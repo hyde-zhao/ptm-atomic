@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atomic-ops"
+version = "0.1.0"
+description = "CLI for syncing and consuming atomic operation specifications."
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml",
+    "jsonschema",
+]
+
+[project.scripts]
+atomic-ops = "atomic_ops.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

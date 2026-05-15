@@ -1,0 +1,8 @@
+# Package manifests are filter views only for list and validate --package.
+# They do not install, copy, or distribute operation YAML files.
+package_id: networking
+display_name: Networking
+description: Network reachability and firewall policy verification operations.
+version: "1.0.0"
+operations:
+  - fw_verify_acl_rule

@@ -1,0 +1,162 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: Atomic Operation Schema v1
+description: >-
+  Authoritative contract for a single atomic operation YAML document consumed by
+  schema validation, CLI read commands, and human-authored operation files.
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - op_id
+  - device_type
+  - description
+  - parameters
+  - returns
+  - idempotent
+  - timeout_ms
+  - error_types
+properties:
+  schema_version:
+    $ref: "#/$defs/semverString"
+    description: Version of the atomic operation document schema.
+    examples: ["1.0.0"]
+  op_id:
+    $ref: "#/$defs/opId"
+    description: Stable atomic operation identifier in device_verb_target form.
+    examples: ["fw_verify_acl_rule"]
+  device_type:
+    type: string
+    description: Device family prefix used by discovery and CLI routing.
+    enum:
+      - fw
+      - tg
+      - mock
+      - sw
+  description:
+    type: string
+    description: Single-sentence operator-facing description.
+    minLength: 1
+    maxLength: 120
+    examples:
+      - Verify whether the firewall ACL rule is present and correctly ordered.
+  parameters:
+    type: object
+    description: >-
+      Mapping of parameter name to parameter definition. Array-based historical
+      representations are rejected by schema v1.
+    propertyNames:
+      pattern: "^[a-z][a-z0-9_]*$"
+    additionalProperties:
+      $ref: "#/$defs/parameterDefinition"
+    examples:
+      - rule_name:
+          type: string
+          required: true
+          description: ACL rule name to verify.
+  returns:
+    type: object
+    description: Fixed response contract for downstream readers and validators.
+    additionalProperties: false
+    required:
+      - status
+      - data
+      - error_type
+      - diag_snapshot_ref
+    properties:
+      status:
+        type: string
+        minLength: 1
+        description: Result status emitted by the eventual operation implementation.
+        examples: ["success"]
+      data:
+        type: object
+        description: Structured success payload. Business-specific keys are out of scope for schema v1.
+        additionalProperties: true
+      error_type:
+        type: string
+        minLength: 1
+        description: Error category string returned on failure.
+        examples: ["CONFIG_APPLY_FAILED"]
+      diag_snapshot_ref:
+        type: string
+        description: Diagnostic snapshot reference; may be an empty string when no snapshot is captured.
+        examples: ["snapshots/fw_verify_acl_rule/latest.json", ""]
+  idempotent:
+    type: boolean
+    description: Whether repeated execution is expected to converge on the same target state.
+  timeout_ms:
+    type: integer
+    description: Expected timeout upper bound in milliseconds.
+    minimum: 1
+    examples: [30000]
+  error_types:
+    type: array
+    description: >-
+      Declared error types that the operation may emit. Schema v1 constrains
+      item shape and naming pattern only; it does not pre-enumerate the full set.
+    minItems: 1
+    items:
+      type: string
+      pattern: "^[A-Z][A-Z0-9_]*$"
+    examples:
+      - ["VALIDATION_ERROR", "CONFIG_APPLY_FAILED"]
+  preconditions:
+    type: array
+    description: Human-readable preconditions that must hold before execution.
+    items:
+      type: string
+      minLength: 1
+  postconditions:
+    type: array
+    description: Human-readable postconditions expected after successful execution.
+    items:
+      type: string
+      minLength: 1
+  tags:
+    type: array
+    description: Free-form labels for discovery and documentation.
+    items:
+      type: string
+      minLength: 1
+    uniqueItems: true
+  deprecated:
+    type: boolean
+    description: Marks the operation as deprecated.
+  deprecated_by:
+    $ref: "#/$defs/opId"
+    description: Replacement operation identifier for deprecated operations.
+  since_version:
+    $ref: "#/$defs/semverString"
+    description: First repository version that introduced the operation.
+$defs:
+  opId:
+    type: string
+    pattern: "^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$"
+  parameterDefinition:
+    type: object
+    additionalProperties: false
+    required:
+      - type
+      - required
+      - description
+    properties:
+      type:
+        type: string
+        enum:
+          - string
+          - int
+          - float
+          - bool
+          - json
+          - list
+        description: Baseline parameter type vocabulary for schema v1.
+      required:
+        type: boolean
+        description: Whether the caller must provide the parameter.
+      description:
+        type: string
+        minLength: 1
+        description: Human-readable parameter meaning.
+  semverString:
+    type: string
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"

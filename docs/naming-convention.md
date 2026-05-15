@@ -1,0 +1,110 @@
+# Atomic Operation Naming Convention
+
+## Naming Pattern
+
+Atomic operation identifiers use the `op_id` field. The current contract is:
+
+```text
+^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$
+```
+
+The semantic shape is:
+
+```text
+{device_prefix}_{verb}_{target}
+```
+
+| Segment | Required | Allowed values / pattern | Meaning |
+|---|---|---|---|
+| `device_prefix` | Yes | `fw`, `tg`, `mock`, `sw` | Device family that owns the operation file path and `device_type` value |
+| `verb` | Yes | Lowercase ASCII verb from the controlled vocabulary | Primary action or observation performed by the operation |
+| `target` | Yes | Lowercase ASCII words joined by `_` | Object, feature, metric, or state being acted on |
+
+Examples:
+
+| `op_id` | Meaning |
+|---|---|
+| `fw_verify_acl_rule` | Verify a firewall ACL rule state |
+| `tg_start_traffic_stream` | Start a traffic generator stream |
+| `mock_reset_session_state` | Reset mock session state |
+| `sw_apply_vlan_config` | Apply switch VLAN configuration |
+
+The `op_id` prefix must match the YAML `device_type` field and the file path:
+
+```text
+atoms/<device_type>/<op_id>.yaml
+```
+
+For example, `fw_verify_acl_rule` belongs under `atoms/fw/fw_verify_acl_rule.yaml`.
+
+## Controlled Verb Vocabulary
+
+Use the smallest verb that accurately describes the operation. Prefer existing verbs before introducing a new one.
+
+| Verb | Use when the operation... | Example |
+|---|---|---|
+| `create` | Creates a new managed object | `fw_create_acl_rule` |
+| `delete` | Deletes an existing managed object | `fw_delete_acl_rule` |
+| `update` | Changes fields on an existing object | `fw_update_acl_rule` |
+| `apply` | Applies configuration or policy state | `sw_apply_vlan_config` |
+| `rollback` | Reverts a prior change | `fw_rollback_policy_package` |
+| `verify` | Checks whether state matches expectation | `fw_verify_acl_rule` |
+| `start` | Starts a service, stream, capture, or process | `tg_start_traffic_stream` |
+| `stop` | Stops a service, stream, capture, or process | `tg_stop_traffic_stream` |
+| `reset` | Resets state to a known baseline | `mock_reset_session_state` |
+| `capture` | Captures packets, counters, logs, or diagnostics | `fw_capture_diagnostics` |
+
+Additional verbs require review before use. The reviewer must confirm that no existing verb expresses the intended action and that the new verb will be reusable by more than one operation.
+
+## Examples And Counterexamples
+
+| Candidate | Status | Reason |
+|---|---|---|
+| `fw_verify_acl_rule` | Valid | Uses an allowed prefix, controlled verb, and explicit target |
+| `tg_capture_packet_trace` | Valid | Uses an allowed prefix and lowercase underscore target |
+| `sw_apply_vlan_config` | Valid | Uses a known action and target |
+| `firewall_verify_acl_rule` | Invalid | Prefix must be one of `fw`, `tg`, `mock`, `sw` |
+| `fw_Verify_acl_rule` | Invalid | Uppercase letters are not accepted |
+| `fw_verify` | Invalid | Missing target segment |
+| `fw_verify_acl-rule` | Invalid | Hyphens are not accepted in `op_id` |
+| `fw_check_acl_rule` | Discouraged | `verify` is the controlled verb for state checks |
+| `operation_id: fw_verify_acl_rule` | Invalid field name | Current schema uses `op_id`; `operation_id` is historical wording only |
+| `device: fw` | Invalid field name | Current schema uses `device_type`; `device` is historical wording only |
+
+When a candidate is invalid, update the `op_id` and the file path together. Do not create aliases by adding old field names to the YAML.
+
+## Extension Process
+
+New prefixes or verbs affect the shared schema and downstream validators. Treat them as contract changes.
+
+To add a new device prefix:
+
+1. Record the reason and expected consumers in a change request or Story.
+2. Update `schemas/atomic-op.schema.yaml` `device_type` enum and `op_id` pattern.
+3. Update this document's prefix table and examples.
+4. Update layout validation and CLI validation logic when those Stories exist.
+5. Add a `CHANGELOG.md` entry under the next `atoms-vX.Y.Z` section.
+
+To add a new verb:
+
+1. Confirm that the action cannot be represented by the existing controlled vocabulary.
+2. Add the verb to the vocabulary table with a precise use condition.
+3. Add at least one valid example and one near-miss example if ambiguity is likely.
+4. Add a `CHANGELOG.md` entry under the next `atoms-vX.Y.Z` section.
+
+To rename an existing `op_id`:
+
+1. Create the replacement operation using the new `op_id`.
+2. Mark the old operation with `deprecated: true`, `deprecated_by`, and `since_version` according to schema v1.
+3. Add a `CHANGELOG.md` entry under `Deprecated` and, when removal happens, under `Removed`.
+4. Keep package manifests and test-case references aligned before deleting the old operation.
+
+## Review Checklist
+
+- The `op_id` matches `^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$`.
+- The `op_id` prefix matches `device_type`.
+- The file path is `atoms/<device_type>/<op_id>.yaml`.
+- The verb appears in the controlled vocabulary, or the extension process has been followed.
+- The target is specific enough to distinguish this operation from nearby operations.
+- Historical fields such as `operation_id` and `device` are not used in schema v1 YAML.
+- A relevant `CHANGELOG.md` entry is present for additions, deprecations, removals, or renames.

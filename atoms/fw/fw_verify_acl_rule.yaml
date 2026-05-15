@@ -1,0 +1,37 @@
+schema_version: "1.0.0"
+op_id: fw_verify_acl_rule
+device_type: fw
+description: Verify that a firewall ACL rule exists with the expected enabled state.
+parameters:
+  rule_name:
+    type: string
+    required: true
+    description: Firewall ACL rule name to verify.
+  expected_enabled:
+    type: bool
+    required: false
+    description: Expected enabled state for the ACL rule.
+returns:
+  status: success
+  data:
+    rule_name: ""
+    matched: true
+    enabled: true
+  error_type: RESOURCE_NOT_FOUND
+  diag_snapshot_ref: ""
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - RESOURCE_NOT_FOUND
+  - STATE_MISMATCH
+  - TIMEOUT
+preconditions:
+  - The firewall management plane is reachable.
+  - The caller can read ACL policy state.
+postconditions:
+  - The ACL policy state is not modified by this verification operation.
+tags:
+  - firewall
+  - acl
+  - verification
+since_version: "1.0.0"

@@ -1,0 +1,43 @@
+test_case_id: tc_fw_acl_rule_tight_sequence
+description: Template showing how a test case references atomic operations by op_id.
+preconditions:
+  - The firewall test environment is prepared with a readable ACL policy.
+  - The logical device name fw_primary is mapped by the consuming test runner.
+  - The local atomic operation cache contains fw_verify_acl_rule.
+steps:
+  - step: verify_acl_rule_baseline
+    op_id: fw_verify_acl_rule
+    device: fw_primary
+    wait_ms: 0
+    on_error: abort
+  - step: verify_acl_rule_after_policy_refresh
+    op_id: fw_verify_acl_rule
+    device: fw_primary
+    wait_ms: 500
+    on_error: retry_once
+  - step: verify_acl_rule_final_state
+    op_id: fw_verify_acl_rule
+    device: fw_primary
+    wait_ms: 1000
+    on_error: skip
+tight_sequence:
+  enabled: true
+  steps:
+    - step: verify_acl_rule_sequence_start
+      op_id: fw_verify_acl_rule
+      device: fw_primary
+      wait_ms: 0
+      on_error: abort
+    - step: verify_acl_rule_sequence_middle
+      op_id: fw_verify_acl_rule
+      device: fw_primary
+      wait_ms: 250
+      on_error: retry_once
+    - step: verify_acl_rule_sequence_end
+      op_id: fw_verify_acl_rule
+      device: fw_primary
+      wait_ms: 500
+      on_error: abort
+postconditions:
+  - The ACL policy state remains unchanged by verification steps.
+  - Validation reports all referenced op_id values as present in the local cache.

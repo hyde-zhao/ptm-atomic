@@ -1,0 +1,8 @@
+# Package manifests are filter views only for list and validate --package.
+# They do not install, copy, or distribute operation YAML files.
+package_id: security
+display_name: Security
+description: Security policy and access control verification operations.
+version: "1.0.0"
+operations:
+  - fw_verify_acl_rule
