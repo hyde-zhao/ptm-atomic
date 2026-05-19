@@ -15,6 +15,12 @@ The two streams are intentionally separate. A schema or operation-library change
 - Add the schema field reference in `docs/schema-field-reference.md`.
 - Add the naming convention baseline in `docs/naming-convention.md`.
 - Add this changelog baseline with `atoms-vX.Y.Z` and `cli-vX.Y.Z` version stream guidance.
+- Add TG traffic generator operation atoms:
+  `tg_start_traffic_stream`, `tg_capture_traffic_result`,
+  `tg_verify_traffic_loss`, `tg_stop_traffic_stream`, and
+  `tg_delete_traffic_stream`.
+- Add the `traffic` package manifest for TG stream lifecycle and statistics
+  verification operations.
 
 ### Changed
 

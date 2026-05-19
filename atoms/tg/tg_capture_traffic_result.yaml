@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+op_id: tg_capture_traffic_result
+device_type: tg
+description: Capture Ixia-C traffic stream counters for one stream or all streams.
+parameters:
+  topology:
+    type: string
+    required: true
+    description: Topology YAML file path consumed by the traffic CLI.
+  tx:
+    type: string
+    required: true
+    description: TX link name in the topology file.
+  rx:
+    type: string
+    required: true
+    description: RX link name in the topology file.
+  name:
+    type: string
+    required: false
+    description: Optional traffic stream name; omit to capture all streams.
+returns:
+  status: success
+  data:
+    flows: []
+  error_type: RESOURCE_NOT_FOUND
+  diag_snapshot_ref: ""
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - The topology file exists and maps the TX and RX links to one TG node.
+  - Ixia-C traffic statistics are available.
+postconditions:
+  - Traffic stream configuration is not modified.
+tags:
+  - traffic
+  - ixiac
+  - counters
+since_version: "1.0.0"
