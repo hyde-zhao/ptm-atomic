@@ -1,0 +1,17 @@
+# Package manifests are filter views only for list and validate --package.
+# They do not install, copy, or distribute operation YAML files.
+package_id: ngfw_capacity_config
+display_name: NGFW Capacity Configuration
+description: Capacity configuration contract operations for ten NGFW domains.
+version: "1.1.0"
+operations:
+  - fw_config_interface
+  - fw_config_object
+  - fw_config_acl_policy
+  - fw_config_policy_route
+  - fw_config_static_route
+  - fw_config_nat
+  - fw_config_bandwidth
+  - fw_config_black_white_list
+  - fw_config_ssl_vpn
+  - fw_config_dynamic_routing

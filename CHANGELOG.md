@@ -21,10 +21,26 @@ The two streams are intentionally separate. A schema or operation-library change
   `tg_delete_traffic_stream`.
 - Add the `traffic` package manifest for TG stream lifecycle and statistics
   verification operations.
+- Add schema v1.1 documentation coverage for `risk`, `credential_ref`, `session_ref`, `state_ref`, `gate`, `verification`, and `batch`.
+- Add user-facing guidance for `ngfw_installation`, `ngfw_capacity_config`, `ngfw_verification`, and `ngfw_batch_config`.
+- Add the CR-004 public adapter profile layer with `schemas/adapter-profile.schema.yaml`, `adapters/ngfw/default.yaml`, and `docs/API-ADAPTER-SPEC.md`.
+- Add the read-only `atomic-ops adapter <op_id>` command for querying a synced atom's referenced adapter profile operation.
+- Add the allowlisted `atomic-ops run` runner for `fw_login_web_management`, `fw_config_object`, and `fw_config_policy_route`, with dry-run by default and explicit `--execute` for live device requests.
+- Add release guidance for repository checks using `uv run atomic-ops --help`, `uv run atomic-ops packages`, `uv run --python 3.11 python scripts/validate_schema.py atoms`, `uv run --python 3.11 python scripts/layout_check.py`, and `uv run --python 3.11 python scripts/security_gate_check.py`.
 
 ### Changed
 
-- None.
+- Update README, user manual, engineer handbook, and test-case template to reflect the verified schema v1.1, NGFW atom/package, batch contract, security gate, and read-only CLI boundary.
+- Replace environment-specific repository address examples with `<atomic-ops-git-repository-url>` placeholders.
+- Align Python command examples with `uv run` and `uv tool` usage.
+- Clarify that package manifests are filter views for `op_id` selection only; they do not install, copy, execute, or distribute atoms.
+- Record current package integrity facts: 6 manifests, 37 package entries, 36 unique `op_id` values, and all package references resolving to `atoms/fw/*.yaml`.
+- Separate working-tree repository checks from synced-cache consumer smoke checks, and document the stale-cache caveat for `list`, `show`, `packages`, and `validate`.
+- Align error-code documentation with the current `scripts/security_gate_check.py` behavior and the CLI error object shape, including the optional `suggestion` field.
+- Add `adapter_contract_ref` to `fw_config_policy_route` so external generators can consume the public adapter profile instead of reading `.input/capacity`.
+- Include `adapters/` in the `atomic-ops sync` sparse checkout paths so adapter profile queries can work from the local cache.
+- Align `fw_config_policy_route` with the executable NGFW API shape: `POST /api/v1/policyroute` and `val.source_network` / `val.dst_network` / `val.forwarding_paths[].next_hop_ip`.
+- Clarify that policy route `source_network` and `dst_network` reference address object names by default, with explicit `*_is_group` flags for address group names.
 
 ### Deprecated
 
@@ -40,7 +56,11 @@ The two streams are intentionally separate. A schema or operation-library change
 
 ### Security
 
-- None.
+- Document that only the `atomic-ops run` allowlist can connect to devices or push configuration, while other CLI commands remain cache/query/validation commands.
+- Document the sensitive-information boundary for user-facing examples; the only allowed password-policy literal remains `Ngfw@123`.
+- Document `.gitignore` hygiene for `.input/`, `process/`, `checkpoints/`, generated local `AGENTS.md`, local agent config, caches, and logs as process/runtime artifacts rather than delivery docs.
+- Extend adapter validation and the default security scan to cover `adapters/`, rejecting runtime-sensitive adapter fields or values and hidden `.input/capacity` dependencies.
+- Keep runner runtime material out of repository files; login accepts password material only through environment variables and writes session files outside the repo by default.
 
 ## atoms-v0.1.0 - 2026-05-13
 

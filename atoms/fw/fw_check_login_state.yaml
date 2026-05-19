@@ -1,0 +1,65 @@
+schema_version: "1.1"
+op_id: fw_check_login_state
+device_type: fw
+description: Define the NGFW login-state guard contract before configuration or verification use.
+parameters:
+  max_relogin_attempts:
+    type: int
+    required: true
+    description: Maximum relogin attempts allowed by the guard contract; fixed at 1.
+inputs:
+  state_ref: "<state-ref>"
+returns:
+  status: success
+  data:
+    state_ref: "<state-ref>"
+    state_status: valid
+    relogin_required: false
+    max_relogin_attempts: 1
+    next_action: proceed
+  error_type: LOGIN_STATE_INVALID
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 60000
+error_types:
+  - LOGIN_STATE_INVALID
+  - STATE_REFERENCE_MISSING
+  - STATE_REFERENCE_EXPIRED
+  - RELOGIN_LIMIT_REACHED
+  - TIMEOUT
+risk:
+  level: high
+  categories:
+    - session_state
+    - guard
+    - management_plane
+gate:
+  required: true
+  reason: Login-state guard controls whether downstream contracts may reuse or refresh state.
+  approver_role: change_reviewer
+  evidence_required:
+    - login_state_policy_review
+    - relogin_limit_review
+verification:
+  kind: login_state
+  rules:
+    - name: valid_state_allows_proceed
+      input_ref: "<state-ref>"
+      expected_result: valid state allows downstream contract use
+    - name: invalid_state_requests_relogin
+      input_ref: "<state-ref>"
+      expected_result: expired missing or invalid state requests one relogin attempt
+  summary_ref: "<login-guard-summary-ref>"
+preconditions:
+  - A state_ref has been returned by fw_login_web_management or by an external state holder.
+  - The guard does not perform unlimited retries and does not hide relogin inside configuration atoms.
+postconditions:
+  - The guard returns a state_status value of valid, expired, missing, or invalid.
+  - The guard returns relogin_required when state cannot be reused.
+tags:
+  - firewall
+  - ngfw
+  - login_state
+  - guard
+  - contract_only
+since_version: "1.1.0"

@@ -1,0 +1,17 @@
+# Package manifests are filter views only for list and validate --package.
+# They do not install, copy, or distribute operation YAML files.
+package_id: ngfw_verification
+display_name: NGFW Capacity Verification
+description: Capacity verification contract operations for ten NGFW domains.
+version: "1.1.0"
+operations:
+  - fw_verify_interface
+  - fw_verify_object
+  - fw_verify_acl_policy
+  - fw_verify_policy_route
+  - fw_verify_static_route
+  - fw_verify_nat
+  - fw_verify_bandwidth
+  - fw_verify_black_white_list
+  - fw_verify_ssl_vpn
+  - fw_verify_dynamic_routing

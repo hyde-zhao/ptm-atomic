@@ -13,7 +13,7 @@ from typing import Any
 
 DEFAULT_REPO_URL = "git@<GITLAB_HOST>:<ORG/PROJECT>/ptm-atomic.git"
 DEFAULT_BRANCH = "main"
-SPARSE_PATHS = ("atoms", "schemas", "packages", "docs")
+SPARSE_PATHS = ("atoms", "schemas", "packages", "docs", "adapters")
 
 STATUS_SYNCED = "SYNCED"
 STATUS_STALE = "STALE"

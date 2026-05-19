@@ -8,8 +8,11 @@
 .codex/
 .agents/
 
-# Raw input staging; keep canonical records in process/ and checkpoints/
+# Meta Flow generated process artifacts
 .input/
+/process/
+/checkpoints/
+AGENTS.md
 
 # Python virtual environments and caches
 .venv/
@@ -45,3 +48,5 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+.input/*

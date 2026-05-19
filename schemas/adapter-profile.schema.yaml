@@ -1,0 +1,154 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: Adapter Profile Schema v1.0
+description: >-
+  Public, non-sensitive adapter mapping contract for external script generators.
+  Profiles describe API shape only and must not contain device hosts, usernames,
+  passwords, tokens, cookies, private keys, or production response samples.
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - adapter_id
+  - device_type
+  - profile_family
+  - operations
+properties:
+  schema_version:
+    type: string
+    enum:
+      - "1.0"
+  adapter_id:
+    type: string
+    pattern: "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+  device_type:
+    type: string
+    enum:
+      - fw
+      - tg
+      - mock
+      - sw
+  profile_family:
+    type: string
+    pattern: "^[a-z][a-z0-9_]*$"
+  description:
+    type: string
+    minLength: 1
+  operations:
+    type: object
+    minProperties: 1
+    propertyNames:
+      pattern: "^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$"
+    additionalProperties:
+      $ref: "#/$defs/operationAdapter"
+$defs:
+  nonSensitiveRef:
+    type: string
+    minLength: 1
+    maxLength: 160
+    allOf:
+      - not:
+          pattern: "(?i)(\\.input/capacity|token|cookie|password|ftp_pass|secret|authorization|private[_ -]?key|production[_ -]?(response|sample)|\\bhost\\b)"
+  endpointPath:
+    type: string
+    pattern: "^/[A-Za-z0-9_./{}:-]+$"
+    allOf:
+      - not:
+          pattern: "^[a-z]+://"
+  operationAdapter:
+    type: object
+    additionalProperties: false
+    required:
+      - atom_ref
+      - intent
+      - request
+      - response
+      - safety
+    properties:
+      atom_ref:
+        type: string
+        pattern: "^atoms/[a-z0-9_]+/[a-z0-9_]+\\.ya?ml$"
+      intent:
+        type: string
+        minLength: 1
+      request:
+        type: object
+        additionalProperties: false
+        required:
+          - method
+          - path
+          - content_type
+          - auth
+          - payload_template
+        properties:
+          method:
+            type: string
+            enum:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+          path:
+            $ref: "#/$defs/endpointPath"
+          content_type:
+            type: string
+            enum:
+              - application/json
+          auth:
+            type: object
+            additionalProperties: false
+            required:
+              - mode
+              - header_name
+              - value_ref
+            properties:
+              mode:
+                type: string
+                enum:
+                  - external_session_ref
+                  - external_credential_ref
+              header_name:
+                type: string
+                enum:
+                  - Authorization
+                  - AuthorizationToken
+                  - X-Session-Ref
+              value_ref:
+                $ref: "#/$defs/nonSensitiveRef"
+          payload_template:
+            type: object
+            additionalProperties: true
+      response:
+        type: object
+        additionalProperties: false
+        required:
+          - success_status
+          - result_ref
+        properties:
+          success_status:
+            type: array
+            minItems: 1
+            items:
+              type: integer
+              minimum: 100
+              maximum: 599
+          result_ref:
+            $ref: "#/$defs/nonSensitiveRef"
+      safety:
+        type: object
+        additionalProperties: false
+        required:
+          - stores_sensitive_data
+          - runner_required
+          - notes
+        properties:
+          stores_sensitive_data:
+            const: false
+          runner_required:
+            const: true
+          notes:
+            type: array
+            minItems: 1
+            items:
+              type: string
+              minLength: 1

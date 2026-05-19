@@ -1,0 +1,12 @@
+# Package manifests are filter views only for list and validate --package.
+# They do not install, copy, or distribute operation YAML files.
+package_id: ngfw_installation
+display_name: NGFW Installation
+description: NGFW install, initialization, login guard, and health verification contracts.
+version: "1.1.0"
+operations:
+  - fw_install_ngfw_image
+  - fw_init_ngfw_minimal
+  - fw_login_web_management
+  - fw_check_login_state
+  - fw_verify_ngfw_health

@@ -1,0 +1,83 @@
+schema_version: "1.0"
+adapter_id: ngfw.default
+device_type: fw
+profile_family: ngfw
+description: Public non-sensitive NGFW API shape profile for external script generators.
+operations:
+  fw_config_object:
+    atom_ref: atoms/fw/fw_config_object.yaml
+    intent: Build an IPv4 address-object configuration request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/ippool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.object_name }}"
+          desc: "{{ params.object_desc }}"
+          type: 4
+          ranges: []
+          networks:
+            - ipaddr: "{{ params.ipaddr }}"
+              mask: "{{ params.mask }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <object-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Address-object names are later referenced by policy route source_network or dst_network fields.
+        - CIDR input must be split into ipaddr and mask before calling this endpoint.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_config_policy_route:
+    atom_ref: atoms/fw/fw_config_policy_route.yaml
+    intent: Build an IPv4 policy-route configuration request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/policyroute
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: 0
+        val:
+          type: ipv4
+          in_interface: "{{ params.in_interface }}"
+          source_network: "{{ params.source_network }}"
+          source_network_is_group: "{{ params.source_network_is_group }}"
+          dst_network: "{{ params.dst_network }}"
+          dst_network_is_group: "{{ params.dst_network_is_group }}"
+          service: "{{ params.service }}"
+          service_is_group: false
+          applist: []
+          app_tag_name: []
+          forwarding_paths:
+            - next_hop_ip: "{{ params.next_hop_ip }}"
+              outgoing_interface: "{{ params.outgoing_interface }}"
+              weight: "{{ params.weight }}"
+          time_obj: "{{ params.time_obj }}"
+          action: 1
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <policy-route-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Adapter profiles describe endpoint and payload shape without runtime values.
+        - source_network and dst_network are address object names unless the matching is_group flag is true.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.

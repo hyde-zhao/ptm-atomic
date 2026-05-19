@@ -1,0 +1,73 @@
+schema_version: "1.1"
+op_id: fw_install_ngfw_image
+device_type: fw
+description: Define the NGFW image installation contract as static metadata only.
+parameters:
+  image_ref:
+    type: string
+    required: true
+    description: Non-sensitive image artifact reference.
+  device_model:
+    type: string
+    required: true
+    description: NGFW device model identifier.
+  checksum_ref:
+    type: string
+    required: true
+    description: Non-sensitive integrity check reference for the image artifact.
+  install_mode:
+    type: string
+    required: false
+    description: Installation mode label selected by an external orchestrator.
+returns:
+  status: pending_verification
+  data:
+    install_status: pending_verification
+    next_step: fw_verify_ngfw_health
+    install_result_ref: "<install-result-ref>"
+    manual_action_required: false
+  error_type: INSTALL_BLOCKED
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+timeout_ms: 1800000
+error_types:
+  - INSTALL_BLOCKED
+  - IMAGE_REFERENCE_INVALID
+  - INTEGRITY_CHECK_FAILED
+  - DEVICE_MODEL_UNSUPPORTED
+  - TIMEOUT
+risk:
+  level: high
+  categories:
+    - installation
+    - disruptive_change
+gate:
+  required: true
+  reason: Image installation is a high-risk device lifecycle contract and requires review before use.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_install_plan
+    - image_integrity_evidence
+verification:
+  kind: install_health
+  rules:
+    - name: install_result_recorded
+      input_ref: "<install-result-ref>"
+      expected_result: install result is available for health verification
+    - name: diagnostic_reference_recorded
+      input_ref: "<diag-snapshot-ref>"
+      expected_result: diagnostic reference is available when install is blocked
+  summary_ref: "<install-verification-summary-ref>"
+preconditions:
+  - The image artifact is referenced by image_ref and is not embedded in this atom.
+  - The integrity evidence is referenced by checksum_ref and is not embedded in this atom.
+  - A reviewer has approved the install contract gate before any external runner uses it.
+postconditions:
+  - The atom only records the installation contract outcome expected from an external orchestrator.
+  - The next validation step is fw_verify_ngfw_health.
+tags:
+  - firewall
+  - ngfw
+  - installation
+  - contract_only
+since_version: "1.1.0"

@@ -1,406 +1,316 @@
 # 用户使用手册
 
-## 1. 开始之前
+`atomic-ops` 用于同步、查询、校验和受控执行防火墙测试原子操作。当前 CLI 提供 `sync`、`list`、`show`、`adapter`、`run`、`packages` 和 `validate`；除 `run` 白名单 op 外，其余命令只读。
 
-`atomic-ops` 用于同步、查询和校验防火墙测试原子操作。你需要准备 Python、uv、git，以及可访问默认 git 仓库的认证环境。
+## 1. 使用前准备
 
-默认仓库地址：
+| 材料 | 必填 | 说明 |
+|---|---:|---|
+| Python `>=3.11` | 是 | CLI 运行环境。 |
+| `uv` | 是 | 安装、运行和锁定 Python 环境。 |
+| `git` | 是 | `atomic-ops sync` 使用 git 同步远端操作库。 |
+| git 认证 | 按需 | 由 git 原生机制处理，CLI 不保存凭据。 |
+| 测试用例 YAML | 按需 | 用于 `atomic-ops validate <test_case.yaml>`。 |
+| package 名称 | 按需 | 用于 `list --package` 或 `validate --package`。 |
 
-```text
-git@<GITLAB_HOST>:<ORG/PROJECT>/ptm-atomic.git
-```
+本项目已交付 `pyproject.toml` 与 `uv.lock`。安装 CLI 使用 `uv tool`，仓库内脚本使用 `uv run --python 3.11 python ...`。
 
-| 材料 | 格式 | 必填 | 说明 |
-|---|---|---:|---|
-| Python | `>=3.11` | 是 | CLI 运行环境。 |
-| uv | 命令行工具 | 是 | 安装、升级和运行 Python CLI。 |
-| git | 命令行工具 | 是 | 同步远端原子操作仓库。 |
-| git 认证 | SSH key 或系统 credential helper | 是 | 由 git 自己处理，CLI 不保存凭据。 |
-| 测试用例 | YAML | 按需 | 用于 `atomic-ops validate <test_case.yaml>`。 |
-| package 名称 | 文本 | 按需 | 用于 `list --package` 或 `validate --package`。 |
+## 2. 安装和首次同步
 
-### Python 环境（uv）
+### 安装 CLI
 
-- Python 版本要求：`>=3.11`。
-- 项目已交付 `pyproject.toml` 与 `uv.lock`。
-- `pyproject.toml` 是 Python 依赖声明来源，`uv.lock` 是锁定结果。
-- 日常运行优先使用 `uv tool install .` 安装 CLI，或在仓库根目录用 `uv run atomic-ops ...` 临时运行。
-- 运行仓库脚本时使用 `uv run`，带临时依赖的脚本使用 `uv run --with <package>`。
-- 一次性 Python 工具优先使用 `uvx`，但本项目当前核心入口是 `atomic-ops` CLI 和仓库内脚本。
-
-## 2. 首次使用
-
-### 步骤 1：安装或直接运行 CLI
-
-从仓库根目录安装：
+在仓库根目录执行：
 
 ```bash
 uv tool install .
 atomic-ops --version
 ```
 
-临时运行：
+开发或临时验证时可以不安装到工具环境：
 
 ```bash
 uv run atomic-ops --help
 ```
 
-当前仓库没有独立安装脚本；不要把操作库同步和 CLI 本体安装混为一件事。CLI 本体由 `uv tool` 管理，操作库缓存由 `atomic-ops sync` 管理。
+### 同步本地缓存
 
-### 步骤 2：同步本地操作库
-
-首次使用必须先同步：
+首次使用前同步操作库：
 
 ```bash
-atomic-ops sync
+atomic-ops sync --repo <atomic-ops-git-repository-url>
 ```
 
-如果需要显式指定仓库地址：
+同步只访问 git 仓库并写入本地缓存。同步成功后，`list`、`show`、`adapter`、`packages`、`validate` 都读取本地缓存，不访问设备。
 
-```bash
-atomic-ops sync --repo git@<GITLAB_HOST>:<ORG/PROJECT>/ptm-atomic.git
-```
+这些只读命令读取 synced cache，不读取当前工作树中尚未同步的本地修改。若同步失败但已有完整缓存，命令可能继续使用标记为 `STALE` 的旧缓存；此时结果可能落后于仓库最新提交。
 
-同步后，本地缓存会保存 sparse checkout 内容和 `_metadata.json`。
-
-### 步骤 3：确认可查询
+### 确认可查询
 
 ```bash
 atomic-ops packages
-atomic-ops list
-atomic-ops show fw_verify_acl_rule
+atomic-ops list --package ngfw_installation
+atomic-ops show fw_verify_ngfw_health
 ```
 
-### 步骤 4：校验引用
+## 3. 本地缓存
 
-```bash
-atomic-ops validate docs/test-case-template.yaml
-atomic-ops validate --package networking
-```
-
-## 3. 同步与本地缓存
-
-### 同步命令
-
-```bash
-atomic-ops sync
-atomic-ops sync --format json
-atomic-ops sync --latest
-atomic-ops sync --ref atoms-v0.1.0
-```
-
-`--latest` 表示跟踪默认分支最新状态；`--ref` 表示固定到指定分支、tag 或 commit。固定 ref 后，`_metadata.json.ref_mode` 会记录为 `pinned`。恢复默认分支跟踪时执行 `atomic-ops sync --latest`。
-
-### 缓存路径
-
-| 平台 | 路径 |
+| 平台 | 默认缓存目录 |
 |---|---|
 | Linux/macOS | `~/.cache/atomic-ops/repo/` |
 | Windows | `%LOCALAPPDATA%\\atomic-ops\\repo\\` |
 
-缓存目录包含：
+缓存内容包括 `atoms/`、`schemas/`、`packages/`、`docs/`、`adapters/` 和 `_metadata.json`。`_metadata.json` 记录 `source_repo`、`ref_mode`、`current_ref`、`commit_sha`、`synced_at`、`last_sync_status`、`cache_root`、`sparse_paths` 等同步状态字段。
 
-| 内容 | 说明 |
-|---|---|
-| `atoms/` | 原子操作 YAML。 |
-| `schemas/` | atom schema。 |
-| `packages/` | package 清单。 |
-| `docs/` | 可同步的用户参考文档。 |
-| `_metadata.json` | 最近一次同步状态摘要。 |
-
-`_metadata.json` 常见字段包括 `source_repo`、`default_branch`、`ref_mode`、`current_ref`、`commit_sha`、`synced_at`、`last_sync_status`、`cache_root`、`sparse_paths`。它不是完整日志文件。
-
-### 同步频率
-
-推荐频率为：**每个工作日一次**。
-
-发布、联调、大批量引用 atom 或 CI 关键校验前，可额外执行一次：
+常用同步命令：
 
 ```bash
-atomic-ops sync
+atomic-ops sync --repo <atomic-ops-git-repository-url>
+atomic-ops sync --format json
+atomic-ops sync --latest
+atomic-ops sync --ref atoms-v1.1.0
 ```
 
-如果 `sync` 遇到网络错误但已有完整缓存，CLI 会把缓存标记为 `STALE`。此时 `list`、`show`、`packages`、`validate` 仍可继续读取本地缓存，但 stderr 会提醒结果基于过期缓存。
+`--latest` 跟踪默认分支最新状态；`--ref` 固定到指定分支、tag 或 commit。网络失败但本地缓存完整时，CLI 可标记为 `STALE`，只读命令仍可基于缓存继续工作。
 
 ## 4. 查询原子操作
 
-### 列出全部操作
+列出全部本地 atom：
 
 ```bash
 atomic-ops list
-```
-
-默认输出表格，适合人工阅读。机器消费使用 JSON：
-
-```bash
 atomic-ops list --format json
 ```
 
-### 按设备过滤
+按设备和 package 过滤：
 
 ```bash
 atomic-ops list --device fw
-atomic-ops list --device tg
-atomic-ops list --device mock
-atomic-ops list --device sw
+atomic-ops list --package ngfw_capacity_config
+atomic-ops list --package ngfw_verification --device fw
 ```
 
-设备前缀必须与 `op_id`、`device_type` 和文件路径一致。例如 `fw_verify_acl_rule` 位于：
-
-```text
-atoms/fw/fw_verify_acl_rule.yaml
-```
-
-### 查看单个操作
+查看单个 atom：
 
 ```bash
-atomic-ops show fw_verify_acl_rule
-atomic-ops show fw_verify_acl_rule --format json
+atomic-ops show fw_verify_interface
+atomic-ops show fw_verify_interface --format json
 ```
 
-`show` 根据 `op_id` 前缀直接定位到 `atoms/<device>/<op_id>.yaml`。如果返回 `OP_NOT_FOUND`，先运行 `atomic-ops sync`，再检查前缀、拼写和相似建议。
+`show` 根据 `op_id` 前缀定位到 `atoms/<device_type>/<op_id>.yaml`。如果返回 `OP_NOT_FOUND`，先执行 `atomic-ops sync`，再检查拼写、前缀和相似建议。
 
-## 5. Package 过滤
+查看单个 atom 引用的 adapter profile operation：
 
-package 是一组 `op_id` 的过滤视图，用于快速聚合常用操作。它不会复制 atom 文件，也不会生成新的本地操作目录。
+```bash
+atomic-ops adapter fw_config_policy_route
+atomic-ops adapter fw_config_policy_route --format json
+```
 
-查看可用 package：
+`adapter` 先读取缓存中的 atom，再通过 `adapter_contract_ref` 解析 `adapters/<profile>.yaml#/operations/<op_id>`。如果 atom 没有声明 adapter 引用，命令返回 `OP_NOT_FOUND`；如果缓存缺少 `adapters/` 或 profile 文件，命令返回 `REPO_NOT_SYNCED`，需要同步到包含 adapter profile 的提交。
+
+## 5. Runner 执行
+
+`atomic-ops run` 只支持三个白名单 op：`fw_login_web_management`、`fw_config_object` 和 `fw_config_policy_route`。命令默认 dry-run，不连接设备；必须显式传入 `--execute` 才会发真实请求。
+
+登录 Web 管理面：
+
+```bash
+NGFW_PASSWORD='<password>' atomic-ops run fw_login_web_management \
+  --base-url https://<device-management-ip> \
+  --username admin \
+  --password-env NGFW_PASSWORD \
+  --execute
+```
+
+登录 runner 会读取防火墙登录页 RSA 公钥、加密密码、调用 `PUT /api/v1/auth`，并把返回的会话材料写入 `~/.local/state/atomic-ops/ngfw/session.json`。CLI 不接受 `--password <明文>`，也不会打印完整会话值。
+
+地址对象 dry-run：
+
+```bash
+atomic-ops run fw_config_object \
+  --base-url https://<device-management-ip> \
+  --object-name srcObj \
+  --ipaddr 192.168.0.0 \
+  --mask 16
+```
+
+地址对象真实执行：
+
+```bash
+atomic-ops run fw_config_object \
+  --base-url https://<device-management-ip> \
+  --object-name srcObj \
+  --ipaddr 192.168.0.0 \
+  --mask 16 \
+  --execute
+```
+
+地址对象 runner 调用 `POST /api/v1/ippool`。设备对象名只允许字母、数字和连字符；不要使用下划线或 CIDR 字符串作为对象名。
+
+策略路由 dry-run：
+
+```bash
+atomic-ops run fw_config_policy_route \
+  --base-url https://<device-management-ip> \
+  --source-network srcObj \
+  --dst-network dstObj \
+  --next-hop-ip 18.18.2.2 \
+  --in-interface GE0_12
+```
+
+策略路由真实执行：
+
+```bash
+atomic-ops run fw_config_policy_route \
+  --base-url https://<device-management-ip> \
+  --source-network srcObj \
+  --dst-network dstObj \
+  --next-hop-ip 18.18.2.2 \
+  --in-interface GE0_12 \
+  --execute
+```
+
+策略路由 runner 调用 `POST /api/v1/policyroute`，默认使用登录会话和 `Authorization` 头。`--source-network` 和 `--dst-network` 是地址对象名；如果传入的是地址组名，必须同时加 `--source-network-is-group` 或 `--dst-network-is-group`。若目标版本要求 capacity 风格头名，可传 `--auth-header AuthorizationToken`。
+
+## 6. Package 过滤
+
+package 是一组 `op_id` 的过滤视图。它不复制 atom 文件，不代表可执行计划，也不会触发设备动作。
+
+查看 package：
 
 ```bash
 atomic-ops packages
 atomic-ops packages --format json
 ```
 
-当前基线 package：
+当前 package：
 
-| package | 说明 |
+| Package | 用途 | op_id 数 |
+|---|---|---:|
+| `networking` | 网络连通性与防火墙策略验证示例 | 1 |
+| `security` | 安全策略与访问控制验证示例 | 1 |
+| `ngfw_installation` | NGFW 安装、初始化、登录和健康检查合同 | 5 |
+| `ngfw_capacity_config` | 十个容量域的单设备配置合同 | 10 |
+| `ngfw_verification` | 十个容量域的只读验证合同 | 10 |
+| `ngfw_batch_config` | 十个容量域的多设备批量配置合同 | 10 |
+
+当前完整性事实：6 个 package manifest 合计 37 条 `operations`，对应 36 个唯一 `op_id`；所有 package `op_id` 都能解析到 `atoms/fw/*.yaml`。`fw_verify_acl_rule` 同时属于 `networking` 和 `security` 两个旧基线过滤视图。
+
+代表性 op：
+
+| Package | 示例 op_id |
 |---|---|
-| `networking` | 网络连通性与防火墙策略验证操作。 |
-| `security` | 安全策略与访问控制验证操作。 |
-
-按 package 过滤操作：
-
-```bash
-atomic-ops list --package networking
-atomic-ops list --package security
-```
-
-同时按 package 和设备过滤：
-
-```bash
-atomic-ops list --package networking --device fw
-```
+| `ngfw_installation` | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
+| `ngfw_capacity_config` | `fw_config_interface`、`fw_config_object`、`fw_config_acl_policy`、`fw_config_nat`、`fw_config_dynamic_routing` |
+| `ngfw_verification` | `fw_verify_interface`、`fw_verify_object`、`fw_verify_acl_policy`、`fw_verify_nat`、`fw_verify_dynamic_routing` |
+| `ngfw_batch_config` | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_acl_policy`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
 
 校验 package 引用完整性：
 
 ```bash
+atomic-ops validate --package ngfw_installation
 atomic-ops validate --package networking
-atomic-ops validate --package security --format json
 ```
 
-如果返回 `PACKAGE_NOT_FOUND`，先执行 `atomic-ops packages` 查看合法名称。如果 package 中的 `operations` 引用了不存在的 `op_id`，`validate --package` 会返回 `OP_NOT_FOUND`。
+如果返回 `PACKAGE_NOT_FOUND`，先用 `atomic-ops packages` 查看本地缓存中已有的名称。缓存必须同步到包含目标 package 的提交后，package 校验才会解析到最新清单。`validate --package` 是 synced-cache 引用 smoke test，不会检查当前未提交或未同步的本地 manifest 编辑；维护者要验证工作树时应使用仓库级 schema、layout、安全门禁和 package-reference invariant 检查。
 
-## 6. Validate 测试用例和 Package
+## 7. Validate 测试用例
 
-`validate` 不执行真实设备操作，只检查测试用例或 package 中的 `op_id` 引用能否在本地缓存中解析，并报告基础结构问题。
-
-### 校验测试用例
+`validate` 只检查引用，不执行 atom。
 
 ```bash
 atomic-ops validate docs/test-case-template.yaml
 atomic-ops validate docs/test-case-template.yaml --format json
 ```
 
-测试用例模式会读取：
+测试用例模式读取：
 
 - `steps[].op_id`
 - `tight_sequence.steps[].op_id`
 
-常见输出字段：
+常见结果字段：
 
 | 字段 | 说明 |
 |---|---|
 | `status` | `passed` 或 `failed`。 |
 | `mode` | `test_case` 或 `package`。 |
 | `checked_count` | 已检查的引用数量。 |
-| `missing_count` | 缺失的引用数量。 |
+| `missing_count` | 缺失引用数量。 |
 | `findings` | YAML 解析、结构或字段问题。 |
 | `cache` | 本地缓存摘要。 |
 
-### 校验 Package
+## 8. 测试用例模板
 
-```bash
-atomic-ops validate --package networking
-atomic-ops validate --package security
-```
-
-package 模式会读取 `packages/<name>.yaml` 的 `operations` 列表，并逐项确认 `op_id` 是否存在。
-
-### 结果判断
-
-- `status=passed`：当前输入中的引用均能在本地缓存中解析。
-- `status=failed`：存在结构或引用问题，应按 `findings` 或错误对象修正。
-- 顶层 `OP_NOT_FOUND`：某些引用缺失，CLI 可能给出相似 `op_id` 建议。
-- `REPO_NOT_SYNCED`：本地缓存不可用，先执行 `atomic-ops sync`。
-
-## 7. 测试用例模板
-
-模板文件位于：
-
-```text
-docs/test-case-template.yaml
-```
-
-核心结构：
+模板位于 `docs/test-case-template.yaml`。下面是模板摘录，展示 `validate` 会读取的 `steps[].op_id` 引用；完整模板以文件本身为准：
 
 ```yaml
-test_case_id: tc_fw_acl_rule_tight_sequence
-description: Template showing how a test case references atomic operations by op_id.
+test_case_id: tc_ngfw_read_only_reference_check
 steps:
-  - step: verify_acl_rule_baseline
-    op_id: fw_verify_acl_rule
-    device: fw_primary
-    wait_ms: 0
-    on_error: abort
-tight_sequence:
-  enabled: true
-  steps:
-    - step: verify_acl_rule_sequence_start
-      op_id: fw_verify_acl_rule
-      device: fw_primary
-      wait_ms: 0
-      on_error: abort
+  - step: verify_ngfw_health_reference
+    op_id: fw_verify_ngfw_health
+    device: fw_lab_primary
+  - step: verify_interface_reference
+    op_id: fw_verify_interface
+    device: fw_lab_primary
 ```
 
-字段说明：
+`device` 是消费方测试框架中的逻辑名称，不应写真实地址、账号、token、cookie 或设备口令。
 
-| 字段 | 说明 |
+## 9. Schema v1.1 使用边界
+
+atom 顶层使用 `schema_version: "1.1"`。字段参考见 `docs/schema-field-reference.md`。
+
+| 字段 | 用户侧含义 |
 |---|---|
-| `test_case_id` | 测试用例标识。 |
-| `description` | 用例说明。 |
-| `preconditions` | 执行前置条件。 |
-| `steps[]` | 普通操作步骤。 |
-| `steps[].step` | 步骤名。 |
-| `steps[].op_id` | 引用的原子操作 ID。 |
-| `steps[].device` | 消费方测试执行器中的设备实例名。 |
-| `steps[].wait_ms` | 当前步骤执行前等待毫秒数，用于补偿前序步骤完成后的状态传播延迟。 |
-| `steps[].on_error` | 错误处理建议，示例值为 `abort`、`retry_once`、`skip`。 |
-| `tight_sequence.enabled` | 是否启用紧密时序段。 |
-| `tight_sequence.steps[]` | 紧密时序步骤列表，字段形态与普通 `steps[]` 一致。 |
-| `postconditions` | 执行后期望状态。 |
+| `risk` | 操作风险和人工确认要求。 |
+| `credential_ref` | 凭据引用名，不保存凭据值。 |
+| `session_ref` | 会话状态引用，不保存 cookie 或会话密钥。 |
+| `state_ref` | 状态引用，不嵌入生产数据。 |
+| `gate` | 执行前置门禁说明。 |
+| `verification` | 验证方式和期望结果。 |
+| `batch` | 批量配置的并发、失败策略和设备结果摘要。 |
 
-修改模板时，优先改 `op_id` 和设备实例名，不要把真实凭据、管理地址或设备回包写入模板。
+当前唯一允许在示例中出现的密码策略字面值是 `Ngfw@123`。它用于描述初始化口令复杂度要求，不是生产默认密码。
 
-## 8. 贡献原子操作流程
+## 10. CLI 不做什么
 
-### 新增 Atom
+除 `atomic-ops run` 白名单 op 外，当前 CLI 不具备以下能力：
 
-1. 选择 `op_id`，必须符合：
+| 边界 | 说明 |
+|---|---|
+| 非白名单设备连接 | 不连接真实防火墙或管理面。 |
+| 通用 atom 执行 | 不执行 `fw_install_ngfw_image`、`fw_config_interface` 等未接入 runner 的 atom。 |
+| 通用配置下发 | 不推送白名单以外的配置，不修改白名单以外的设备状态。 |
+| 凭据保存 | 不保存账号、密码、cookie、私钥；会话材料只写入用户指定 session 文件，且不允许写入仓库目录。 |
+| 自动回滚 | 不在失败后自动回滚设备配置。 |
+| `.input` 数据 | 不在运行时读取或发布 `.input` 目录数据；实现只迁移了公开 API 形态。 |
 
-```text
-^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$
-```
+新增 runner 必须单独设计白名单入口、dry-run、凭据边界、审计输出和测试覆盖。
 
-2. 在对应设备目录创建 YAML：
+## 11. 常见故障
 
-```text
-atoms/<device_type>/<op_id>.yaml
-```
+| 错误码 | 退出码 | 常见触发 | 处理 |
+|---|---:|---|---|
+| `GIT_AUTH_FAILED` | 21 | git 认证失败 | 配置 git 原生认证后重跑 `atomic-ops sync`。 |
+| `GIT_NETWORK_ERROR` | 22 | 网络、DNS、远端或 TLS 失败 | 网络恢复后重跑同步；已有完整缓存时可继续只读查询。 |
+| `OP_NOT_FOUND` | 23 | `show` / `validate` 引用未知 `op_id`，或 `adapter` 查询的 atom 没有 adapter 引用 | 先同步，再检查拼写、候选建议和 `adapter_contract_ref`。 |
+| `REPO_NOT_SYNCED` | 24 | 缓存缺失、损坏，或 adapter 引用的 profile 未同步 | 执行 `atomic-ops sync --repo <atomic-ops-git-repository-url>`。 |
+| `PACKAGE_NOT_FOUND` | 25 | 引用未知 package | 运行 `atomic-ops packages` 后选择已有名称。 |
+| `RUNNER_UNSUPPORTED_OP` | 41 | `run` 请求未接入 runner 的 op | 使用 `adapter` 查询契约，或新增专用 runner。 |
+| `RUNNER_CREDENTIAL_MISSING` | 43 | 登录执行缺少 `--password-env` 或环境变量为空 | 设置环境变量后重跑。 |
+| `RUNNER_SESSION_INVALID` | 45 | session 文件不存在、权限过宽或格式无效 | 先执行登录，或修正 session 文件权限为 `0600`。 |
+| `RUNNER_CONFIG_REJECTED` | 48 | 设备拒绝地址对象或策略路由配置 | 检查对象名、参数、会话和设备侧错误。 |
 
-3. 填写 schema 必填字段：`schema_version`、`op_id`、`device_type`、`description`、`parameters`、`returns`、`idempotent`、`timeout_ms`、`error_types`。
+仓库脚本错误码见 `docs/error-codes.md`。
 
-4. 选择已登记的操作级错误类型：
-
-```text
-TIMEOUT
-DEVICE_UNREACHABLE
-INVALID_PARAM
-RESOURCE_CONFLICT
-RESOURCE_NOT_FOUND
-PERMISSION_DENIED
-STATE_MISMATCH
-INTERNAL_ERROR
-DRY_RUN
-```
-
-5. 如属于现有 package，更新 `packages/<package_id>.yaml` 的 `operations`。
-
-6. 在 `CHANGELOG.md` 记录新增、修改、废弃或删除。
-
-7. 本地校验：
+## 12. 发布前自检
 
 ```bash
-uv run python scripts/layout_check.py .
-uv run --with pyyaml --with jsonschema --python 3.11 python scripts/validate_schema.py atoms/fw/fw_verify_acl_rule.yaml
-atomic-ops validate --package networking
+uv run atomic-ops --help
+uv run atomic-ops packages
+uv run atomic-ops adapter fw_config_policy_route
+uv run --python 3.11 python scripts/validate_schema.py atoms
+uv run --python 3.11 python scripts/layout_check.py
+uv run --python 3.11 python scripts/security_gate_check.py
 ```
 
-### 修改或废弃 Atom
-
-已被测试用例引用的 `op_id` 不应直接删除。推荐流程：
-
-1. 创建替代 atom。
-2. 将旧 atom 标记为 `deprecated: true`。
-3. 填写 `deprecated_by` 和 `since_version`。
-4. 更新 package 清单和 `CHANGELOG.md`。
-5. 在明确版本窗口删除旧引用。
-
-### 新增 Package
-
-1. 创建 `packages/<package_id>.yaml`。
-2. 保持文件名与 `package_id` 一致。
-3. 填写 `display_name`、`description`、`version`。
-4. 在 `operations` 中只写 `op_id`，不写文件路径，不嵌入 atom 内容。
-5. 执行 `atomic-ops validate --package <package_id>`。
-
-## 9. 日志与诊断边界
-
-`atomic-ops` 当前没有独立日志文件，也不会默认创建 `logs/` 目录。
-
-| 通道 | 内容 | 不包含 |
-|---|---|---|
-| stdout | 成功结果，如表格、JSON、YAML、同步摘要 | 调试日志、错误栈、warning |
-| stderr | warning、错误对象、修复建议、stale cache 提醒 | 访问凭据、完整 traceback、设备回包 |
-| `_metadata.json` | 最近一次同步摘要 | 操作明细日志、长期历史、设备诊断详情 |
-
-机器消费建议：
-
-- 成功路径读取 stdout。
-- 失败路径读取 stderr 中的 `error_code`。
-- CI 如需保留日志，应由 CI 自己重定向 stdout/stderr。
-- `_metadata.json` 可用于确认 `commit_sha`、`synced_at` 和 `last_sync_status`，但不要把它当作审计日志。
-
-## 10. 常见错误排查
-
-| 问题现象 | 可能原因 | 解决方法 |
-|---|---|---|
-| `atomic-ops` 命令找不到 | `uv tool` 的可执行目录未加入 `PATH`，或尚未安装 CLI | 执行 `uv tool install .`，再检查 `uv tool dir` 对应目录是否在 `PATH`。 |
-| `GIT_AUTH_FAILED` | git 原生认证未配置或无仓库权限 | 先用 `git ls-remote git@<GITLAB_HOST>:<ORG/PROJECT>/ptm-atomic.git` 做最小验证，修复后重跑 `atomic-ops sync`。 |
-| `GIT_NETWORK_ERROR` | 网络不可达、DNS、TLS 或远端超时 | 网络恢复后重跑 `atomic-ops sync`；如已有完整缓存，可先继续只读查询。 |
-| `REPO_NOT_SYNCED` | 首次未同步、缓存损坏、`_metadata.json` 缺失或不可读 | 执行 `atomic-ops sync`；确认缓存父目录可写且没有被普通文件占用。 |
-| `OP_NOT_FOUND` | `op_id` 拼写错误、前缀错误、缓存过期或 atom 未发布 | 执行 `atomic-ops sync`，再用 `atomic-ops list --device <device>` 查找候选。 |
-| `PACKAGE_NOT_FOUND` | package 名称不存在 | 执行 `atomic-ops packages` 查看可用名称。 |
-| `validate` 返回 `YAML_PARSE_ERROR` | 测试用例 YAML 格式错误 | 用 YAML 解析器或编辑器检查缩进、冒号和列表结构。 |
-| `validate` 返回 `INVALID_TEST_CASE` | `steps` 或 `tight_sequence.steps` 结构不符合约定 | 对照 `docs/test-case-template.yaml` 修正为对象列表，并确保 `op_id` 非空。 |
-| package 校验失败 | package 清单引用了不存在或已重命名的 `op_id` | 维护者更新 package 的 `operations`，或补齐对应 atom。 |
-| 缓存状态为 `STALE` | 最近一次同步网络失败，但本地缓存完整 | 只读命令可继续使用；发布或联调前需重新同步到 `SYNCED`。 |
-
-## 11. 限制说明
-
-- 当前只交付 CLI、schema、文档、示例 atom、package 清单和校验脚本，不交付真实设备执行器。
-- `validate` 只校验引用和结构，不连接设备，不执行 atom。
-- package 是过滤和校验视图，不复制、不安装 atom 文件。
-- 不支持实时 Git API 拉取；数据更新通过 git 同步完成。
-- 不支持多远端仓库联邦同步。
-- 私有仓库证书、代理、系统 credential helper 等环境问题由 git 和本机环境处理。
-- 当前示例 atom 只有 `fw_verify_acl_rule`，其他设备目录为后续扩展保留。
-- 默认 sparse checkout 只同步 `atoms/`、`schemas/`、`packages/`、`docs/`；维护者开发 CLI 源码时应使用完整仓库。
-
-## 12. 文档缺口清单
-
-| 缺口类型 | 影响项 | 严重程度 | 修复建议 | 参考来源 |
-|---|---|---|---|---|
-| 无 BLOCKING 缺口 | 安装与首次使用 | BLOCKING | 已覆盖 `uv tool install`、`uv run`、首次 `sync`、默认仓库 URL 和本地缓存路径。 | README / 本手册 |
-| 无 REQUIRED 缺口 | 核心命令与故障排查 | REQUIRED | 已覆盖 `sync/list/show/packages/validate`、五类 CLI 错误码、stdout/stderr/`_metadata.json` 边界。 | 已验证 CLI 合同 |
-| 后续发布源说明 | 内部制品仓库或 tag 发布策略 | OPTIONAL | 若后续有正式包源或 release tag 规范，可补充“从制品源安装”的组织内示例。 | `pyproject.toml` / `CHANGELOG.md` |
-| 更多业务样例 | 非 `fw_verify_acl_rule` 的真实 atom | OPTIONAL | 新增更多 atom 后，补充多设备、多 package、多步骤测试用例示例。 | `atoms/` / `packages/` |
+这些命令不连接设备，不读取 `.input`，不保存凭据。

@@ -1,0 +1,59 @@
+schema_version: "1.1"
+op_id: fw_verify_static_route
+device_type: fw
+description: Verify static route configuration contract result for NGFW capacity.
+parameters:
+  config_result_ref:
+    type: string
+    required: false
+    description: Non-sensitive reference to the related configuration result.
+  config_result:
+    type: json
+    required: false
+    description: Inline non-sensitive configuration result envelope.
+  verification_rules:
+    type: list
+    required: true
+    description: Rules used to check static route configuration state.
+  expected_route_ref:
+    type: string
+    required: true
+    description: Expected route reference.
+inputs:
+  state_ref: "<state-ref>"
+  config_result_ref: "<static-route-config-result-ref>"
+  config_domain: static_route
+returns:
+  status: success
+  data:
+    verification_summary_ref: "<static-route-verification-summary-ref>"
+    verification_status: passed
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: static_route_state_matches
+      input_ref: "<static-route-config-result-ref>"
+      expected_result: route, destination, next hop, and metric match
+  summary_ref: "<static-route-verification-summary-ref>"
+preconditions:
+  - A related static route configuration result reference is available.
+postconditions:
+  - Verification summary and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - static_route
+  - verification
+since_version: "1.1.0"

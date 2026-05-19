@@ -8,8 +8,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from atomic_ops import __version__
+from atomic_ops.commands import adapter as adapter_command
 from atomic_ops.commands import list_ops as list_command
 from atomic_ops.commands import packages as packages_command
+from atomic_ops.commands import run as run_command
 from atomic_ops.commands import show as show_command
 from atomic_ops.commands import sync as sync_command
 from atomic_ops.commands import validate as validate_command
@@ -40,6 +42,16 @@ COMMANDS: tuple[CommandSpec, ...] = (
         name="show",
         help="Show one atomic operation by op_id.",
         description="Show one atomic operation by op_id.",
+    ),
+    CommandSpec(
+        name="adapter",
+        help="Show one adapter profile operation by op_id.",
+        description="Show one adapter profile operation by op_id.",
+    ),
+    CommandSpec(
+        name="run",
+        help="Run a supported atomic operation against an NGFW device.",
+        description="Run a supported atomic operation against an NGFW device.",
     ),
     CommandSpec(
         name="validate",
@@ -88,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(
         title="commands",
-        metavar="{sync,list,show,validate,packages}",
+        metavar="{sync,list,show,adapter,run,validate,packages}",
         dest="command",
     )
     subparsers.required = True
@@ -103,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
         elif spec.name == "show":
             _register_subcommand(subparsers, spec, show_command.run)
             show_command.add_arguments(subparsers.choices[spec.name])
+        elif spec.name == "adapter":
+            _register_subcommand(subparsers, spec, adapter_command.run)
+            adapter_command.add_arguments(subparsers.choices[spec.name])
+        elif spec.name == "run":
+            _register_subcommand(subparsers, spec, run_command.run)
+            run_command.add_arguments(subparsers.choices[spec.name])
         elif spec.name == "packages":
             _register_subcommand(subparsers, spec, packages_command.run)
             packages_command.add_arguments(subparsers.choices[spec.name])

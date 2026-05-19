@@ -20,11 +20,29 @@ from atomic_ops.metadata import (
 
 ERROR_OP_NOT_FOUND = "OP_NOT_FOUND"
 ERROR_PACKAGE_NOT_FOUND = "PACKAGE_NOT_FOUND"
+ERROR_RUNNER_UNSUPPORTED_OP = "RUNNER_UNSUPPORTED_OP"
+ERROR_RUNNER_EXECUTE_REQUIRED = "RUNNER_EXECUTE_REQUIRED"
+ERROR_RUNNER_CREDENTIAL_MISSING = "RUNNER_CREDENTIAL_MISSING"
+ERROR_RUNNER_LOGIN_FAILED = "RUNNER_LOGIN_FAILED"
+ERROR_RUNNER_SESSION_INVALID = "RUNNER_SESSION_INVALID"
+ERROR_RUNNER_DEVICE_UNREACHABLE = "RUNNER_DEVICE_UNREACHABLE"
+ERROR_RUNNER_RESPONSE_INVALID = "RUNNER_RESPONSE_INVALID"
+ERROR_RUNNER_CONFIG_REJECTED = "RUNNER_CONFIG_REJECTED"
+ERROR_RUNNER_VALIDATION_FAILED = "RUNNER_VALIDATION_FAILED"
 
 EXIT_CODES = {
     ERROR_OP_NOT_FOUND: 23,
     ERROR_REPO_NOT_SYNCED: 24,
     ERROR_PACKAGE_NOT_FOUND: 25,
+    ERROR_RUNNER_UNSUPPORTED_OP: 41,
+    ERROR_RUNNER_EXECUTE_REQUIRED: 42,
+    ERROR_RUNNER_CREDENTIAL_MISSING: 43,
+    ERROR_RUNNER_LOGIN_FAILED: 44,
+    ERROR_RUNNER_SESSION_INVALID: 45,
+    ERROR_RUNNER_DEVICE_UNREACHABLE: 46,
+    ERROR_RUNNER_RESPONSE_INVALID: 47,
+    ERROR_RUNNER_CONFIG_REJECTED: 48,
+    ERROR_RUNNER_VALIDATION_FAILED: 49,
 }
 
 SUPPORTED_DEVICES = ("fw", "tg", "mock", "sw")
@@ -63,6 +81,18 @@ class OperationDocument:
 
 
 @dataclass(frozen=True)
+class AdapterOperationDocument:
+    op_id: str
+    adapter_contract_ref: str
+    profile_path: str
+    operation_id: str
+    operation: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class PackageManifest:
     package_id: str
     display_name: str
@@ -91,6 +121,7 @@ class Repository:
         self.metadata = metadata
         self.atoms_root = cache_root / "atoms"
         self.packages_root = cache_root / "packages"
+        self.adapters_root = cache_root / "adapters"
 
     @classmethod
     def from_default_cache(cls) -> "Repository":
@@ -179,6 +210,55 @@ class Repository:
             )
         return OperationDocument(path=path, data=data, raw_text=raw_text)
 
+    def read_adapter_operation(self, op_id: str) -> AdapterOperationDocument:
+        operation_document = self.read_operation(op_id)
+        adapter_ref = operation_document.data.get("adapter_contract_ref")
+        if not isinstance(adapter_ref, str) or not adapter_ref.strip():
+            raise ReadError(
+                ERROR_OP_NOT_FOUND,
+                f"Adapter profile not found for operation: {op_id}",
+                {"op_id": op_id, "missing_field": "adapter_contract_ref"},
+            )
+
+        profile_part, operation_id = _parse_adapter_ref(adapter_ref)
+        profile_path = self._adapter_profile_path(profile_part)
+        if profile_path is None or not profile_path.is_file():
+            raise _repo_not_synced(
+                f"adapter profile referenced by {op_id} is missing: {profile_part}",
+                cache_root=self.cache_root,
+            )
+
+        profile, _raw_text = self._read_yaml_document(profile_path)
+        if not isinstance(profile, dict):
+            raise _repo_not_synced("adapter profile YAML root must be an object", cache_root=self.cache_root)
+        operations = profile.get("operations")
+        if not isinstance(operations, dict):
+            raise _repo_not_synced(
+                f"adapter profile operations must be an object: {profile_part}",
+                cache_root=self.cache_root,
+            )
+        adapter_operation = operations.get(operation_id)
+        if not isinstance(adapter_operation, dict):
+            raise _repo_not_synced(
+                f"adapter operation referenced by {op_id} is missing: {adapter_ref}",
+                cache_root=self.cache_root,
+            )
+        atom_ref = adapter_operation.get("atom_ref")
+        expected_atom_ref = _display_cache_relative_path(operation_document.path, self.cache_root)
+        if atom_ref != expected_atom_ref:
+            raise _repo_not_synced(
+                f"adapter operation atom_ref does not match requested operation: {adapter_ref}",
+                cache_root=self.cache_root,
+            )
+
+        return AdapterOperationDocument(
+            op_id=op_id,
+            adapter_contract_ref=adapter_ref,
+            profile_path=profile_part,
+            operation_id=operation_id,
+            operation=adapter_operation,
+        )
+
     def read_package(self, package_name: str) -> PackageManifest:
         path = self._package_path(package_name)
         if path is None or not path.is_file():
@@ -242,6 +322,22 @@ class Repository:
         if ".." in Path(package_name).parts:
             return None
         return self.packages_root / f"{package_name}.yaml"
+
+    def _adapter_profile_path(self, profile_part: str) -> Path | None:
+        if _has_path_separator(profile_part.replace("/", "")) or profile_part in {"", ".", ".."}:
+            return None
+        path = Path(profile_part)
+        parts = path.parts
+        if not parts or parts[0] != "adapters" or ".." in parts or path.is_absolute():
+            return None
+        if path.suffix.lower() not in {".yaml", ".yml"}:
+            return None
+        resolved = (self.cache_root / path).resolve()
+        try:
+            resolved.relative_to(self.adapters_root.resolve())
+        except ValueError:
+            return None
+        return resolved
 
     def _operation_summary_from_path(self, path: Path, expected_device: str) -> OperationSummary:
         data, _raw_text = self._read_yaml_document(path)
@@ -320,6 +416,38 @@ def _device_from_op_id(op_id: str) -> str | None:
 
 def _has_path_separator(value: str) -> bool:
     return "/" in value or "\\" in value
+
+
+def _parse_adapter_ref(adapter_ref: str) -> tuple[str, str]:
+    marker = "#/operations/"
+    if marker not in adapter_ref:
+        raise ReadError(
+            ERROR_OP_NOT_FOUND,
+            "Adapter profile reference must point to an operation.",
+            {"adapter_contract_ref": adapter_ref},
+        )
+    profile_part, operation_id = adapter_ref.split(marker, 1)
+    if (
+        not profile_part
+        or not operation_id
+        or "\\" in profile_part
+        or "/" in operation_id
+        or "\\" in operation_id
+        or ".." in Path(profile_part).parts
+    ):
+        raise ReadError(
+            ERROR_OP_NOT_FOUND,
+            "Adapter profile reference is invalid.",
+            {"adapter_contract_ref": adapter_ref},
+        )
+    return profile_part, operation_id
+
+
+def _display_cache_relative_path(path: Path, cache_root: Path) -> str:
+    try:
+        return path.resolve().relative_to(cache_root.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def _string_field(data: dict[str, Any], key: str) -> str:

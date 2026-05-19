@@ -1,0 +1,74 @@
+schema_version: "1.1"
+op_id: fw_verify_ngfw_health
+device_type: fw
+description: Define the NGFW post-install health verification contract for VPP Agent and HTTPS.
+parameters:
+  install_status_ref:
+    type: string
+    required: true
+    description: Non-sensitive installation result reference.
+inputs:
+  state_ref: "<state-ref>"
+returns:
+  status: success
+  data:
+    verification_status: passed
+    component_results:
+      - component: vpp
+        status: passed
+      - component: agent
+        status: passed
+      - component: https
+        status: passed
+    verification_summary_ref: "<health-summary-ref>"
+    manual_action_required: false
+  error_type: HEALTH_CHECK_FAILED
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 300000
+error_types:
+  - HEALTH_CHECK_FAILED
+  - VPP_UNHEALTHY
+  - AGENT_UNHEALTHY
+  - HTTPS_UNHEALTHY
+  - MANUAL_ACTION_REQUIRED
+  - TIMEOUT
+risk:
+  level: high
+  categories:
+    - verification
+    - diagnostics
+    - management_plane
+gate:
+  required: true
+  reason: Health verification consumes installation state and can block promotion to downstream configuration.
+  approver_role: change_reviewer
+  evidence_required:
+    - health_check_plan
+    - diagnostic_boundary_review
+verification:
+  kind: install_health
+  rules:
+    - name: vpp_health
+      input_ref: "<health-vpp-ref>"
+      expected_result: VPP health is reported as passed or a diagnostic reference is returned
+    - name: agent_health
+      input_ref: "<health-agent-ref>"
+      expected_result: Agent health is reported as passed or a diagnostic reference is returned
+    - name: https_health
+      input_ref: "<health-https-ref>"
+      expected_result: HTTPS health is reported as passed or a diagnostic reference is returned
+  summary_ref: "<health-summary-ref>"
+preconditions:
+  - Installation and minimal initialization contracts have produced non-sensitive status references.
+  - Login state is available as state_ref when health checks require authenticated management context.
+postconditions:
+  - Health verification returns VPP, Agent, and HTTPS component status.
+  - Failures produce diagnostic references and manual handling signals only.
+tags:
+  - firewall
+  - ngfw
+  - health
+  - verification
+  - contract_only
+since_version: "1.1.0"

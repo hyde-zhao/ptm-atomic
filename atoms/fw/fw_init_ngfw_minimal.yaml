@@ -1,0 +1,79 @@
+schema_version: "1.1"
+op_id: fw_init_ngfw_minimal
+device_type: fw
+description: Define the minimal NGFW initialization contract without adding extra setup scope.
+parameters:
+  install_status_ref:
+    type: string
+    required: true
+    description: Non-sensitive reference to the completed installation status.
+  serial_access_ref:
+    type: string
+    required: true
+    description: Non-sensitive reference to approved serial access context.
+  management_route_ref:
+    type: string
+    required: true
+    description: Non-sensitive management route reference.
+  password_policy:
+    type: string
+    required: true
+    description: Approved password policy value; the only allowed literal value is Ngfw@123.
+returns:
+  status: success
+  data:
+    init_status: initialized
+    captcha_disabled: true
+    management_route_status: configured
+    password_policy_applied: true
+    init_result_ref: "<init-result-ref>"
+    manual_action_required: false
+  error_type: INIT_BLOCKED
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 600000
+error_types:
+  - INIT_BLOCKED
+  - SERIAL_CONTEXT_INVALID
+  - MANAGEMENT_ROUTE_INVALID
+  - PASSWORD_POLICY_REJECTED
+  - TIMEOUT
+risk:
+  level: high
+  categories:
+    - initialization
+    - credential_rotation
+    - management_plane
+gate:
+  required: true
+  reason: Initialization changes login policy and management routing and must stay within approved scope.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_initialization_plan
+    - management_route_review
+verification:
+  kind: diagnostics
+  rules:
+    - name: captcha_disabled
+      input_ref: "<init-result-ref>"
+      expected_result: login verification challenge is disabled
+    - name: management_route_configured
+      input_ref: "<init-result-ref>"
+      expected_result: management route contract is recorded as configured
+    - name: password_policy_applied
+      input_ref: "<init-result-ref>"
+      expected_result: approved password policy is recorded as applied
+  summary_ref: "<init-summary-ref>"
+preconditions:
+  - Installation status has been recorded by fw_install_ngfw_image.
+  - Initialization scope is limited to serial login, challenge disablement, management route, and Ngfw@123.
+  - No additional remote access or entitlement setup is included in this atom.
+postconditions:
+  - Minimal initialization status is available as a non-sensitive reference.
+  - Web management login can be modeled by fw_login_web_management.
+tags:
+  - firewall
+  - ngfw
+  - initialization
+  - contract_only
+since_version: "1.1.0"

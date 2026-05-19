@@ -1,0 +1,59 @@
+schema_version: "1.1"
+op_id: fw_verify_object
+device_type: fw
+description: Verify object configuration contract result for NGFW capacity operations.
+parameters:
+  config_result_ref:
+    type: string
+    required: false
+    description: Non-sensitive reference to the related configuration result.
+  config_result:
+    type: json
+    required: false
+    description: Inline non-sensitive configuration result envelope.
+  verification_rules:
+    type: list
+    required: true
+    description: Rules used to check object configuration state.
+  expected_object_ref:
+    type: string
+    required: true
+    description: Expected object reference.
+inputs:
+  state_ref: "<state-ref>"
+  config_result_ref: "<object-config-result-ref>"
+  config_domain: object
+returns:
+  status: success
+  data:
+    verification_summary_ref: "<object-verification-summary-ref>"
+    verification_status: passed
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: object_state_matches
+      input_ref: "<object-config-result-ref>"
+      expected_result: object type, name, reference, and digest match
+  summary_ref: "<object-verification-summary-ref>"
+preconditions:
+  - A related object configuration result reference is available.
+postconditions:
+  - Verification summary and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - object
+  - verification
+since_version: "1.1.0"

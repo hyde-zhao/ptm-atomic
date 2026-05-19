@@ -1,43 +1,45 @@
-test_case_id: tc_fw_acl_rule_tight_sequence
-description: Template showing how a test case references atomic operations by op_id.
+test_case_id: tc_ngfw_read_only_reference_check
+description: Template for validating references to shipped NGFW atomic operations.
 preconditions:
-  - The firewall test environment is prepared with a readable ACL policy.
-  - The logical device name fw_primary is mapped by the consuming test runner.
-  - The local atomic operation cache contains fw_verify_acl_rule.
+  - The local atomic operation cache is synced to a commit containing the referenced op_id values.
+  - The consuming test runner maps fw_lab_primary to a lab firewall without storing credentials in this file.
+  - This template is for reference validation only; atomic-ops validate does not connect to devices.
 steps:
-  - step: verify_acl_rule_baseline
-    op_id: fw_verify_acl_rule
-    device: fw_primary
+  - step: verify_ngfw_health_reference
+    op_id: fw_verify_ngfw_health
+    device: fw_lab_primary
     wait_ms: 0
     on_error: abort
-  - step: verify_acl_rule_after_policy_refresh
-    op_id: fw_verify_acl_rule
-    device: fw_primary
+  - step: verify_interface_reference
+    op_id: fw_verify_interface
+    device: fw_lab_primary
     wait_ms: 500
     on_error: retry_once
-  - step: verify_acl_rule_final_state
-    op_id: fw_verify_acl_rule
-    device: fw_primary
+  - step: verify_nat_reference
+    op_id: fw_verify_nat
+    device: fw_lab_primary
     wait_ms: 1000
-    on_error: skip
+    on_error: abort
 tight_sequence:
   enabled: true
   steps:
-    - step: verify_acl_rule_sequence_start
-      op_id: fw_verify_acl_rule
-      device: fw_primary
+    - step: verify_acl_policy_sequence_start
+      op_id: fw_verify_acl_policy
+      device: fw_lab_primary
       wait_ms: 0
       on_error: abort
-    - step: verify_acl_rule_sequence_middle
-      op_id: fw_verify_acl_rule
-      device: fw_primary
+    - step: verify_static_route_sequence_middle
+      op_id: fw_verify_static_route
+      device: fw_lab_primary
       wait_ms: 250
       on_error: retry_once
-    - step: verify_acl_rule_sequence_end
-      op_id: fw_verify_acl_rule
-      device: fw_primary
+    - step: verify_dynamic_routing_sequence_end
+      op_id: fw_verify_dynamic_routing
+      device: fw_lab_primary
       wait_ms: 500
       on_error: abort
 postconditions:
-  - The ACL policy state remains unchanged by verification steps.
-  - Validation reports all referenced op_id values as present in the local cache.
+  - The template remains free of real addresses, credentials, tokens, cookies, and device session data.
+  - Validation reports all referenced op_id values as present in the local cache when synced to the matching repository commit.
+  - Any real device execution or configuration push uses only explicit atomic-ops run allowlist commands outside this reference-validation template.
+  - Rollback and credential handling stay outside this test-case YAML.

@@ -7,7 +7,10 @@ The contract has two layers:
 - Operation-level errors use `error_type` in atomic operation returns and validate findings.
 - CLI-level errors use `error_code` in the top-level CLI error object and have fixed process exit codes.
 
-The current baseline contains exactly 14 error codes: 9 operation-level codes and 5 CLI-level codes.
+The current runtime baseline contains exactly 23 error codes: 9 operation-level
+codes and 14 CLI-level codes. Repository scripts additionally use static check
+exit semantics; those static check exits are not `atomic-ops` CLI-level
+`error_code` values and do not represent real device execution failures.
 
 ## Operation-Level Error Types
 
@@ -33,9 +36,35 @@ CLI-level errors describe command execution failures. These are the only errors 
 |---|---:|---|---|---|---|
 | `GIT_AUTH_FAILED` | 21 | Git repository authentication failed. | SSH key or system credential helper is not configured for the repository. | Configure Git authentication and rerun `atomic-ops sync`. | No |
 | `GIT_NETWORK_ERROR` | 22 | Git network access failed. | DNS failure, remote endpoint unreachable, TLS failure, offline host, git timeout. | If a valid cache exists, continue read-only work from the cache; otherwise rerun after network recovery. | Yes |
-| `OP_NOT_FOUND` | 23 | The requested `op_id` does not exist in the local operation repository. | `show` or `validate` references an unknown operation, or the op_id prefix maps to no valid path. | Run `atomic-ops sync`, check spelling, and use nearest `op_id` suggestions when available. | No |
-| `REPO_NOT_SYNCED` | 24 | The local operation repository cache is missing, unreadable, or damaged. | First run before `sync`, missing `_metadata.json`, unreadable cache, incomplete clone. | Run `atomic-ops sync`; if the cache is damaged, remove the cache through the documented recovery path and sync again. | Yes |
+| `OP_NOT_FOUND` | 23 | The requested `op_id` or operation-level adapter reference does not exist in the local operation repository. | `show` or `validate` references an unknown operation; `adapter` references an operation without `adapter_contract_ref`; or the op_id prefix maps to no valid path. | Run `atomic-ops sync`, check spelling, and use nearest `op_id` suggestions when available; for `adapter`, confirm the atom declares `adapter_contract_ref`. | No |
+| `REPO_NOT_SYNCED` | 24 | The local operation repository cache is missing, unreadable, damaged, or missing a referenced adapter profile file. | First run before `sync`, missing `_metadata.json`, unreadable cache, incomplete clone, or cache synced before `adapters/` was included. | Run `atomic-ops sync`; if the cache is damaged, remove the cache through the documented recovery path and sync again. | Yes |
 | `PACKAGE_NOT_FOUND` | 25 | The requested package manifest does not exist. | `list --package` or `validate --package` references an unknown package name. | Run `atomic-ops packages` and choose one of the listed package names. | No |
+| `RUNNER_UNSUPPORTED_OP` | 41 | `atomic-ops run` does not support the requested operation. | The op is not in the runner allowlist. | Use `atomic-ops adapter` for contract lookup, or add a dedicated runner implementation. | No |
+| `RUNNER_EXECUTE_REQUIRED` | 42 | Live execution was requested by workflow policy but `--execute` was missing. | A caller expected a real device action but invoked dry-run. | Add `--execute` after reviewing the dry-run output. | No |
+| `RUNNER_CREDENTIAL_MISSING` | 43 | Required runtime credential input is unavailable. | `--password-env` or `--new-password-env` is absent, unset, or empty. | Set the environment variable and rerun. | No |
+| `RUNNER_LOGIN_FAILED` | 44 | NGFW Web login failed. | Login response has no session reference, returns a device error, or requires default password change without explicit approval. | Check credentials, management reachability, and default-password-change policy. | No |
+| `RUNNER_SESSION_INVALID` | 45 | Local session file cannot be used. | File missing, JSON invalid, session value missing, or permissions broader than `0600`. | Re-run login or fix session file permissions. | No |
+| `RUNNER_DEVICE_UNREACHABLE` | 46 | Runner could not reach the device or login asset endpoint. | Timeout, connection failure, non-200 login asset response, or TLS/network failure. | Check route, device state, base URL, and TLS settings. | Yes |
+| `RUNNER_RESPONSE_INVALID` | 47 | Runner received an unexpected device response shape. | Response is not JSON, JSON root is not an object, or login page lacks the RSA public-key script. | Capture sanitized diagnostics and verify firmware/API compatibility. | No |
+| `RUNNER_CONFIG_REJECTED` | 48 | Device rejected a runner configuration request. | `POST /api/v1/ippool` or `POST /api/v1/policyroute` returned a non-success status. | Check session validity, object names, policy-route references, parameters, and device-side validation. | No |
+| `RUNNER_VALIDATION_FAILED` | 49 | Runner input failed local validation. | Missing required CLI argument, invalid base URL, invalid address object name, IPv6 input for IPv4-only runners, invalid mask, or invalid weight. | Fix CLI parameters and retry dry-run first. | No |
+
+## Static Repository Check Exit Semantics
+
+The following exit codes are used by current read-only repository checks,
+including `scripts/security_gate_check.py`. They are not top-level `atomic-ops`
+CLI `error_code` values and must not be used to describe a real firewall
+execution result.
+
+| Static check category | Exit code | Meaning | Typical trigger | Output boundary |
+|---|---:|---|---|---|
+| `SENSITIVE_PATTERN_FOUND` | 31 | A committed product file contains a forbidden sensitive assignment pattern. | A non-placeholder value assigned to keys such as `token`, `cookie`, `authorization`, `password`, `ftp_pass`, `secret` appears under the default scan paths: `atoms/`, `adapters/`, `packages/`, `docs/`, `schemas/`, `scripts/`, or `src/atomic_ops/`. | Print file path, line number, and rule name; do not print the full matched value. |
+| `HIGH_RISK_GATE_MISSING` | 32 | A high-risk schema v1.1 atom is missing the required review gate contract. | `risk.level=high`, or an `op_id` matching `^fw_(install\|init\|login\|config\|config_batch)_`, without `gate.required=true` and non-empty `gate.reason`, `gate.approver_role`, and `gate.evidence_required`. | Print `op_id` and field path only. |
+| `STATIC_CHECK_INPUT_ERROR` | 33 | The static check cannot read or parse its inputs. | Missing path, YAML parse error, missing schema file, unsupported file type, or invalid invocation. | Print safe path and error category; do not print file contents. |
+
+Static checks must be read-only: they do not connect to devices, do not access
+the network, do not read `.input/` runtime assets, and do not persist diagnostic
+logs.
 
 ## CLI Error Object
 
@@ -49,7 +78,8 @@ When a CLI command fails in JSON mode, stdout remains reserved for successful re
     "command": "sync",
     "cache_status": "STALE"
   },
-  "retryable": true
+  "retryable": true,
+  "suggestion": "Check network access to the Git repository and rerun atomic-ops sync."
 }
 ```
 
@@ -57,10 +87,11 @@ Field contract:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `error_code` | string | Yes | One of the 5 CLI-level error codes. |
+| `error_code` | string | Yes | One of the CLI-level error codes. |
 | `message` | string | Yes | Human-readable failure summary. |
 | `details` | object | Yes | Machine-readable context. Use an empty object when no safe detail is available. |
 | `retryable` | boolean | Yes | Whether retrying the same command may succeed after environment recovery. |
+| `suggestion` | string | No | Operator-facing next action. Current CLI error paths include it for known failures, but consumers should tolerate absence for compatibility. |
 
 ## Stdout And Stderr Rules
 
@@ -73,16 +104,29 @@ Field contract:
 
 ## Validate Finding Boundary
 
-`validate` may report operation content problems without treating them as CLI top-level execution failures.
+`atomic-ops validate` is a reference checker, not a full schema validator. It reads either a test-case YAML file or a package manifest from the synced cache, extracts `op_id` references, and reports missing references or test-case structure findings.
 
 Examples:
 
 - `INVALID_PARAM` is an operation-level `error_type` or validate finding.
-- Schema violations are validate findings.
 - Test case YAML structure errors are validate findings.
 - Missing referenced operations may appear in validate output and may also make the command fail with top-level `OP_NOT_FOUND` when the command cannot complete as requested.
+- `validate --package <package_id>` is a cache-based package reference smoke test; it checks that package `operations[]` resolve in the synced cache.
 
 Validate result entries should use fields such as `violation_code` or `finding_type` for content-level findings. They must not invent additional CLI-level `error_code` values.
+
+Schema and static repository checks are separate from CLI validate. Schema
+violations are reported by `scripts/validate_schema.py`; sensitive-pattern and
+high-risk-gate failures are reported by `scripts/security_gate_check.py`.
+These scripts may report categories such as:
+
+| Finding category | Boundary |
+|---|---|
+| `schema_v1_1_field_family_invalid` | A v1.1-only field family is malformed, uses the wrong version, or violates enum/range constraints. |
+| `schema_version_incompatible` | A document uses `inputs`, `risk`, `credential_ref`, `gate`, `verification`, or `batch` without `schema_version: "1.1"`. |
+| `safety_gate_missing` | A high-risk atom lacks `risk.level=high` or a required gate. Static check exit 32 may be used by repository scripts. |
+| `sensitive_pattern_found` | A forbidden sensitive pattern appears in a checked product file. Static check exit 31 may be used by repository scripts. |
+| `static_check_input_error` | A repository check cannot load its inputs. Static check exit 33 may be used by repository scripts. |
 
 ## Extension Process
 
@@ -90,24 +134,36 @@ Adding or changing an error code is a contract change.
 
 To add an operation-level `error_type`:
 
-1. Create a change request or Story that explains the trigger, consumer impact, and migration path.
-2. Update `process/REQUIREMENTS.md` and this document in the same change set.
+1. Create an approved change record or implementation issue that explains the trigger, consumer impact, and migration path.
+2. Update the product requirements source and this document in the same change set.
 3. Update schema examples, field references, operation YAML, and validation logic when the code exists.
 4. Add an `atoms-vX.Y.Z` entry to `CHANGELOG.md`.
 
 To add a CLI-level `error_code`:
 
-1. Create a change request or Story that explains why the failure cannot be represented by the existing 5 CLI-level errors.
-2. Update `process/HLD.md`, this document, CLI error handling, tests, and engineer-facing documentation.
+1. Create an approved change record or implementation issue that explains why the failure cannot be represented by the existing 5 CLI-level errors.
+2. Update the approved design evidence, this document, CLI error handling, tests, and engineer-facing documentation.
 3. Assign a stable non-zero exit code and document backward compatibility.
 4. Add a `cli-vX.Y.Z` entry to `CHANGELOG.md`.
 
+To add or change a static repository check exit code:
+
+1. Create an approved issue or change record that identifies the check, scope, and safe
+   output boundary.
+2. Update this document, the owning script, and validation evidence in the same
+   change set.
+3. Keep static check exits separate from CLI-level `error_code` values.
+4. Confirm the check is read-only and does not connect to firewall devices.
+
 ## Review Checklist
 
-- The total number of error codes is 14.
+- The runtime total number of operation-level and CLI-level error codes is 14.
 - Operation-level errors are listed separately from CLI-level errors.
 - The 5 CLI-level exit codes are exactly `21`, `22`, `23`, `24`, and `25`.
-- The JSON error object contains `error_code`, `message`, `details`, and `retryable`.
+- Static repository check exits `31`, `32`, and `33` are documented separately
+  from CLI-level `error_code` values.
+- Process files such as `process/*` are workflow/internal artifacts ignored by source control policy; they are not shipped delivery docs for `atomic-ops`.
+- The JSON error object contains `error_code`, `message`, `details`, `retryable`, and may include `suggestion`.
 - JSON-mode failures write the error object to stderr and keep stdout for successful results.
 - Text-mode failures include the `error_code` string in stderr.
 - `INVALID_PARAM` is not treated as a CLI top-level error code.

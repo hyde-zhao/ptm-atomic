@@ -1,0 +1,69 @@
+schema_version: "1.1"
+op_id: fw_login_web_management
+device_type: fw
+description: Define the NGFW web management login contract using non-sensitive state references.
+parameters:
+  management_endpoint_ref:
+    type: string
+    required: true
+    description: Non-sensitive reference to the management endpoint context.
+  login_context_ref:
+    type: string
+    required: true
+    description: Non-sensitive reference to the web login context.
+credential_ref:
+  kind: placeholder
+  ref: "<credential-ref>"
+returns:
+  status: success
+  data:
+    login_status: authenticated
+    session_ref: "<session-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: LOGIN_FAILED
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+timeout_ms: 120000
+error_types:
+  - LOGIN_FAILED
+  - CREDENTIAL_REF_INVALID
+  - MANAGEMENT_ENDPOINT_UNAVAILABLE
+  - STATE_REFERENCE_INVALID
+  - TIMEOUT
+risk:
+  level: high
+  categories:
+    - authentication
+    - session_state
+    - management_plane
+gate:
+  required: true
+  reason: Web management login handles authentication context and must only expose non-sensitive references.
+  approver_role: change_reviewer
+  evidence_required:
+    - credential_reference_review
+    - session_state_boundary_review
+verification:
+  kind: login_state
+  rules:
+    - name: session_reference_created
+      input_ref: "<session-ref>"
+      expected_result: non-sensitive session reference is returned
+    - name: state_reference_valid
+      input_ref: "<state-ref>"
+      expected_result: login state is valid or explicitly failed
+  summary_ref: "<login-state-summary-ref>"
+preconditions:
+  - Minimal initialization has made the web management plane ready for a login contract.
+  - Credential material is supplied only through credential_ref and is not embedded in this atom.
+postconditions:
+  - The returned session_ref and state_ref are references held outside the CLI cache.
+  - The current CLI validates field shape only and does not judge live session validity.
+tags:
+  - firewall
+  - ngfw
+  - login
+  - contract_only
+since_version: "1.1.0"
