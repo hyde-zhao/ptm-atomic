@@ -2,13 +2,30 @@
 # They do not install, copy, or distribute operation YAML files.
 package_id: ngfw_capacity_config
 display_name: NGFW Capacity Configuration
-description: Capacity configuration contract operations for ten NGFW domains.
-version: "1.1.0"
+description: Capacity configuration contract operations for NGFW domains.
+version: "1.2.0"
 operations:
   - fw_config_interface
   - fw_config_object
   - fw_config_acl_policy
   - fw_config_policy_route
+  - fw_config_ospfv2_global
+  - fw_config_ospfv2_redistribution
+  - fw_config_ospfv2_network
+  - fw_config_ospfv2_network_update
+  - fw_delete_ospfv2_network
+  - fw_config_ospfv2_interface
+  - fw_config_ospfv2_interface_update
+  - fw_delete_ospfv2_interface
+  - fw_config_ospfv3_global
+  - fw_config_ospfv3_redistribution
+  - fw_config_ospfv3_network
+  - fw_config_ospfv3_network_update
+  - fw_delete_ospfv3_network
+  - fw_config_ospfv3_interface
+  - fw_config_ospfv3_interface_update
+  - fw_delete_ospfv3_interface
+  - fw_config_bfd_global
   - fw_config_static_route
   - fw_config_nat
   - fw_config_bandwidth

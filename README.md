@@ -44,10 +44,10 @@
 |---|---|
 | Schema v1.1 | 顶层 `schema_version: "1.1"`，新增或收口 `risk`、`credential_ref`、`session_ref`、`state_ref`、`gate`、`verification`、`batch` 等字段。 |
 | NGFW 安装初始化 | `ngfw_installation` package 包含 5 个 op：镜像安装、最小初始化、Web 管理登录、登录状态检查和健康检查。 |
-| 十域容量配置 | `ngfw_capacity_config` package 包含接口、对象、ACL 策略、策略路由、静态路由、NAT、带宽、黑白名单、SSL VPN、动态路由 10 个配置 op。 |
-| 十域验证 | `ngfw_verification` package 包含对应 10 个容量域验证 op，不包含安装健康检查 `fw_verify_ngfw_health`。 |
+| 容量配置 | `ngfw_capacity_config` package 包含接口、对象、ACL 策略、策略路由、OSPFv2、OSPFv3、BFD、静态路由、NAT、带宽、黑白名单、SSL VPN、动态路由等配置 op。 |
+| 容量验证 | `ngfw_verification` package 包含对应容量域验证 op 和 OSPFv2、OSPFv3、BFD 查询，不包含安装健康检查 `fw_verify_ngfw_health`。 |
 | 多设备批量配置 | `ngfw_batch_config` package 包含 10 个批量配置 op；批量合同见 `docs/batch-configuration-contract.md`。 |
-| Adapter profile | `adapters/ngfw/default.yaml` 为 `fw_config_object` 和 `fw_config_policy_route` 提供公开 API shape 映射；合同见 `docs/API-ADAPTER-SPEC.md`。 |
+| Adapter profile | `adapters/ngfw/default.yaml` 为地址对象、策略路由、OSPFv2、OSPFv3 和 BFD runner 提供公开 API shape 映射；合同见 `docs/API-ADAPTER-SPEC.md`。 |
 | CLI | 当前 CLI 提供 `sync`、`list`、`show`、`adapter`、`run`、`packages`、`validate`；除 `run` 白名单外，其余命令只读。 |
 | 安全门禁 | `scripts/security_gate_check.py` 执行敏感赋值模式检测，并检查高风险 atom 的 gate 合同完整性。 |
 | 静态检查 | `scripts/validate_schema.py`、`scripts/validate_adapter_profiles.py`、`scripts/layout_check.py`、`scripts/security_gate_check.py` 均可通过 `uv run --python 3.11 python ...` 执行。 |
@@ -124,6 +124,10 @@ atomic-ops adapter fw_config_policy_route
 atomic-ops run fw_login_web_management --base-url https://<device-management-ip>
 atomic-ops run fw_config_object --base-url https://<device-management-ip> --object-name srcObj --ipaddr 192.168.0.0 --mask 16
 atomic-ops run fw_config_policy_route --base-url https://<device-management-ip> --source-network srcObj --dst-network dstObj --next-hop-ip 18.18.2.2 --in-interface GE0_12
+atomic-ops run fw_config_ospfv2_global --base-url https://<device-management-ip> --enable --router-id <DUT_IP> --originate --always
+atomic-ops run fw_config_ospfv3_global --base-url https://<device-management-ip> --enable --router-id <DUT_IP>
+atomic-ops run fw_verify_ospfv2_neighbor --base-url https://<device-management-ip> --page 1 --size 40
+atomic-ops run fw_verify_bfd_session --base-url https://<device-management-ip> --page 1 --size 40
 atomic-ops validate docs/test-case-template.yaml
 atomic-ops validate --package ngfw_installation
 ```
@@ -136,12 +140,12 @@ atomic-ops validate --package ngfw_installation
 | `atomic-ops list` | 列出本地缓存中的 atom 摘要 | 读取本地缓存。 |
 | `atomic-ops show <op_id>` | 输出单个 atom 的 YAML 或 JSON | 读取本地缓存。 |
 | `atomic-ops adapter <op_id>` | 输出单个 atom 引用的 adapter profile operation | 读取本地缓存中的 atom 与 `adapters/`。 |
-| `atomic-ops run <op_id>` | 执行白名单 runner op，默认 dry-run | 只支持 `fw_login_web_management`、`fw_config_object` 和 `fw_config_policy_route`；真实请求必须显式 `--execute`。 |
+| `atomic-ops run <op_id>` | 执行白名单 runner op，默认 dry-run | 支持 Web 登录、地址对象、策略路由和 OSPFv2 白名单 op；真实请求必须显式 `--execute`。 |
 | `atomic-ops packages` | 列出 package 清单 | 读取本地缓存。 |
 | `atomic-ops validate <test_case.yaml>` | 校验测试用例中的 `op_id` 引用 | 读取本地缓存和指定 YAML。 |
 | `atomic-ops validate --package <package_id>` | 校验 package 清单中的 `op_id` 引用 | 读取本地缓存。 |
 
-除 `atomic-ops run` 的白名单 runner 外，其他 CLI 命令仍是只读缓存查询或校验。`run` 默认 dry-run，不发设备请求；登录真实执行需要 `--execute --password-env <ENV>`，地址对象和策略路由真实执行需要已有 session 文件和 `--execute`。CLI 不接受明文密码参数，不打印完整会话值，不把运行时材料写入仓库。
+除 `atomic-ops run` 的白名单 runner 外，其他 CLI 命令仍是只读缓存查询或校验。`run` 默认 dry-run，不发设备请求；登录真实执行需要 `--execute --password-env <ENV>`，地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 真实执行需要已有 session 文件和 `--execute`。CLI 不接受明文密码参数，不打印完整会话值，不把运行时材料写入仓库。
 
 `atomic-ops run` 成功输出使用固定 envelope。runner 细节统一放入 `data`，调用方不应从顶层读取 `request`、`session`、`response` 等旧字段：
 
@@ -219,6 +223,115 @@ atomic-ops run fw_config_policy_route \
   --execute
 ```
 
+OSPFv2 按 HTTP 方法拆分为独立原子操作。先 dry-run 查看全局配置请求体：
+
+```bash
+atomic-ops run fw_config_ospfv2_global \
+  --base-url https://<device-management-ip> \
+  --enable \
+  --router-id <DUT_IP> \
+  --originate \
+  --always
+```
+
+配置 OSPFv2 路由引入：
+
+```bash
+atomic-ops run fw_config_ospfv2_redistribution \
+  --base-url https://<device-management-ip> \
+  --redistribute connected=333 \
+  --redistribute static=666 \
+  --redistribute rip=333
+```
+
+新增、更新和删除 OSPFv2 network 使用不同 op；PUT 和 DELETE 必须显式传 `--id`：
+
+```bash
+atomic-ops run fw_config_ospfv2_network \
+  --base-url https://<device-management-ip> \
+  --network 191.0.0.0/24 \
+  --area 0
+
+atomic-ops run fw_config_ospfv2_network_update \
+  --base-url https://<device-management-ip> \
+  --id <ospfv2-network-id> \
+  --network 191.0.0.0/24 \
+  --area 0
+
+atomic-ops run fw_delete_ospfv2_network \
+  --base-url https://<device-management-ip> \
+  --id <ospfv2-network-id>
+```
+
+接口配置同样按 POST、PUT、DELETE 拆分：
+
+```bash
+atomic-ops run fw_config_ospfv2_interface \
+  --base-url https://<device-management-ip> \
+  --interface bvi109 \
+  --cost 1 \
+  --priority 1 \
+  --hello-interval 10 \
+  --retransmit-interval 5 \
+  --dead-interval 40 \
+  --transmit-delay 1 \
+  --type-network 0 \
+  --int-auth-mode 0 \
+  --bfd-enable \
+  --detect-multiplier 3 \
+  --min-rx-interval 300 \
+  --min-tx-interval 300
+```
+
+OSPFv2 interface 删除使用接口名作为 `--id`，runner 会发送 `DELETE /api/v1/ospfinterface?id=<interface>`：
+
+```bash
+atomic-ops run fw_delete_ospfv2_interface \
+  --base-url https://<device-management-ip> \
+  --id GE0_12 \
+  --execute
+```
+
+查询邻居和日志时 `--page` 默认 `1`，`--size` 默认 `40`：
+
+```bash
+atomic-ops run fw_verify_ospfv2_neighbor --base-url https://<device-management-ip>
+atomic-ops run fw_capture_ospfv2_log --base-url https://<device-management-ip> --page 1 --size 40
+```
+
+OSPFv3 使用相同的按方法拆分模式，接口路径为 `ospf6*`：
+
+```bash
+atomic-ops run fw_config_ospfv3_global \
+  --base-url https://<device-management-ip> \
+  --enable \
+  --router-id <DUT_IP>
+
+atomic-ops run fw_config_ospfv3_redistribution \
+  --base-url https://<device-management-ip> \
+  --redistribute connected=333 \
+  --redistribute static=333
+
+atomic-ops run fw_config_ospfv3_network \
+  --base-url https://<device-management-ip> \
+  --interface bvi109 \
+  --area 0
+
+atomic-ops run fw_verify_ospfv3_neighbor --base-url https://<device-management-ip> --page 1 --size 40
+atomic-ops run fw_capture_ospfv3_log --base-url https://<device-management-ip> --page 1 --size 40
+```
+
+BFD 支持全局启停、会话查询和日志查询：
+
+```bash
+atomic-ops run fw_config_bfd_global \
+  --base-url https://<device-management-ip> \
+  --enable
+
+atomic-ops run fw_verify_bfd_session --base-url https://<device-management-ip> --page 1 --size 40
+atomic-ops run fw_capture_bfd_log --base-url https://<device-management-ip> --page 1 --size 40
+```
+
 ## 6. 当前 Package 和 Op ID
 
 | Package | 当前 op_id 数 | 代表性 op_id |
@@ -226,8 +339,8 @@ atomic-ops run fw_config_policy_route \
 | `networking` | 1 | `fw_verify_acl_rule` |
 | `security` | 1 | `fw_verify_acl_rule` |
 | `ngfw_installation` | 5 | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
-| `ngfw_capacity_config` | 10 | `fw_config_interface`、`fw_config_object`、`fw_config_acl_policy`、`fw_config_nat`、`fw_config_dynamic_routing` |
-| `ngfw_verification` | 10 | `fw_verify_interface`、`fw_verify_object`、`fw_verify_acl_policy`、`fw_verify_nat`、`fw_verify_dynamic_routing` |
+| `ngfw_capacity_config` | 27 | `fw_config_interface`、`fw_config_policy_route`、`fw_config_ospfv2_global`、`fw_config_ospfv3_global`、`fw_config_bfd_global` |
+| `ngfw_verification` | 25 | `fw_verify_interface`、`fw_verify_policy_route`、`fw_verify_ospfv2_neighbor`、`fw_verify_ospfv3_neighbor`、`fw_verify_bfd_session` |
 | `ngfw_batch_config` | 10 | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_acl_policy`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
 
 `package_id` 必须与 `packages/<package_id>.yaml` 文件名一致。package 是 `list`、`validate --package` 等命令使用的过滤视图，不复制 atom 文件，不安装 atom，不执行 atom，不分发 atom，也不表示可执行计划。
@@ -235,8 +348,8 @@ atomic-ops run fw_config_policy_route \
 当前 package 完整性事实：
 
 - 共有 6 个 package manifest。
-- 共有 37 条 package `operations` 条目。
-- 共有 36 个唯一 `op_id`；`fw_verify_acl_rule` 同时出现在 `networking` 和 `security` 旧基线视图中。
+- 共有 69 条 package `operations` 条目。
+- 共有 68 个唯一 `op_id`；`fw_verify_acl_rule` 同时出现在 `networking` 和 `security` 旧基线视图中。
 - 所有 package `op_id` 均能解析到 `atoms/fw/*.yaml`。
 
 ## 7. Schema v1.1 摘要
@@ -268,8 +381,8 @@ v1.1 atom 使用 `schema_version: "1.1"`。重要字段包括：
 
 | 边界 | 说明 |
 |---|---|
-| 设备连接 | 除 `atomic-ops run fw_login_web_management`、`atomic-ops run fw_config_object --execute` 和 `atomic-ops run fw_config_policy_route --execute` 外，CLI 不连接真实防火墙、流量发生器、交换机或管理面。 |
-| 配置变更 | 除地址对象和策略路由 runner 白名单外，CLI 不执行 atom，不下发配置，不触发安装、初始化或策略修改。 |
+| 设备连接 | 除 `atomic-ops run` 的 Web 登录、地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 白名单 op 外，CLI 不连接真实防火墙、流量发生器、交换机或管理面。 |
+| 配置变更 | 除地址对象、策略路由、OSPFv2、OSPFv3 和 BFD runner 白名单外，CLI 不执行 atom，不下发配置，不触发安装、初始化或策略修改。 |
 | 凭据处理 | CLI 不接受明文密码参数；登录 runner 只从环境变量读取口令，会话材料默认写入用户 state 目录，文档和 YAML 不写真实凭据值。 |
 | 回滚 | CLI 不执行自动回滚；回滚只能作为 atom 合同或人工流程描述。 |
 | 敏感输入 | 仓库文档不得包含 `.input` 数据、真实地址、token、cookie、私钥、FTP 凭据或生产环境样本。 |

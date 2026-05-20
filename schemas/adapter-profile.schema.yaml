@@ -37,7 +37,7 @@ properties:
     type: object
     minProperties: 1
     propertyNames:
-      pattern: "^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$"
+      pattern: "^(fw|tg|mock|sw)_[a-z]+_[a-z0-9_]+$"
     additionalProperties:
       $ref: "#/$defs/operationAdapter"
 $defs:

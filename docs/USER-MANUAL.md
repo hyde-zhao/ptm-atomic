@@ -109,7 +109,7 @@ atomic-ops adapter fw_config_policy_route --format json
 
 ## 5. Runner 执行
 
-`atomic-ops run` 只支持三个白名单 op：`fw_login_web_management`、`fw_config_object` 和 `fw_config_policy_route`。命令默认 dry-run，不连接设备；必须显式传入 `--execute` 才会发真实请求。
+`atomic-ops run` 支持白名单 op：`fw_login_web_management`、`fw_config_object`、`fw_config_policy_route`、OSPFv2、OSPFv3 和 BFD 相关 op。命令默认 dry-run，不连接设备；必须显式传入 `--execute` 才会发真实请求。
 
 成功输出使用固定 envelope。`op_id`、`status`、`data`、`error_type` 和 `diag_snapshot_ref` 是稳定顶层字段；请求计划、真实执行响应、session 摘要等 runner 专属内容放在 `data` 下：
 
@@ -201,6 +201,124 @@ atomic-ops run fw_config_policy_route \
 
 策略路由 runner 调用 `POST /api/v1/policyroute`，默认使用登录会话和 `Authorization` 头。`--source-network` 和 `--dst-network` 是地址对象名；如果传入的是地址组名，必须同时加 `--source-network-is-group` 或 `--dst-network-is-group`。若目标版本要求 capacity 风格头名，可传 `--auth-header AuthorizationToken`。
 
+OSPFv2、OSPFv3 和 BFD runner 按 HTTP 方法拆分 op。GET 查询发送空请求体；POST 创建；PUT 更新；network DELETE 使用 `{"id": "<id>"}`；OSPFv2/OSPFv3 interface DELETE 使用 `?id=<interface>`。所有真实请求都需要已有登录 session 和 `--execute`。
+
+启停 OSPFv2 全局配置 dry-run：
+
+```bash
+atomic-ops run fw_config_ospfv2_global \
+  --base-url https://<device-management-ip> \
+  --enable \
+  --router-id <DUT_IP> \
+  --originate \
+  --always
+```
+
+配置路由引入：
+
+```bash
+atomic-ops run fw_config_ospfv2_redistribution \
+  --base-url https://<device-management-ip> \
+  --redistribute connected=333 \
+  --redistribute static=666 \
+  --redistribute rip=333
+```
+
+新增、更新、删除 OSPFv2 network：
+
+```bash
+atomic-ops run fw_config_ospfv2_network \
+  --base-url https://<device-management-ip> \
+  --network 191.0.0.0/24 \
+  --area 0
+
+atomic-ops run fw_config_ospfv2_network_update \
+  --base-url https://<device-management-ip> \
+  --id <ospfv2-network-id> \
+  --network 191.0.0.0/24 \
+  --area 0
+
+atomic-ops run fw_delete_ospfv2_network \
+  --base-url https://<device-management-ip> \
+  --id <ospfv2-network-id>
+```
+
+新增 OSPFv2 interface：
+
+```bash
+atomic-ops run fw_config_ospfv2_interface \
+  --base-url https://<device-management-ip> \
+  --interface bvi109 \
+  --cost 1 \
+  --priority 1 \
+  --hello-interval 10 \
+  --retransmit-interval 5 \
+  --dead-interval 40 \
+  --transmit-delay 1 \
+  --type-network 0 \
+  --int-auth-mode 0 \
+  --bfd-enable \
+  --detect-multiplier 3 \
+  --min-rx-interval 300 \
+  --min-tx-interval 300
+```
+
+更新和删除 OSPFv2 interface 使用 `fw_config_ospfv2_interface_update` 和 `fw_delete_ospfv2_interface`，并且必须传 `--id`。邻居和日志查询支持分页：
+
+```bash
+atomic-ops run fw_verify_ospfv2_neighbor --base-url https://<device-management-ip> --page 1 --size 40
+atomic-ops run fw_capture_ospfv2_log --base-url https://<device-management-ip> --page 1 --size 40
+```
+
+OSPFv3 使用 `ospf6*` API 路径：
+
+```bash
+atomic-ops run fw_config_ospfv3_global \
+  --base-url https://<device-management-ip> \
+  --enable \
+  --router-id <DUT_IP>
+
+atomic-ops run fw_config_ospfv3_redistribution \
+  --base-url https://<device-management-ip> \
+  --redistribute connected=333 \
+  --redistribute static=333
+
+atomic-ops run fw_config_ospfv3_network \
+  --base-url https://<device-management-ip> \
+  --interface bvi109 \
+  --area 0
+
+atomic-ops run fw_config_ospfv3_interface \
+  --base-url https://<device-management-ip> \
+  --interface bvi109 \
+  --cost 1 \
+  --priority 1 \
+  --hello-interval 10 \
+  --retransmit-interval 5 \
+  --dead-interval 40 \
+  --transmit-delay 1 \
+  --type-network 0
+```
+
+OSPFv3 network/interface 的 update 和 delete op 同样必须传 `--id`。OSPFv3 邻居和日志查询支持分页：
+
+```bash
+atomic-ops run fw_verify_ospfv3_neighbor --base-url https://<device-management-ip> --page 1 --size 40
+atomic-ops run fw_capture_ospfv3_log --base-url https://<device-management-ip> --page 1 --size 40
+```
+
+BFD 全局启停、会话查询和日志查询：
+
+```bash
+atomic-ops run fw_config_bfd_global \
+  --base-url https://<device-management-ip> \
+  --enable
+
+atomic-ops run fw_verify_bfd_global --base-url https://<device-management-ip>
+atomic-ops run fw_verify_bfd_session --base-url https://<device-management-ip> --page 1 --size 40
+atomic-ops run fw_capture_bfd_log --base-url https://<device-management-ip> --page 1 --size 40
+```
+
 ## 6. Package 过滤
 
 package 是一组 `op_id` 的过滤视图。它不复制 atom 文件，不代表可执行计划，也不会触发设备动作。
@@ -219,19 +337,19 @@ atomic-ops packages --format json
 | `networking` | 网络连通性与防火墙策略验证示例 | 1 |
 | `security` | 安全策略与访问控制验证示例 | 1 |
 | `ngfw_installation` | NGFW 安装、初始化、登录和健康检查合同 | 5 |
-| `ngfw_capacity_config` | 十个容量域的单设备配置合同 | 10 |
-| `ngfw_verification` | 十个容量域的只读验证合同 | 10 |
+| `ngfw_capacity_config` | 容量域、OSPFv2、OSPFv3 和 BFD 的单设备配置合同 | 27 |
+| `ngfw_verification` | 容量域、OSPFv2、OSPFv3 和 BFD 的只读验证合同 | 25 |
 | `ngfw_batch_config` | 十个容量域的多设备批量配置合同 | 10 |
 
-当前完整性事实：6 个 package manifest 合计 37 条 `operations`，对应 36 个唯一 `op_id`；所有 package `op_id` 都能解析到 `atoms/fw/*.yaml`。`fw_verify_acl_rule` 同时属于 `networking` 和 `security` 两个旧基线过滤视图。
+当前完整性事实：6 个 package manifest 合计 69 条 `operations`，对应 68 个唯一 `op_id`；所有 package `op_id` 都能解析到 `atoms/fw/*.yaml`。`fw_verify_acl_rule` 同时属于 `networking` 和 `security` 两个旧基线过滤视图。
 
 代表性 op：
 
 | Package | 示例 op_id |
 |---|---|
 | `ngfw_installation` | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
-| `ngfw_capacity_config` | `fw_config_interface`、`fw_config_object`、`fw_config_acl_policy`、`fw_config_nat`、`fw_config_dynamic_routing` |
-| `ngfw_verification` | `fw_verify_interface`、`fw_verify_object`、`fw_verify_acl_policy`、`fw_verify_nat`、`fw_verify_dynamic_routing` |
+| `ngfw_capacity_config` | `fw_config_interface`、`fw_config_policy_route`、`fw_config_ospfv2_global`、`fw_config_ospfv3_global`、`fw_config_bfd_global` |
+| `ngfw_verification` | `fw_verify_interface`、`fw_verify_policy_route`、`fw_verify_ospfv2_neighbor`、`fw_verify_ospfv3_neighbor`、`fw_verify_bfd_session` |
 | `ngfw_batch_config` | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_acl_policy`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
 
 校验 package 引用完整性：

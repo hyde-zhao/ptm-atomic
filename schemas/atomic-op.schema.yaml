@@ -212,7 +212,7 @@ allOf:
 $defs:
   opId:
     type: string
-    pattern: "^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$"
+    pattern: "^(fw|tg|mock|sw)_[a-z]+_[a-z0-9_]+$"
   parameterDefinition:
     type: object
     additionalProperties: false

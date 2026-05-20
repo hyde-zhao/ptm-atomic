@@ -1,0 +1,44 @@
+schema_version: "1.1"
+op_id: fw_capture_ospfv2_log
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_capture_ospfv2_log
+description: Capture NGFW OSPFv2 log entries with pagination.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the OSPFv2 log query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the OSPFv2 log query.
+returns:
+  status: success
+  data:
+    observed_log_ref: "<ospfv2-log-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - OSPFv2 log entries are available to the caller.
+tags:
+  - firewall
+  - ospfv2
+  - routing
+  - diagnostics
+since_version: "1.2.0"

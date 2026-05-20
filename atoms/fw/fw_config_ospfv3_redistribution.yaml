@@ -1,0 +1,40 @@
+schema_version: "1.1"
+op_id: fw_config_ospfv3_redistribution
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_ospfv3_redistribution
+description: Configure NGFW OSPFv3 route redistribution rules.
+parameters:
+  params:
+    type: json
+    required: true
+    description: OSPFv3 redistribution list with protocol and metric fields.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: ospfv3_redistribution
+      applied_ref: "<ospfv3-redistribution-config-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types: [NONE, VALIDATION_FAILED, GATE_MISSING, CONFIG_REJECTED, DEVICE_UNREACHABLE, UNKNOWN_ERROR]
+risk:
+  level: high
+  categories: [configuration, routing]
+gate:
+  required: true
+  reason: OSPFv3 redistribution can inject routes into the IPv6 routing domain and require review.
+  approver_role: change_reviewer
+  evidence_required: [approved_change_record, parameter_digest]
+preconditions:
+  - Gate evidence exists before this high-risk routing configuration is used.
+postconditions:
+  - OSPFv3 redistribution result is available to the caller.
+tags: [firewall, ospfv3, routing, configuration]
+since_version: "1.2.0"

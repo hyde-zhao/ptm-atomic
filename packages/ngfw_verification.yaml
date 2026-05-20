@@ -2,13 +2,28 @@
 # They do not install, copy, or distribute operation YAML files.
 package_id: ngfw_verification
 display_name: NGFW Capacity Verification
-description: Capacity verification contract operations for ten NGFW domains.
-version: "1.1.0"
+description: Capacity verification contract operations for NGFW domains.
+version: "1.2.0"
 operations:
   - fw_verify_interface
   - fw_verify_object
   - fw_verify_acl_policy
   - fw_verify_policy_route
+  - fw_verify_ospfv2_global
+  - fw_verify_ospfv2_redistribution
+  - fw_verify_ospfv2_network
+  - fw_verify_ospfv2_interface
+  - fw_verify_ospfv2_neighbor
+  - fw_capture_ospfv2_log
+  - fw_verify_ospfv3_global
+  - fw_verify_ospfv3_redistribution
+  - fw_verify_ospfv3_network
+  - fw_verify_ospfv3_interface
+  - fw_verify_ospfv3_neighbor
+  - fw_capture_ospfv3_log
+  - fw_verify_bfd_global
+  - fw_verify_bfd_session
+  - fw_capture_bfd_log
   - fw_verify_static_route
   - fw_verify_nat
   - fw_verify_bandwidth

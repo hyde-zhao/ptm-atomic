@@ -1,0 +1,86 @@
+schema_version: "1.1"
+op_id: fw_config_ospfv2_redistribution
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_ospfv2_redistribution
+description: Configure NGFW OSPFv2 route redistribution rules.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ospfv2_redistribution for this operation.
+  params:
+    type: json
+    required: true
+    description: OSPFv2 redistribution list with protocol and metric fields.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: ospfv2_redistribution
+  params:
+    id: "0"
+    redistribute:
+      - protocol: connected
+        metric: "333"
+      - protocol: static
+        metric: "666"
+      - protocol: rip
+        metric: "333"
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: ospfv2_redistribution
+      applied_ref: "<ospfv2-redistribution-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - routing
+gate:
+  required: true
+  reason: OSPFv2 redistribution can inject routes into the routing domain and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk routing configuration is used.
+postconditions:
+  - OSPFv2 redistribution result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - ospfv2
+  - routing
+  - configuration
+since_version: "1.2.0"

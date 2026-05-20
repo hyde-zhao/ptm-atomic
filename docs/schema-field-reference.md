@@ -358,7 +358,7 @@ For version and deprecation metadata, the schema uses `deprecated`,
 
 ## Validation Notes
 
-- `op_id` must match `^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$`.
+- `op_id` must match `^(fw|tg|mock|sw)_[a-z]+_[a-z0-9_]+$`.
 - `op_id` prefix must match `device_type` and file path
   `atoms/<device_type>/<op_id>.yaml`.
 - v1.1-only top-level fields require `schema_version: "1.1"`.

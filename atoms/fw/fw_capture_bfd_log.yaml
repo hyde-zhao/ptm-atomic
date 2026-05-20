@@ -1,0 +1,29 @@
+schema_version: "1.1"
+op_id: fw_capture_bfd_log
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_capture_bfd_log
+description: Capture NGFW BFD log entries with pagination.
+parameters:
+  page:
+    type: int
+    required: false
+    description: Positive page number for the BFD log query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the BFD log query.
+returns:
+  status: success
+  data:
+    observed_log_ref: "<bfd-log-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types: [NONE, VALIDATION_FAILED, DEVICE_UNREACHABLE, RESPONSE_INVALID, UNKNOWN_ERROR]
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - BFD log entries are available to the caller.
+tags: [firewall, bfd, routing, diagnostics]
+since_version: "1.2.0"

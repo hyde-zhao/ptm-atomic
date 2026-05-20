@@ -6,6 +6,8 @@
 |---|---|---|---|
 | v0.1 | 2026-05-19 | meta-dev | Add CR-004 public adapter profile contract. |
 | v0.2 | 2026-05-19 | Codex | Align policy-route adapter with executable NGFW runner contract. |
+| v0.3 | 2026-05-20 | Codex | Add OSPFv2 method-level adapter operations for config, query, and delete. |
+| v0.4 | 2026-05-20 | Codex | Add OSPFv3 and BFD method-level adapter operations. |
 
 ## Purpose
 
@@ -25,8 +27,14 @@ adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_policy_ro
 | `adapters/ngfw/default.yaml` | Defines the NGFW default profile. |
 | `atoms/fw/fw_config_object.yaml` | References the address-object profile operation through `adapter_contract_ref`. |
 | `atoms/fw/fw_config_policy_route.yaml` | References the policy-route profile operation through `adapter_contract_ref`. |
+| `atoms/fw/fw_config_ospfv2_*.yaml` | References OSPFv2 method-level profile operations through `adapter_contract_ref`. |
+| `atoms/fw/fw_config_ospfv3_*.yaml` | References OSPFv3 method-level profile operations through `adapter_contract_ref`. |
+| `atoms/fw/fw_config_bfd_global.yaml` | References the BFD global profile operation through `adapter_contract_ref`. |
 | `atomic-ops adapter fw_config_object` | Reads the synced cache and shows the address-object adapter operation. |
 | `atomic-ops adapter fw_config_policy_route` | Reads the synced cache and shows the policy-route adapter operation. |
+| `atomic-ops adapter fw_config_ospfv2_global` | Reads the synced cache and shows an OSPFv2 adapter operation. |
+| `atomic-ops adapter fw_config_ospfv3_global` | Reads the synced cache and shows an OSPFv3 adapter operation. |
+| `atomic-ops adapter fw_config_bfd_global` | Reads the synced cache and shows a BFD adapter operation. |
 | `scripts/validate_adapter_profiles.py` | Checks profile schema validity and atom reference integrity. |
 | `scripts/security_gate_check.py` | Includes `adapters/` in the default read-only security scan and performs structured adapter sensitive-content checks. |
 
@@ -82,6 +90,28 @@ Most `atomic-ops` commands remain read-only. `atomic-ops run` is the only execut
 
 The runner obtains live session material from the local session file created by `atomic-ops run fw_login_web_management --execute`.
 
+OSPFv2 operations are represented one HTTP method at a time because adapter schema v1.0 has a single `request.method` per operation. The default NGFW profile maps:
+
+| Operation family | Methods | Paths |
+|---|---|---|
+| OSPFv2 global config | `PUT`, `GET` | `/api/v1/ospfconfig` |
+| OSPFv2 redistribution | `PUT`, `GET` | `/api/v1/ospfredist` |
+| OSPFv2 network entries | `POST`, `PUT`, `DELETE`, `GET` | `/api/v1/ospfnetwork` |
+| OSPFv2 interface entries | `POST`, `PUT`, `DELETE`, `GET` | `/api/v1/ospfinterface` |
+| OSPFv2 neighbors | `GET` | `/api/v1/ospfneighbor` |
+| OSPFv2 logs | `GET` | `/api/v1/ospflog` |
+| OSPFv3 global config | `PUT`, `GET` | `/api/v1/ospf6config` |
+| OSPFv3 redistribution | `PUT`, `GET` | `/api/v1/ospf6redist` |
+| OSPFv3 network entries | `POST`, `PUT`, `DELETE`, `GET` | `/api/v1/ospf6network` |
+| OSPFv3 interface entries | `POST`, `PUT`, `DELETE`, `GET` | `/api/v1/ospf6interface` |
+| OSPFv3 neighbors | `GET` | `/api/v1/ospf6neighbor` |
+| OSPFv3 logs | `GET` | `/api/v1/ospf6log` |
+| BFD global config | `PUT`, `GET` | `/api/v1/bfdconfig` |
+| BFD sessions | `GET` | `/api/v1/bfdsession` |
+| BFD logs | `GET` | `/api/v1/bfdlog` |
+
+GET entries keep `payload_template: {}` to satisfy the schema while the runner sends no JSON body. Network DELETE entries use the id-only JSON shape `{"id": "<id>"}`. OSPFv2/OSPFv3 interface DELETE entries use `?id=<interface>` because the device ignores id-only DELETE bodies for interface deletion.
+
 ## Validation
 
 Run the adapter profile check together with the normal repository checks:
@@ -89,6 +119,10 @@ Run the adapter profile check together with the normal repository checks:
 ```bash
 uv run atomic-ops adapter fw_config_object
 uv run atomic-ops adapter fw_config_policy_route
+uv run atomic-ops adapter fw_config_ospfv2_global
+uv run atomic-ops adapter fw_delete_ospfv2_network
+uv run atomic-ops adapter fw_config_ospfv3_global
+uv run atomic-ops adapter fw_config_bfd_global
 uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/security_gate_check.py
 ```

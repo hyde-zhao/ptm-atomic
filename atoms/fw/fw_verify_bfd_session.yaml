@@ -1,0 +1,29 @@
+schema_version: "1.1"
+op_id: fw_verify_bfd_session
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_bfd_session
+description: Query NGFW BFD sessions with pagination.
+parameters:
+  page:
+    type: int
+    required: false
+    description: Positive page number for the BFD session query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the BFD session query.
+returns:
+  status: success
+  data:
+    observed_state_ref: "<bfd-session-state-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types: [NONE, VALIDATION_FAILED, DEVICE_UNREACHABLE, RESPONSE_INVALID, UNKNOWN_ERROR]
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - BFD session state is available to the caller.
+tags: [firewall, bfd, routing, verification]
+since_version: "1.2.0"

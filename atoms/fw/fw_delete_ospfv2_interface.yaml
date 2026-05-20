@@ -1,0 +1,79 @@
+schema_version: "1.1"
+op_id: fw_delete_ospfv2_interface
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_ospfv2_interface
+description: Delete an NGFW OSPFv2 interface entry by id.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ospfv2_interface for this operation.
+  params:
+    type: json
+    required: true
+    description: OSPFv2 interface delete object with id field.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: ospfv2_interface
+  params:
+    id: "<ospfv2-interface-id>"
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: ospfv2_interface
+      applied_ref: "<ospfv2-interface-delete-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - routing
+gate:
+  required: true
+  reason: OSPFv2 interface deletion removes adjacency participation and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk routing configuration is used.
+postconditions:
+  - OSPFv2 interface deletion result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - ospfv2
+  - routing
+  - configuration
+since_version: "1.2.0"

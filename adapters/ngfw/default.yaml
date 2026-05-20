@@ -81,3 +81,731 @@ operations:
         - source_network and dst_network are address object names unless the matching is_group flag is true.
         - Live endpoint, session material, and credentials must come from runner input.
         - atomic-ops run can execute this request only when --execute is explicit.
+  fw_config_ospfv2_global:
+    atom_ref: atoms/fw/fw_config_ospfv2_global.yaml
+    intent: Build an OSPFv2 global configuration request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/ospfconfig
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          enable: "{{ params.enable }}"
+          routerId: "{{ params.router_id }}"
+          originate: "{{ params.originate }}"
+          always: "{{ params.always }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ospfv2-global-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Router ID must be an IPv4 address.
+        - Live endpoint and session material must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_verify_ospfv2_global:
+    atom_ref: atoms/fw/fw_verify_ospfv2_global.yaml
+    intent: Build an OSPFv2 global configuration query request.
+    request:
+      method: GET
+      path: /api/v1/ospfconfig
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ospfv2-global-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+        - Live endpoint and session material must come from runner input.
+  fw_config_ospfv2_redistribution:
+    atom_ref: atoms/fw/fw_config_ospfv2_redistribution.yaml
+    intent: Build an OSPFv2 route redistribution configuration request.
+    request:
+      method: PUT
+      path: /api/v1/ospfredist
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          redistribute: "{{ params.redistribute }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ospfv2-redistribution-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Supported redistribution protocols are connected, static, and rip.
+        - Live endpoint and session material must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_verify_ospfv2_redistribution:
+    atom_ref: atoms/fw/fw_verify_ospfv2_redistribution.yaml
+    intent: Build an OSPFv2 route redistribution query request.
+    request:
+      method: GET
+      path: /api/v1/ospfredist
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ospfv2-redistribution-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+        - Live endpoint and session material must come from runner input.
+  fw_config_ospfv2_network:
+    atom_ref: atoms/fw/fw_config_ospfv2_network.yaml
+    intent: Build an OSPFv2 network creation request.
+    request:
+      method: POST
+      path: /api/v1/ospfnetwork
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          network: "{{ params.network }}"
+          area: "{{ params.area }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ospfv2-network-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Network must be an IPv4 CIDR.
+        - Live endpoint and session material must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_config_ospfv2_network_update:
+    atom_ref: atoms/fw/fw_config_ospfv2_network_update.yaml
+    intent: Build an OSPFv2 network update request by entry id.
+    request:
+      method: PUT
+      path: /api/v1/ospfnetwork
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          network: "{{ params.network }}"
+          area: "{{ params.area }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ospfv2-network-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Network update requires an explicit entry id.
+        - Live endpoint and session material must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_delete_ospfv2_network:
+    atom_ref: atoms/fw/fw_delete_ospfv2_network.yaml
+    intent: Build an OSPFv2 network deletion request by entry id.
+    request:
+      method: DELETE
+      path: /api/v1/ospfnetwork
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ospfv2-network-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Network deletion requires an explicit entry id.
+        - The runner sends the id as the DELETE JSON body.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_verify_ospfv2_network:
+    atom_ref: atoms/fw/fw_verify_ospfv2_network.yaml
+    intent: Build an OSPFv2 network query request.
+    request:
+      method: GET
+      path: /api/v1/ospfnetwork
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ospfv2-network-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+        - Live endpoint and session material must come from runner input.
+  fw_config_ospfv2_interface:
+    atom_ref: atoms/fw/fw_config_ospfv2_interface.yaml
+    intent: Build an OSPFv2 interface creation request.
+    request:
+      method: POST
+      path: /api/v1/ospfinterface
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          interface: "{{ params.interface }}"
+          cost: "{{ params.cost }}"
+          priority: "{{ params.priority }}"
+          helloInterval: "{{ params.hello_interval }}"
+          retransmitInterval: "{{ params.retransmit_interval }}"
+          deadInterval: "{{ params.dead_interval }}"
+          transmitDelay: "{{ params.transmit_delay }}"
+          typeNetwork: "{{ params.type_network }}"
+          intAuthMode: "{{ params.int_auth_mode }}"
+          bfdEnable: "{{ params.bfd_enable }}"
+          detectMultiplier: "{{ params.detect_multiplier }}"
+          minRxInterval: "{{ params.min_rx_interval }}"
+          minTxInterval: "{{ params.min_tx_interval }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ospfv2-interface-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Timer and BFD interval values must be validated before execution.
+        - Live endpoint and session material must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_config_ospfv2_interface_update:
+    atom_ref: atoms/fw/fw_config_ospfv2_interface_update.yaml
+    intent: Build an OSPFv2 interface update request by entry id.
+    request:
+      method: PUT
+      path: /api/v1/ospfinterface
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          interface: "{{ params.interface }}"
+          cost: "{{ params.cost }}"
+          priority: "{{ params.priority }}"
+          helloInterval: "{{ params.hello_interval }}"
+          retransmitInterval: "{{ params.retransmit_interval }}"
+          deadInterval: "{{ params.dead_interval }}"
+          transmitDelay: "{{ params.transmit_delay }}"
+          typeNetwork: "{{ params.type_network }}"
+          intAuthMode: "{{ params.int_auth_mode }}"
+          bfdEnable: "{{ params.bfd_enable }}"
+          detectMultiplier: "{{ params.detect_multiplier }}"
+          minRxInterval: "{{ params.min_rx_interval }}"
+          minTxInterval: "{{ params.min_tx_interval }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ospfv2-interface-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Interface update requires an explicit entry id.
+        - Live endpoint and session material must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_delete_ospfv2_interface:
+    atom_ref: atoms/fw/fw_delete_ospfv2_interface.yaml
+    intent: Build an OSPFv2 interface deletion request by entry id.
+    request:
+      method: DELETE
+      path: /api/v1/ospfinterface
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ospfv2-interface-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Interface deletion requires an explicit entry id.
+        - The runner sends the id as the DELETE query value.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_verify_ospfv2_interface:
+    atom_ref: atoms/fw/fw_verify_ospfv2_interface.yaml
+    intent: Build an OSPFv2 interface query request.
+    request:
+      method: GET
+      path: /api/v1/ospfinterface
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ospfv2-interface-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+        - Live endpoint and session material must come from runner input.
+  fw_verify_ospfv2_neighbor:
+    atom_ref: atoms/fw/fw_verify_ospfv2_neighbor.yaml
+    intent: Build a paginated OSPFv2 neighbor query request.
+    request:
+      method: GET
+      path: /api/v1/ospfneighbor
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ospfv2-neighbor-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Pagination is supplied by runner input as page and size query values.
+        - GET requests send no JSON body.
+  fw_capture_ospfv2_log:
+    atom_ref: atoms/fw/fw_capture_ospfv2_log.yaml
+    intent: Build a paginated OSPFv2 log query request.
+    request:
+      method: GET
+      path: /api/v1/ospflog
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ospfv2-log-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Pagination is supplied by runner input as page and size query values.
+        - GET requests send no JSON body.
+  fw_config_ospfv3_global:
+    atom_ref: atoms/fw/fw_config_ospfv3_global.yaml
+    intent: Build an OSPFv3 global configuration request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/ospf6config
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          enable: "{{ params.enable }}"
+          routerId: "{{ params.router_id }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <ospfv3-global-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Router ID must be an IPv4 address.
+        - Live endpoint and session material must come from runner input.
+  fw_verify_ospfv3_global:
+    atom_ref: atoms/fw/fw_verify_ospfv3_global.yaml
+    intent: Build an OSPFv3 global configuration query request.
+    request:
+      method: GET
+      path: /api/v1/ospf6config
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <ospfv3-global-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+  fw_config_ospfv3_redistribution:
+    atom_ref: atoms/fw/fw_config_ospfv3_redistribution.yaml
+    intent: Build an OSPFv3 route redistribution configuration request.
+    request:
+      method: PUT
+      path: /api/v1/ospf6redist
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          redistribute: "{{ params.redistribute }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <ospfv3-redistribution-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Supported redistribution protocols are connected and static.
+        - Live endpoint and session material must come from runner input.
+  fw_verify_ospfv3_redistribution:
+    atom_ref: atoms/fw/fw_verify_ospfv3_redistribution.yaml
+    intent: Build an OSPFv3 route redistribution query request.
+    request:
+      method: GET
+      path: /api/v1/ospf6redist
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <ospfv3-redistribution-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+  fw_config_ospfv3_network:
+    atom_ref: atoms/fw/fw_config_ospfv3_network.yaml
+    intent: Build an OSPFv3 network creation request.
+    request:
+      method: POST
+      path: /api/v1/ospf6network
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        val:
+          interface: "{{ params.interface }}"
+          area: "{{ params.area }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <ospfv3-network-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Interface and area are supplied by runner input.
+        - Live endpoint and session material must come from runner input.
+  fw_config_ospfv3_network_update:
+    atom_ref: atoms/fw/fw_config_ospfv3_network_update.yaml
+    intent: Build an OSPFv3 network update request by entry id.
+    request:
+      method: PUT
+      path: /api/v1/ospf6network
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          interface: "{{ params.interface }}"
+          area: "{{ params.area }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <ospfv3-network-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Network update requires an explicit entry id.
+  fw_delete_ospfv3_network:
+    atom_ref: atoms/fw/fw_delete_ospfv3_network.yaml
+    intent: Build an OSPFv3 network deletion request by entry id.
+    request:
+      method: DELETE
+      path: /api/v1/ospf6network
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <ospfv3-network-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Network deletion requires an explicit entry id.
+        - The runner sends the id as the DELETE JSON body.
+  fw_verify_ospfv3_network:
+    atom_ref: atoms/fw/fw_verify_ospfv3_network.yaml
+    intent: Build an OSPFv3 network query request.
+    request:
+      method: GET
+      path: /api/v1/ospf6network
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <ospfv3-network-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+  fw_config_ospfv3_interface:
+    atom_ref: atoms/fw/fw_config_ospfv3_interface.yaml
+    intent: Build an OSPFv3 interface creation request.
+    request:
+      method: POST
+      path: /api/v1/ospf6interface
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        val:
+          interface: "{{ params.interface }}"
+          cost: "{{ params.cost }}"
+          priority: "{{ params.priority }}"
+          helloInterval: "{{ params.hello_interval }}"
+          retransmitInterval: "{{ params.retransmit_interval }}"
+          deadInterval: "{{ params.dead_interval }}"
+          transmitDelay: "{{ params.transmit_delay }}"
+          typeNetwork: "{{ params.type_network }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <ospfv3-interface-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Timer values must be validated before execution.
+  fw_config_ospfv3_interface_update:
+    atom_ref: atoms/fw/fw_config_ospfv3_interface_update.yaml
+    intent: Build an OSPFv3 interface update request by entry id.
+    request:
+      method: PUT
+      path: /api/v1/ospf6interface
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          interface: "{{ params.interface }}"
+          cost: "{{ params.cost }}"
+          priority: "{{ params.priority }}"
+          helloInterval: "{{ params.hello_interval }}"
+          retransmitInterval: "{{ params.retransmit_interval }}"
+          deadInterval: "{{ params.dead_interval }}"
+          transmitDelay: "{{ params.transmit_delay }}"
+          typeNetwork: "{{ params.type_network }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <ospfv3-interface-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Interface update requires an explicit entry id.
+  fw_delete_ospfv3_interface:
+    atom_ref: atoms/fw/fw_delete_ospfv3_interface.yaml
+    intent: Build an OSPFv3 interface deletion request by entry id.
+    request:
+      method: DELETE
+      path: /api/v1/ospf6interface
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <ospfv3-interface-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Interface deletion requires an explicit entry id.
+        - The runner sends the id as the DELETE query value.
+  fw_verify_ospfv3_interface:
+    atom_ref: atoms/fw/fw_verify_ospfv3_interface.yaml
+    intent: Build an OSPFv3 interface query request.
+    request:
+      method: GET
+      path: /api/v1/ospf6interface
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <ospfv3-interface-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+  fw_verify_ospfv3_neighbor:
+    atom_ref: atoms/fw/fw_verify_ospfv3_neighbor.yaml
+    intent: Build a paginated OSPFv3 neighbor query request.
+    request:
+      method: GET
+      path: /api/v1/ospf6neighbor
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <ospfv3-neighbor-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Pagination is supplied by runner input as page and size query values.
+  fw_capture_ospfv3_log:
+    atom_ref: atoms/fw/fw_capture_ospfv3_log.yaml
+    intent: Build a paginated OSPFv3 log query request.
+    request:
+      method: GET
+      path: /api/v1/ospf6log
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <ospfv3-log-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Pagination is supplied by runner input as page and size query values.
+  fw_config_bfd_global:
+    atom_ref: atoms/fw/fw_config_bfd_global.yaml
+    intent: Build a BFD global configuration request.
+    request:
+      method: PUT
+      path: /api/v1/bfdconfig
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          enable: "{{ params.enable }}"
+    response:
+      success_status: [200, 201, 202]
+      result_ref: <bfd-global-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Live endpoint and session material must come from runner input.
+  fw_verify_bfd_global:
+    atom_ref: atoms/fw/fw_verify_bfd_global.yaml
+    intent: Build a BFD global configuration query request.
+    request:
+      method: GET
+      path: /api/v1/bfdconfig
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <bfd-global-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+  fw_verify_bfd_session:
+    atom_ref: atoms/fw/fw_verify_bfd_session.yaml
+    intent: Build a paginated BFD session query request.
+    request:
+      method: GET
+      path: /api/v1/bfdsession
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <bfd-session-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Pagination is supplied by runner input as page and size query values.
+  fw_capture_bfd_log:
+    atom_ref: atoms/fw/fw_capture_bfd_log.yaml
+    intent: Build a paginated BFD log query request.
+    request:
+      method: GET
+      path: /api/v1/bfdlog
+      content_type: application/json
+      auth: {mode: external_session_ref, header_name: Authorization, value_ref: <session-ref>}
+      payload_template: {}
+    response:
+      success_status: [200]
+      result_ref: <bfd-log-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Pagination is supplied by runner input as page and size query values.

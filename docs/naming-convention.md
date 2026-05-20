@@ -5,7 +5,7 @@
 Atomic operation identifiers use the `op_id` field. The current contract is:
 
 ```text
-^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$
+^(fw|tg|mock|sw)_[a-z]+_[a-z0-9_]+$
 ```
 
 The semantic shape is:
@@ -18,7 +18,7 @@ The semantic shape is:
 |---|---|---|---|
 | `device_prefix` | Yes | `fw`, `tg`, `mock`, `sw` | Device family that owns the operation file path and `device_type` value |
 | `verb` | Yes | Lowercase ASCII verb from the controlled vocabulary | Primary action or observation performed by the operation |
-| `target` | Yes | Lowercase ASCII words joined by `_` | Object, feature, metric, or state being acted on |
+| `target` | Yes | Lowercase ASCII words and digits joined by `_` | Object, feature, metric, or state being acted on |
 
 Examples:
 
@@ -139,6 +139,7 @@ the executor surface with a separate safety design.
 | Candidate | Status | Reason |
 |---|---|---|
 | `fw_verify_acl_rule` | Valid | Uses an allowed prefix, controlled verb, and explicit target |
+| `fw_config_ospfv2_global` | Valid | Digits are allowed in the target segment for protocol names such as OSPFv2 |
 | `tg_capture_packet_trace` | Valid | Uses an allowed prefix and lowercase underscore target |
 | `sw_apply_vlan_config` | Valid | Uses a known action and target |
 | `firewall_verify_acl_rule` | Invalid | Prefix must be one of `fw`, `tg`, `mock`, `sw` |
@@ -181,7 +182,7 @@ To rename an existing `op_id`:
 
 ## Review Checklist
 
-- The `op_id` matches `^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$`.
+- The `op_id` matches `^(fw|tg|mock|sw)_[a-z]+_[a-z0-9_]+$`.
 - The `op_id` prefix matches `device_type`.
 - The file path is `atoms/<device_type>/<op_id>.yaml`.
 - The verb appears in the controlled vocabulary, or the extension process has been followed.

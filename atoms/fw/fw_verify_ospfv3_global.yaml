@@ -1,0 +1,25 @@
+schema_version: "1.1"
+op_id: fw_verify_ospfv3_global
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ospfv3_global
+description: Query NGFW OSPFv3 global configuration state.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+returns:
+  status: success
+  data:
+    observed_state_ref: "<ospfv3-global-state-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types: [NONE, VALIDATION_FAILED, DEVICE_UNREACHABLE, RESPONSE_INVALID, UNKNOWN_ERROR]
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - OSPFv3 global state is available to the caller.
+tags: [firewall, ospfv3, routing, verification]
+since_version: "1.2.0"

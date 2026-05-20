@@ -14,7 +14,49 @@ from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.session import DEFAULT_SESSION_FILE, resolve_session_file
 
 
-SUPPORTED_OPS = ("fw_login_web_management", "fw_config_object", "fw_config_policy_route")
+OSPFV2_OPS = (
+    "fw_config_ospfv2_global",
+    "fw_verify_ospfv2_global",
+    "fw_config_ospfv2_redistribution",
+    "fw_verify_ospfv2_redistribution",
+    "fw_config_ospfv2_network",
+    "fw_config_ospfv2_network_update",
+    "fw_delete_ospfv2_network",
+    "fw_verify_ospfv2_network",
+    "fw_config_ospfv2_interface",
+    "fw_config_ospfv2_interface_update",
+    "fw_delete_ospfv2_interface",
+    "fw_verify_ospfv2_interface",
+    "fw_verify_ospfv2_neighbor",
+    "fw_capture_ospfv2_log",
+)
+OSPFV3_BFD_OPS = (
+    "fw_config_ospfv3_global",
+    "fw_verify_ospfv3_global",
+    "fw_config_ospfv3_redistribution",
+    "fw_verify_ospfv3_redistribution",
+    "fw_config_ospfv3_network",
+    "fw_config_ospfv3_network_update",
+    "fw_delete_ospfv3_network",
+    "fw_verify_ospfv3_network",
+    "fw_config_ospfv3_interface",
+    "fw_config_ospfv3_interface_update",
+    "fw_delete_ospfv3_interface",
+    "fw_verify_ospfv3_interface",
+    "fw_verify_ospfv3_neighbor",
+    "fw_capture_ospfv3_log",
+    "fw_config_bfd_global",
+    "fw_verify_bfd_global",
+    "fw_verify_bfd_session",
+    "fw_capture_bfd_log",
+)
+SUPPORTED_OPS = (
+    "fw_login_web_management",
+    "fw_config_object",
+    "fw_config_policy_route",
+    *OSPFV2_OPS,
+    *OSPFV3_BFD_OPS,
+)
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -90,6 +132,43 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--service", default="any", help="Policy-route service object/name.")
     parser.add_argument("--weight", type=int, default=1, help="Policy-route forwarding path weight.")
     parser.add_argument("--time-obj", default="", help="Policy-route time object.")
+
+    parser.add_argument("--id", help="OSPFv2 entry id for global, redistribution, update, or delete operations.")
+    enable_group = parser.add_mutually_exclusive_group()
+    enable_group.add_argument("--enable", dest="enable", action="store_true", default=None, help="Enable OSPFv2 globally.")
+    enable_group.add_argument("--disable", dest="enable", action="store_false", help="Disable OSPFv2 globally.")
+    parser.add_argument("--router-id", help="OSPFv2 router ID IPv4 address.")
+    originate_group = parser.add_mutually_exclusive_group()
+    originate_group.add_argument("--originate", dest="originate", action="store_true", default=None, help="Enable default route origination.")
+    originate_group.add_argument("--no-originate", dest="originate", action="store_false", help="Disable default route origination.")
+    always_group = parser.add_mutually_exclusive_group()
+    always_group.add_argument("--always", dest="always", action="store_true", default=None, help="Always originate the default route.")
+    always_group.add_argument("--no-always", dest="always", action="store_false", help="Do not always originate the default route.")
+    parser.add_argument(
+        "--redistribute",
+        action="append",
+        default=[],
+        help="OSPFv2 redistribution mapping in protocol=metric form. May be repeated.",
+    )
+    parser.add_argument("--network", help="OSPFv2 network in IPv4 CIDR form.")
+    parser.add_argument("--area", help="OSPFv2 area id.")
+    parser.add_argument("--interface", help="OSPFv2 interface name.")
+    parser.add_argument("--cost", help="OSPFv2 interface cost.")
+    parser.add_argument("--priority", help="OSPFv2 interface priority.")
+    parser.add_argument("--hello-interval", help="OSPFv2 hello interval.")
+    parser.add_argument("--retransmit-interval", help="OSPFv2 retransmit interval.")
+    parser.add_argument("--dead-interval", help="OSPFv2 dead interval.")
+    parser.add_argument("--transmit-delay", help="OSPFv2 transmit delay.")
+    parser.add_argument("--type-network", type=int, help="OSPFv2 interface network type.")
+    parser.add_argument("--int-auth-mode", type=int, help="OSPFv2 interface authentication mode.")
+    bfd_group = parser.add_mutually_exclusive_group()
+    bfd_group.add_argument("--bfd-enable", dest="bfd_enable", action="store_true", default=None, help="Enable BFD on the OSPFv2 interface.")
+    bfd_group.add_argument("--bfd-disable", dest="bfd_enable", action="store_false", help="Disable BFD on the OSPFv2 interface.")
+    parser.add_argument("--detect-multiplier", type=int, help="OSPFv2 BFD detect multiplier.")
+    parser.add_argument("--min-rx-interval", type=int, help="OSPFv2 BFD minimum receive interval.")
+    parser.add_argument("--min-tx-interval", type=int, help="OSPFv2 BFD minimum transmit interval.")
+    parser.add_argument("--page", type=int, default=1, help="OSPFv2 paginated query page.")
+    parser.add_argument("--size", type=int, default=40, help="OSPFv2 paginated query page size.")
     parser.add_argument(
         "--auth-header",
         choices=("Authorization", "AuthorizationToken"),
@@ -117,6 +196,10 @@ def run(args: argparse.Namespace) -> int:
             payload = _run_object(args)
         elif op_id == "fw_config_policy_route":
             payload = _run_policy_route(args)
+        elif op_id in OSPFV2_OPS:
+            payload = _run_ospfv2(args)
+        elif op_id in OSPFV3_BFD_OPS:
+            payload = _run_ospfv3_bfd(args)
         else:
             raise RunnerError(
                 "RUNNER_UNSUPPORTED_OP",
@@ -256,6 +339,114 @@ def _run_policy_route(args: argparse.Namespace) -> dict[str, Any]:
         session_file=session_file,
         auth_header=getattr(args, "auth_header"),
         payload=payload,
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout")),
+    )
+
+
+def _run_ospfv2(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.ospfv2 import build_ospfv2_dry_run, build_ospfv2_payload, execute_ospfv2
+
+    op_id = getattr(args, "op_id")
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    payload = build_ospfv2_payload(
+        op_id,
+        {
+            "id": getattr(args, "id"),
+            "enable": getattr(args, "enable"),
+            "router_id": getattr(args, "router_id"),
+            "originate": getattr(args, "originate"),
+            "always": getattr(args, "always"),
+            "redistribute": getattr(args, "redistribute"),
+            "network": getattr(args, "network"),
+            "area": getattr(args, "area"),
+            "interface": getattr(args, "interface"),
+            "cost": getattr(args, "cost"),
+            "priority": getattr(args, "priority"),
+            "hello_interval": getattr(args, "hello_interval"),
+            "retransmit_interval": getattr(args, "retransmit_interval"),
+            "dead_interval": getattr(args, "dead_interval"),
+            "transmit_delay": getattr(args, "transmit_delay"),
+            "type_network": getattr(args, "type_network"),
+            "int_auth_mode": getattr(args, "int_auth_mode"),
+            "bfd_enable": getattr(args, "bfd_enable"),
+            "detect_multiplier": getattr(args, "detect_multiplier"),
+            "min_rx_interval": getattr(args, "min_rx_interval"),
+            "min_tx_interval": getattr(args, "min_tx_interval"),
+        },
+    )
+    if not getattr(args, "execute"):
+        return build_ospfv2_dry_run(
+            op_id=op_id,
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            payload=payload,
+            page=int(getattr(args, "page")),
+            size=int(getattr(args, "size")),
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout")),
+        )
+    return execute_ospfv2(
+        op_id=op_id,
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        payload=payload,
+        page=int(getattr(args, "page")),
+        size=int(getattr(args, "size")),
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout")),
+    )
+
+
+def _run_ospfv3_bfd(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.ospfv3_bfd import (
+        build_ospfv3_bfd_dry_run,
+        build_ospfv3_bfd_payload,
+        execute_ospfv3_bfd,
+    )
+
+    op_id = getattr(args, "op_id")
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    payload = build_ospfv3_bfd_payload(
+        op_id,
+        {
+            "id": getattr(args, "id"),
+            "enable": getattr(args, "enable"),
+            "router_id": getattr(args, "router_id"),
+            "redistribute": getattr(args, "redistribute"),
+            "interface": getattr(args, "interface"),
+            "area": getattr(args, "area"),
+            "cost": getattr(args, "cost"),
+            "priority": getattr(args, "priority"),
+            "hello_interval": getattr(args, "hello_interval"),
+            "retransmit_interval": getattr(args, "retransmit_interval"),
+            "dead_interval": getattr(args, "dead_interval"),
+            "transmit_delay": getattr(args, "transmit_delay"),
+            "type_network": getattr(args, "type_network"),
+        },
+    )
+    if not getattr(args, "execute"):
+        return build_ospfv3_bfd_dry_run(
+            op_id=op_id,
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            payload=payload,
+            page=int(getattr(args, "page")),
+            size=int(getattr(args, "size")),
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout")),
+        )
+    return execute_ospfv3_bfd(
+        op_id=op_id,
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        payload=payload,
+        page=int(getattr(args, "page")),
+        size=int(getattr(args, "size")),
         verify_tls=bool(getattr(args, "verify_tls")),
         timeout=float(getattr(args, "timeout")),
     )

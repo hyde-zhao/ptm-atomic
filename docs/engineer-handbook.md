@@ -63,12 +63,17 @@ atomic-ops list --package ngfw_capacity_config
 atomic-ops show fw_config_interface
 atomic-ops adapter fw_config_object
 atomic-ops adapter fw_config_policy_route
+atomic-ops adapter fw_config_ospfv2_global
+atomic-ops adapter fw_config_ospfv3_global
+atomic-ops adapter fw_config_bfd_global
 atomic-ops run fw_config_object --base-url https://<device-management-ip> --object-name srcObj --ipaddr 192.168.0.0 --mask 16
 atomic-ops run fw_config_policy_route --base-url https://<device-management-ip> --source-network srcObj --dst-network dstObj --next-hop-ip 1.1.1.1 --in-interface GE0_12
+atomic-ops run fw_verify_ospfv2_neighbor --base-url https://<device-management-ip> --page 1 --size 40
+atomic-ops run fw_verify_bfd_session --base-url https://<device-management-ip> --page 1 --size 40
 atomic-ops validate --package ngfw_installation
 ```
 
-`run` 命令默认 dry-run，只有 `fw_login_web_management`、`fw_config_object` 和 `fw_config_policy_route` 白名单 op 在显式 `--execute` 后会连接设备。其他命令不连接设备、不执行 atom、不推送配置、不保存凭据、不执行自动回滚。
+`run` 命令默认 dry-run，只有 Web 登录、地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 白名单 op 在显式 `--execute` 后会连接设备。其他命令不连接设备、不执行 atom、不推送配置、不保存凭据、不执行自动回滚。
 
 `list`、`show`、`adapter`、`packages` 和 `validate` 都读取 synced cache，不读取当前工作树中尚未同步的修改。若 `sync` 失败但缓存完整，命令可能带 `STALE` 警告继续使用旧缓存；此时缓存 smoke test 不能证明当前工作树 manifest 已发布或已同步。
 
@@ -121,6 +126,23 @@ Adapter profile 维护规则见 `docs/API-ADAPTER-SPEC.md`。
 - `fw_config_object`
 - `fw_config_acl_policy`
 - `fw_config_policy_route`
+- `fw_config_ospfv2_global`
+- `fw_config_ospfv2_redistribution`
+- `fw_config_ospfv2_network`
+- `fw_config_ospfv2_network_update`
+- `fw_delete_ospfv2_network`
+- `fw_config_ospfv2_interface`
+- `fw_config_ospfv2_interface_update`
+- `fw_delete_ospfv2_interface`
+- `fw_config_ospfv3_global`
+- `fw_config_ospfv3_redistribution`
+- `fw_config_ospfv3_network`
+- `fw_config_ospfv3_network_update`
+- `fw_delete_ospfv3_network`
+- `fw_config_ospfv3_interface`
+- `fw_config_ospfv3_interface_update`
+- `fw_delete_ospfv3_interface`
+- `fw_config_bfd_global`
 - `fw_config_static_route`
 - `fw_config_nat`
 - `fw_config_bandwidth`
@@ -134,6 +156,21 @@ Adapter profile 维护规则见 `docs/API-ADAPTER-SPEC.md`。
 - `fw_verify_object`
 - `fw_verify_acl_policy`
 - `fw_verify_policy_route`
+- `fw_verify_ospfv2_global`
+- `fw_verify_ospfv2_redistribution`
+- `fw_verify_ospfv2_network`
+- `fw_verify_ospfv2_interface`
+- `fw_verify_ospfv2_neighbor`
+- `fw_capture_ospfv2_log`
+- `fw_verify_ospfv3_global`
+- `fw_verify_ospfv3_redistribution`
+- `fw_verify_ospfv3_network`
+- `fw_verify_ospfv3_interface`
+- `fw_verify_ospfv3_neighbor`
+- `fw_capture_ospfv3_log`
+- `fw_verify_bfd_global`
+- `fw_verify_bfd_session`
+- `fw_capture_bfd_log`
 - `fw_verify_static_route`
 - `fw_verify_nat`
 - `fw_verify_bandwidth`
@@ -161,8 +198,8 @@ package manifest 仅是 `op_id` 过滤视图，供 `list --package` 和 `validat
 当前完整性事实：
 
 - `packages/` 下有 6 个 manifest。
-- 6 个 manifest 合计 37 条 `operations` 条目。
-- 合计 36 个唯一 `op_id`，其中 `fw_verify_acl_rule` 同时属于 `networking` 与 `security` 旧基线视图。
+- 6 个 manifest 合计 69 条 `operations` 条目。
+- 合计 68 个唯一 `op_id`，其中 `fw_verify_acl_rule` 同时属于 `networking` 与 `security` 旧基线视图。
 - 所有 package `op_id` 都解析到 `atoms/fw/*.yaml`。
 
 ## 6. 批量配置合同
@@ -180,7 +217,7 @@ package manifest 仅是 `op_id` 过滤视图，供 `list --package` 和 `validat
 
 ## 7. 新增 Atom 流程
 
-1. 选择符合 `^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$` 的 `op_id`。
+1. 选择符合 `^(fw|tg|mock|sw)_[a-z]+_[a-z0-9_]+$` 的 `op_id`。
 2. 在 `atoms/<device_type>/<op_id>.yaml` 创建或修改 atom。
 3. 填写 schema v1.1 必填字段和适用的 v1.1 扩展字段。
 4. 如属于已有 package，更新 `packages/<package_id>.yaml` 的 `operations`。

@@ -26,6 +26,8 @@ The two streams are intentionally separate. A schema or operation-library change
 - Add the CR-004 public adapter profile layer with `schemas/adapter-profile.schema.yaml`, `adapters/ngfw/default.yaml`, and `docs/API-ADAPTER-SPEC.md`.
 - Add the read-only `atomic-ops adapter <op_id>` command for querying a synced atom's referenced adapter profile operation.
 - Add the allowlisted `atomic-ops run` runner for `fw_login_web_management`, `fw_config_object`, and `fw_config_policy_route`, with dry-run by default and explicit `--execute` for live device requests.
+- Add OSPFv2 atom specs, adapter profile mappings, and allowlisted runner support for global config, redistribution, network, interface, neighbor, and log endpoints.
+- Add OSPFv3 and BFD atom specs, adapter profile mappings, and allowlisted runner support for config, query, delete, session, and log endpoints.
 - Add release guidance for repository checks using `uv run atomic-ops --help`, `uv run atomic-ops packages`, `uv run --python 3.11 python scripts/validate_schema.py atoms`, `uv run --python 3.11 python scripts/layout_check.py`, and `uv run --python 3.11 python scripts/security_gate_check.py`.
 
 ### Changed
@@ -34,7 +36,7 @@ The two streams are intentionally separate. A schema or operation-library change
 - Replace environment-specific repository address examples with `<atomic-ops-git-repository-url>` placeholders.
 - Align Python command examples with `uv run` and `uv tool` usage.
 - Clarify that package manifests are filter views for `op_id` selection only; they do not install, copy, execute, or distribute atoms.
-- Record current package integrity facts: 6 manifests, 37 package entries, 36 unique `op_id` values, and all package references resolving to `atoms/fw/*.yaml`.
+- Record current package integrity facts: 6 manifests, 69 package entries, 68 unique `op_id` values, and all package references resolving to `atoms/fw/*.yaml`.
 - Separate working-tree repository checks from synced-cache consumer smoke checks, and document the stale-cache caveat for `list`, `show`, `packages`, and `validate`.
 - Align error-code documentation with the current `scripts/security_gate_check.py` behavior and the CLI error object shape, including the optional `suggestion` field.
 - Add `adapter_contract_ref` to `fw_config_policy_route` so external generators can consume the public adapter profile instead of reading `.input/capacity`.
@@ -42,6 +44,7 @@ The two streams are intentionally separate. A schema or operation-library change
 - Align `fw_config_policy_route` with the executable NGFW API shape: `POST /api/v1/policyroute` and `val.source_network` / `val.dst_network` / `val.forwarding_paths[].next_hop_ip`.
 - Clarify that policy route `source_network` and `dst_network` reference address object names by default, with explicit `*_is_group` flags for address group names.
 - Make successful `atomic-ops run` stdout use the fixed envelope `op_id`, `status`, `data`, `error_type`, and `diag_snapshot_ref`; runner-specific request, session, and response details now live under `data`.
+- Allow digits in the `op_id` target segment so protocol names such as `ospfv2` can be represented directly.
 
 ### Deprecated
 
@@ -70,7 +73,7 @@ Initial operation-library contract baseline.
 ### Added
 
 - Define schema v1 terminology around `op_id`, `device_type`, mapped `parameters`, fixed `returns`, `deprecated_by`, and `since_version`.
-- Define the current `op_id` naming pattern: `^(fw|tg|mock|sw)_[a-z]+_[a-z_]+$`.
+- Define the current `op_id` naming pattern: `^(fw|tg|mock|sw)_[a-z]+_[a-z0-9_]+$`.
 - Define the controlled verb baseline: `create`, `delete`, `update`, `apply`, `rollback`, `verify`, `start`, `stop`, `reset`, `capture`.
 - Define the initial changelog format and release-note categories.
 

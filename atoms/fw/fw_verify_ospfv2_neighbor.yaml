@@ -1,0 +1,44 @@
+schema_version: "1.1"
+op_id: fw_verify_ospfv2_neighbor
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ospfv2_neighbor
+description: Query NGFW OSPFv2 neighbor state with pagination.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the OSPFv2 neighbor query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the OSPFv2 neighbor query.
+returns:
+  status: success
+  data:
+    observed_state_ref: "<ospfv2-neighbor-state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - OSPFv2 neighbor state is available to the caller.
+tags:
+  - firewall
+  - ospfv2
+  - routing
+  - verification
+since_version: "1.2.0"
