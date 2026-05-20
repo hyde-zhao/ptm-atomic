@@ -127,6 +127,13 @@ contract keys that may appear under `returns.data`.
 `session_ref` and `state_ref` are references held by an external orchestrator.
 They are not CLI cache entries and must not include raw authentication material.
 
+`atomic-ops run` uses the same fixed envelope for successful stdout and adds
+`op_id` as a CLI result identifier. Runner-specific details such as dry-run
+request plans, session summaries, status codes, and device response payloads
+must appear under `data`; consumers must not expect `request`, `session`, or
+`response` as top-level fields. CLI failures remain separate and use the
+`error_code` object documented in `docs/error-codes.md`.
+
 ### `risk`
 
 | Field | Type | Required | Constraint | Example |

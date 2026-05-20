@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import tempfile
@@ -7,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from atomic_ops.cli import main as cli_main
+from atomic_ops.commands.run import _to_run_envelope
 from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.ngfw_login import login
 from atomic_ops.runner.object import build_address_object_payload
@@ -161,6 +165,57 @@ class NgfwLoginTests(unittest.TestCase):
                     )
 
         self.assertEqual(context.exception.error_code, "RUNNER_LOGIN_FAILED")
+
+
+class RunCommandEnvelopeTests(unittest.TestCase):
+    def test_wraps_runner_payload_in_fixed_envelope(self) -> None:
+        envelope = _to_run_envelope(
+            {
+                "op_id": "fw_config_object",
+                "status": "dry_run",
+                "execute_required": True,
+                "request": {"method": "POST"},
+            }
+        )
+
+        self.assertEqual(envelope["op_id"], "fw_config_object")
+        self.assertEqual(envelope["status"], "dry_run")
+        self.assertEqual(envelope["error_type"], "NONE")
+        self.assertEqual(envelope["diag_snapshot_ref"], "")
+        self.assertEqual(envelope["data"], {"execute_required": True, "request": {"method": "POST"}})
+
+    def test_cli_dry_run_json_uses_fixed_envelope(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_config_object",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--object-name",
+                    "srcObj",
+                    "--ipaddr",
+                    "192.168.0.0",
+                    "--mask",
+                    "16",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_object")
+        self.assertEqual(payload["status"], "dry_run")
+        self.assertEqual(payload["error_type"], "NONE")
+        self.assertEqual(payload["diag_snapshot_ref"], "")
+        self.assertNotIn("request", payload)
+        self.assertTrue(payload["data"]["execute_required"])
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
 
 
 if __name__ == "__main__":

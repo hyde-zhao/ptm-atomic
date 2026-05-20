@@ -111,6 +111,36 @@ atomic-ops adapter fw_config_policy_route --format json
 
 `atomic-ops run` 只支持三个白名单 op：`fw_login_web_management`、`fw_config_object` 和 `fw_config_policy_route`。命令默认 dry-run，不连接设备；必须显式传入 `--execute` 才会发真实请求。
 
+成功输出使用固定 envelope。`op_id`、`status`、`data`、`error_type` 和 `diag_snapshot_ref` 是稳定顶层字段；请求计划、真实执行响应、session 摘要等 runner 专属内容放在 `data` 下：
+
+```yaml
+op_id: fw_config_object
+status: dry_run
+data:
+  execute_required: true
+  request:
+    method: POST
+    url: https://<device-management-ip>/api/v1/ippool
+    auth:
+      name: Authorization
+      value: <session-ref>
+    content_type: application/json
+    payload:
+      val:
+        name: srcObj
+        desc: srcObj
+        type: 4
+        ranges: []
+        networks:
+          - ipaddr: 192.168.0.0
+            mask: "16"
+  session_file: ~/.local/state/atomic-ops/ngfw/session.json
+  verify_tls: false
+  timeout: 10.0
+error_type: NONE
+diag_snapshot_ref: ""
+```
+
 登录 Web 管理面：
 
 ```bash

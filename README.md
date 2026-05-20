@@ -143,6 +143,36 @@ atomic-ops validate --package ngfw_installation
 
 除 `atomic-ops run` 的白名单 runner 外，其他 CLI 命令仍是只读缓存查询或校验。`run` 默认 dry-run，不发设备请求；登录真实执行需要 `--execute --password-env <ENV>`，地址对象和策略路由真实执行需要已有 session 文件和 `--execute`。CLI 不接受明文密码参数，不打印完整会话值，不把运行时材料写入仓库。
 
+`atomic-ops run` 成功输出使用固定 envelope。runner 细节统一放入 `data`，调用方不应从顶层读取 `request`、`session`、`response` 等旧字段：
+
+```yaml
+op_id: fw_config_object
+status: dry_run
+data:
+  execute_required: true
+  request:
+    method: POST
+    url: https://<device-management-ip>/api/v1/ippool
+    auth:
+      name: Authorization
+      value: <session-ref>
+    content_type: application/json
+    payload:
+      val:
+        name: srcObj
+        desc: srcObj
+        type: 4
+        ranges: []
+        networks:
+          - ipaddr: 192.168.0.0
+            mask: "16"
+  session_file: ~/.local/state/atomic-ops/ngfw/session.json
+  verify_tls: false
+  timeout: 10.0
+error_type: NONE
+diag_snapshot_ref: ""
+```
+
 ### Runner 示例
 
 登录防火墙 Web 管理面，并把会话材料写入用户 state 目录：

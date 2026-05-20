@@ -41,6 +41,7 @@ The two streams are intentionally separate. A schema or operation-library change
 - Include `adapters/` in the `atomic-ops sync` sparse checkout paths so adapter profile queries can work from the local cache.
 - Align `fw_config_policy_route` with the executable NGFW API shape: `POST /api/v1/policyroute` and `val.source_network` / `val.dst_network` / `val.forwarding_paths[].next_hop_ip`.
 - Clarify that policy route `source_network` and `dst_network` reference address object names by default, with explicit `*_is_group` flags for address group names.
+- Make successful `atomic-ops run` stdout use the fixed envelope `op_id`, `status`, `data`, `error_type`, and `diag_snapshot_ref`; runner-specific request, session, and response details now live under `data`.
 
 ### Deprecated
 

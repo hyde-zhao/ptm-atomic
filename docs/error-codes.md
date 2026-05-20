@@ -96,6 +96,9 @@ Field contract:
 ## Stdout And Stderr Rules
 
 - Successful CLI results go to stdout in the requested output format.
+- Successful `atomic-ops run` results use the fixed envelope `op_id`, `status`,
+  `data`, `error_type`, and `diag_snapshot_ref`; runner-specific fields are
+  nested under `data`.
 - JSON-mode CLI failures write the fixed error object to stderr.
 - Text-mode CLI failures write a human-readable diagnostic to stderr and must include the `error_code` string.
 - Warnings and recovery notes, such as stale cache warnings, go to stderr.

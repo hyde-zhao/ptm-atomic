@@ -5,8 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -126,7 +124,7 @@ def run(args: argparse.Namespace) -> int:
                 {"op_id": op_id, "supported_ops": list(SUPPORTED_OPS)},
                 suggestion="Use atomic-ops adapter for unsupported operations, or add a dedicated runner.",
             )
-        _write_output(payload, output_format)
+        _write_output(_to_run_envelope(payload), output_format)
         return 0
     except RunnerError as exc:
         return write_error(
@@ -296,6 +294,26 @@ def _write_output(payload: dict[str, Any], output_format: str) -> None:
         print(json.dumps(safe_payload, ensure_ascii=False, sort_keys=True))
         return
     print(yaml.safe_dump(safe_payload, allow_unicode=True, sort_keys=False), end="")
+
+
+def _to_run_envelope(payload: dict[str, Any]) -> dict[str, Any]:
+    """Wrap runner-specific payloads in the stable operation return envelope."""
+
+    data = dict(payload)
+    op_id = data.pop("op_id", None)
+    status = data.pop("status", None)
+    error_type = data.pop("error_type", "NONE")
+    diag_snapshot_ref = data.pop("diag_snapshot_ref", "")
+
+    envelope: dict[str, Any] = {
+        "status": status or "success",
+        "data": data,
+        "error_type": error_type,
+        "diag_snapshot_ref": diag_snapshot_ref,
+    }
+    if op_id is not None:
+        envelope["op_id"] = op_id
+    return envelope
 
 
 def _redact_runner_output(value: Any) -> Any:
