@@ -23,6 +23,7 @@ POLICY_ROUTE_ENDPOINTS = {
     "fw_update_policy_route_priority": ("POST", "/api/v1/pridpriconf"),
 }
 GET_OPS = {"fw_verify_policy_route"}
+NO_BODY_OPS = {"fw_verify_policy_route", "fw_delete_policy_route"}
 TARGET_SITES = {"before", "after", "first", "last"}
 ROUTE_TYPES = {"ipv4", "ipv6"}
 
@@ -74,32 +75,36 @@ def build_policy_route_payload(
         )
     entry_id = _validate_non_negative_int("id", entry_id)
 
+    val: dict[str, Any] = {
+        "type": route_type,
+        "in_interface": in_interface,
+        "source_network": source_network,
+        "source_network_is_group": source_network_is_group,
+        "dst_network": dst_network,
+        "dst_network_is_group": dst_network_is_group,
+        "service": service,
+        "service_is_group": service_is_group,
+        "active": active,
+        "applist": [],
+        "app_tag_name": [],
+        "forwarding_paths": [
+            {
+                "next_hop_ip": next_hop_ip,
+                "outgoing_interface": outgoing_interface,
+                "weight": weight,
+                "health_check": {},
+            }
+        ],
+        "time_obj": time_obj,
+        "action": action,
+        "config_source": config_source,
+    }
+    if entry_id > 0:
+        val["id"] = entry_id
+
     return {
         "id": entry_id,
-        "val": {
-            "type": route_type,
-            "in_interface": in_interface,
-            "source_network": source_network,
-            "source_network_is_group": source_network_is_group,
-            "dst_network": dst_network,
-            "dst_network_is_group": dst_network_is_group,
-            "service": service,
-            "service_is_group": service_is_group,
-            "active": active,
-            "applist": [],
-            "app_tag_name": [],
-            "forwarding_paths": [
-                {
-                    "next_hop_ip": next_hop_ip,
-                    "outgoing_interface": outgoing_interface,
-                    "weight": weight,
-                    "health_check": {},
-                }
-            ],
-            "time_obj": time_obj,
-            "action": action,
-            "config_source": config_source,
-        },
+        "val": val,
     }
 
 
@@ -144,14 +149,14 @@ def build_policy_route_dry_run(
     timeout: float,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
-    request_payload = None if op_id in GET_OPS else payload
+    request_payload = None if op_id in NO_BODY_OPS else payload
     return {
         "op_id": op_id,
         "status": "dry_run",
         "execute_required": True,
         "request": {
             "method": method,
-            "url": _request_url(base_url, op_id, page=page, size=size, route_type=route_type),
+            "url": _request_url(base_url, op_id, page=page, size=size, route_type=route_type, payload=payload),
             "auth": {"name": auth_header, "value": "<session-ref>"},
             "content_type": "application/json",
             "payload": request_payload,
@@ -183,12 +188,12 @@ def execute_policy_route(
         "Content-Type": "application/json",
         auth_header: header_value,
     }
-    url = _request_url(base_url, op_id, page=page, size=size, route_type=route_type)
+    url = _request_url(base_url, op_id, page=page, size=size, route_type=route_type, payload=payload)
     status_code, response_payload, _text = request_json(
         method,
         url,
         headers=headers,
-        json_payload=None if op_id in GET_OPS else payload,
+        json_payload=None if op_id in NO_BODY_OPS else payload,
         timeout=timeout,
         verify_tls=verify_tls,
     )
@@ -225,6 +230,7 @@ def _request_url(
     page: int,
     size: int,
     route_type: str,
+    payload: dict[str, Any] | None = None,
 ) -> str:
     _validate_positive_int("page", page)
     _validate_positive_int("size", size)
@@ -232,6 +238,10 @@ def _request_url(
     url = f"{normalize_base_url(base_url)}{path}"
     if op_id in GET_OPS:
         url = f"{url}?{urlencode({'page': page, 'size': size, 'is_ip6': str(_route_type_to_is_ip6(route_type)).lower()})}"
+    if op_id == "fw_delete_policy_route":
+        entry_id = str((payload or {}).get("id") or "")
+        _validate_positive_int("id", entry_id)
+        url = f"{url}?{urlencode({'id': entry_id, 'is_ip6': str(_route_type_to_is_ip6(route_type)).lower()})}"
     return url
 
 

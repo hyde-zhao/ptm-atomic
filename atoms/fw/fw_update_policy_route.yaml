@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Policy route update object with id, type, match fields, and forwarding path.
+    description: Policy route update object with matching top-level id and val.id, type, match fields, and forwarding path.
   idempotency_key:
     type: string
     required: true
@@ -85,6 +85,7 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk configuration contract is used.
+  - The update request must carry the same route id in both the top-level id field and val.id; otherwise the device rejects it as a route ID change.
 postconditions:
   - Policy route update result and diagnostic references are available to the caller.
   - A follow-up fw_verify_policy_route query can confirm the device route state.

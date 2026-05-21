@@ -133,7 +133,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Treat --dst-network as an address-group name.",
     )
-    parser.add_argument("--next-hop-ip", help="Policy-route forwarding next-hop IPv4 address.")
+    parser.add_argument("--next-hop-ip", help="Policy-route forwarding next-hop IP address.")
     parser.add_argument("--in-interface", help="Policy-route incoming interface.")
     parser.add_argument("--outgoing-interface", default="", help="Policy-route outgoing interface.")
     parser.add_argument("--service", default="any", help="Policy-route service object/name.")

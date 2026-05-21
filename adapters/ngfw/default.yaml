@@ -99,6 +99,7 @@ operations:
       payload_template:
         id: "{{ params.id }}"
         val:
+          id: "{{ params.id }}"
           type: "{{ params.type }}"
           in_interface: "{{ params.in_interface }}"
           source_network: "{{ params.source_network }}"
@@ -134,7 +135,7 @@ operations:
         - atomic-ops run can execute this request only when --execute is explicit.
   fw_delete_policy_route:
     atom_ref: atoms/fw/fw_delete_policy_route.yaml
-    intent: Build a policy-route delete request by id.
+    intent: Build a policy-route delete request by id and address family.
     request:
       method: DELETE
       path: /api/v1/policyroute
@@ -143,8 +144,7 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -155,7 +155,8 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - DELETE uses the provided policy-route id in the JSON request body.
+        - DELETE uses id and is_ip6 as query values and sends no JSON body.
+        - is_ip6=false deletes an IPv4 policy route id; is_ip6=true deletes an IPv6 policy route id.
         - Live endpoint, session material, and credentials must come from runner input.
         - atomic-ops run can execute this request only when --execute is explicit.
   fw_verify_policy_route:

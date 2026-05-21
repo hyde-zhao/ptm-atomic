@@ -120,6 +120,25 @@ class PolicyRoutePayloadTests(unittest.TestCase):
     def test_build_policy_route_delete_payload(self) -> None:
         self.assertEqual(build_policy_route_delete_payload(entry_id="15"), {"id": 15})
 
+    def test_update_policy_route_payload_includes_val_id(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="2092:106::32",
+            in_interface="GE0_12",
+            outgoing_interface="",
+            service="any",
+            weight=2,
+            time_obj="",
+            route_type="ipv6",
+            entry_id=3,
+        )
+
+        self.assertEqual(payload["id"], 3)
+        self.assertEqual(payload["val"]["id"], 3)
+
     def test_build_policy_route_priority_payload(self) -> None:
         payload = build_policy_route_priority_payload(
             targetsite="before",
@@ -543,7 +562,7 @@ class RunCommandEnvelopeTests(unittest.TestCase):
         self.assertIsNone(payload["data"]["request"]["payload"])
         self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
 
-    def test_cli_policy_route_delete_uses_body_id(self) -> None:
+    def test_cli_policy_route_delete_uses_query_id_and_no_body(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
 
@@ -558,13 +577,16 @@ class RunCommandEnvelopeTests(unittest.TestCase):
                     "https://192.0.2.1",
                     "--id",
                     "15",
+                    "--policy-route-type",
+                    "ipv6",
                 ]
             )
 
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["data"]["request"]["method"], "DELETE")
-        self.assertEqual(payload["data"]["request"]["payload"], {"id": 15})
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/policyroute?id=15&is_ip6=true"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
         self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
 
     def test_cli_policy_route_priority_uses_pridpriconf(self) -> None:
