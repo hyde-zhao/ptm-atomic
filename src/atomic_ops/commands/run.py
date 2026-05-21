@@ -50,10 +50,17 @@ OSPFV3_BFD_OPS = (
     "fw_verify_bfd_session",
     "fw_capture_bfd_log",
 )
+POLICY_ROUTE_OPS = (
+    "fw_config_policy_route",
+    "fw_update_policy_route",
+    "fw_delete_policy_route",
+    "fw_verify_policy_route",
+    "fw_update_policy_route_priority",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_config_object",
-    "fw_config_policy_route",
+    *POLICY_ROUTE_OPS,
     *OSPFV2_OPS,
     *OSPFV3_BFD_OPS,
 )
@@ -130,8 +137,38 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--in-interface", help="Policy-route incoming interface.")
     parser.add_argument("--outgoing-interface", default="", help="Policy-route outgoing interface.")
     parser.add_argument("--service", default="any", help="Policy-route service object/name.")
-    parser.add_argument("--weight", type=int, default=1, help="Policy-route forwarding path weight.")
+    parser.add_argument("--service-is-group", action="store_true", help="Treat --service as a service-group name.")
+    parser.add_argument("--weight", type=int, default=100, help="Policy-route forwarding path weight.")
     parser.add_argument("--time-obj", default="", help="Policy-route time object.")
+    parser.add_argument(
+        "--policy-route-type",
+        choices=("ipv4", "ipv6"),
+        default="ipv4",
+        help="Policy-route address family. Also controls is_ip6 for query and priority operations.",
+    )
+    policy_route_active_group = parser.add_mutually_exclusive_group()
+    policy_route_active_group.add_argument(
+        "--policy-route-active",
+        dest="policy_route_active",
+        action="store_true",
+        default=True,
+        help="Enable the policy route.",
+    )
+    policy_route_active_group.add_argument(
+        "--policy-route-inactive",
+        dest="policy_route_active",
+        action="store_false",
+        help="Disable the policy route.",
+    )
+    parser.add_argument("--policy-route-action", type=int, default=1, help="Policy-route action value.")
+    parser.add_argument("--config-source", type=int, default=0, help="Policy-route config_source value.")
+    parser.add_argument(
+        "--targetsite",
+        choices=("before", "after", "first", "last"),
+        help="Policy-route priority target site for fw_update_policy_route_priority.",
+    )
+    parser.add_argument("--targetid", help="Policy-route priority target id.")
+    parser.add_argument("--moveid", help="Policy-route priority moving route id.")
 
     parser.add_argument("--id", help="OSPFv2 entry id for global, redistribution, update, or delete operations.")
     enable_group = parser.add_mutually_exclusive_group()
@@ -194,7 +231,7 @@ def run(args: argparse.Namespace) -> int:
             payload = _run_login(args)
         elif op_id == "fw_config_object":
             payload = _run_object(args)
-        elif op_id == "fw_config_policy_route":
+        elif op_id in POLICY_ROUTE_OPS:
             payload = _run_policy_route(args)
         elif op_id in OSPFV2_OPS:
             payload = _run_ospfv2(args)
@@ -304,41 +341,78 @@ def _run_object(args: argparse.Namespace) -> dict[str, Any]:
 
 def _run_policy_route(args: argparse.Namespace) -> dict[str, Any]:
     from atomic_ops.runner.policy_route import (
+        build_policy_route_delete_payload,
         build_policy_route_dry_run,
         build_policy_route_payload,
+        build_policy_route_priority_payload,
         execute_policy_route,
     )
 
+    op_id = getattr(args, "op_id")
     session_file = resolve_session_file(getattr(args, "session_file", None))
-    _require_arg(args, "source_network")
-    _require_arg(args, "next_hop_ip")
-    _require_arg(args, "in_interface")
-    payload = build_policy_route_payload(
-        source_network=getattr(args, "source_network"),
-        source_network_is_group=bool(getattr(args, "source_network_is_group")),
-        dst_network=getattr(args, "dst_network"),
-        dst_network_is_group=bool(getattr(args, "dst_network_is_group")),
-        next_hop_ip=getattr(args, "next_hop_ip"),
-        in_interface=getattr(args, "in_interface"),
-        outgoing_interface=getattr(args, "outgoing_interface"),
-        service=getattr(args, "service"),
-        weight=int(getattr(args, "weight")),
-        time_obj=getattr(args, "time_obj"),
-    )
+    route_type = getattr(args, "policy_route_type")
+    payload: dict[str, Any] | None
+    if op_id in {"fw_config_policy_route", "fw_update_policy_route"}:
+        _require_arg(args, "source_network")
+        _require_arg(args, "next_hop_ip")
+        _require_arg(args, "in_interface")
+        if op_id == "fw_update_policy_route":
+            _require_arg(args, "id")
+        payload = build_policy_route_payload(
+            source_network=getattr(args, "source_network"),
+            source_network_is_group=bool(getattr(args, "source_network_is_group")),
+            dst_network=getattr(args, "dst_network"),
+            dst_network_is_group=bool(getattr(args, "dst_network_is_group")),
+            next_hop_ip=getattr(args, "next_hop_ip"),
+            in_interface=getattr(args, "in_interface"),
+            outgoing_interface=getattr(args, "outgoing_interface"),
+            service=getattr(args, "service"),
+            service_is_group=bool(getattr(args, "service_is_group")),
+            weight=int(getattr(args, "weight")),
+            time_obj=getattr(args, "time_obj"),
+            route_type=route_type,
+            entry_id=getattr(args, "id") if op_id == "fw_update_policy_route" else 0,
+            active=bool(getattr(args, "policy_route_active")),
+            action=int(getattr(args, "policy_route_action")),
+            config_source=int(getattr(args, "config_source")),
+        )
+    elif op_id == "fw_delete_policy_route":
+        _require_arg(args, "id")
+        payload = build_policy_route_delete_payload(entry_id=getattr(args, "id"))
+    elif op_id == "fw_update_policy_route_priority":
+        _require_arg(args, "targetsite")
+        _require_arg(args, "targetid")
+        _require_arg(args, "moveid")
+        payload = build_policy_route_priority_payload(
+            targetsite=getattr(args, "targetsite"),
+            targetid=getattr(args, "targetid"),
+            moveid=getattr(args, "moveid"),
+            route_type=route_type,
+        )
+    else:
+        payload = None
     if not getattr(args, "execute"):
         return build_policy_route_dry_run(
+            op_id=op_id,
             base_url=getattr(args, "base_url"),
             session_file=session_file,
             auth_header=getattr(args, "auth_header"),
             payload=payload,
+            page=int(getattr(args, "page")),
+            size=int(getattr(args, "size")),
+            route_type=route_type,
             verify_tls=bool(getattr(args, "verify_tls")),
             timeout=float(getattr(args, "timeout")),
         )
     return execute_policy_route(
+        op_id=op_id,
         base_url=getattr(args, "base_url"),
         session_file=session_file,
         auth_header=getattr(args, "auth_header"),
         payload=payload,
+        page=int(getattr(args, "page")),
+        size=int(getattr(args, "size")),
+        route_type=route_type,
         verify_tls=bool(getattr(args, "verify_tls")),
         timeout=float(getattr(args, "timeout")),
     )

@@ -39,7 +39,7 @@ operations:
         - atomic-ops run can execute this request only when --execute is explicit.
   fw_config_policy_route:
     atom_ref: atoms/fw/fw_config_policy_route.yaml
-    intent: Build an IPv4 policy-route configuration request from a validated atom parameter set.
+    intent: Build an IPv4 or IPv6 policy-route create request from a validated atom parameter set.
     request:
       method: POST
       path: /api/v1/policyroute
@@ -51,22 +51,25 @@ operations:
       payload_template:
         id: 0
         val:
-          type: ipv4
+          type: "{{ params.type }}"
           in_interface: "{{ params.in_interface }}"
           source_network: "{{ params.source_network }}"
           source_network_is_group: "{{ params.source_network_is_group }}"
           dst_network: "{{ params.dst_network }}"
           dst_network_is_group: "{{ params.dst_network_is_group }}"
           service: "{{ params.service }}"
-          service_is_group: false
+          service_is_group: "{{ params.service_is_group }}"
+          active: "{{ params.active }}"
           applist: []
           app_tag_name: []
           forwarding_paths:
             - next_hop_ip: "{{ params.next_hop_ip }}"
               outgoing_interface: "{{ params.outgoing_interface }}"
               weight: "{{ params.weight }}"
+              health_check: {}
           time_obj: "{{ params.time_obj }}"
-          action: 1
+          action: "{{ params.action }}"
+          config_source: "{{ params.config_source }}"
     response:
       success_status:
         - 200
@@ -78,8 +81,135 @@ operations:
       runner_required: true
       notes:
         - Adapter profiles describe endpoint and payload shape without runtime values.
+        - type must be ipv4 or ipv6; next_hop_ip must match the selected IP version.
         - source_network and dst_network are address object names unless the matching is_group flag is true.
         - Live endpoint, session material, and credentials must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_update_policy_route:
+    atom_ref: atoms/fw/fw_update_policy_route.yaml
+    intent: Build an IPv4 or IPv6 policy-route update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/policyroute
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          type: "{{ params.type }}"
+          in_interface: "{{ params.in_interface }}"
+          source_network: "{{ params.source_network }}"
+          source_network_is_group: "{{ params.source_network_is_group }}"
+          dst_network: "{{ params.dst_network }}"
+          dst_network_is_group: "{{ params.dst_network_is_group }}"
+          service: "{{ params.service }}"
+          service_is_group: "{{ params.service_is_group }}"
+          active: "{{ params.active }}"
+          applist: []
+          app_tag_name: []
+          forwarding_paths:
+            - next_hop_ip: "{{ params.next_hop_ip }}"
+              outgoing_interface: "{{ params.outgoing_interface }}"
+              weight: "{{ params.weight }}"
+              health_check: {}
+          time_obj: "{{ params.time_obj }}"
+          action: "{{ params.action }}"
+          config_source: "{{ params.config_source }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <policy-route-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT updates an existing policy-route id on /api/v1/policyroute.
+        - type must be ipv4 or ipv6; next_hop_ip must match the selected IP version.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_delete_policy_route:
+    atom_ref: atoms/fw/fw_delete_policy_route.yaml
+    intent: Build a policy-route delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/policyroute
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <policy-route-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses the provided policy-route id in the JSON request body.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_verify_policy_route:
+    atom_ref: atoms/fw/fw_verify_policy_route.yaml
+    intent: Build a policy-route query request for IPv4 or IPv6 routes.
+    request:
+      method: GET
+      path: /api/v1/policyroute
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <policy-route-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page, size, and is_ip6.
+        - GET requests send no JSON body.
+        - is_ip6=false queries IPv4 policy routes; is_ip6=true queries IPv6 policy routes.
+  fw_update_policy_route_priority:
+    atom_ref: atoms/fw/fw_update_policy_route_priority.yaml
+    intent: Build a policy-route priority move request for IPv4 or IPv6 routes.
+    request:
+      method: POST
+      path: /api/v1/pridpriconf
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          targetsite: "{{ params.targetsite }}"
+          targetid: "{{ params.targetid }}"
+          moveid: "{{ params.moveid }}"
+          is_ip6: "{{ params.is_ip6 }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <policy-route-priority-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - targetsite supports before, after, first, and last.
+        - is_ip6=false moves IPv4 policy route priority; is_ip6=true moves IPv6 policy route priority.
         - atomic-ops run can execute this request only when --execute is explicit.
   fw_config_ospfv2_global:
     atom_ref: atoms/fw/fw_config_ospfv2_global.yaml

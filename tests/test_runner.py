@@ -32,7 +32,11 @@ from atomic_ops.runner.ospfv3_bfd import (
     build_ospfv3_redistribution_payload,
     execute_ospfv3_bfd,
 )
-from atomic_ops.runner.policy_route import build_policy_route_payload
+from atomic_ops.runner.policy_route import (
+    build_policy_route_delete_payload,
+    build_policy_route_payload,
+    build_policy_route_priority_payload,
+)
 from atomic_ops.runner.session import read_session_file, write_session_file
 
 
@@ -57,7 +61,28 @@ class PolicyRoutePayloadTests(unittest.TestCase):
         self.assertEqual(payload["val"]["dst_network"], "any")
         self.assertEqual(payload["val"]["forwarding_paths"][0]["next_hop_ip"], "18.18.2.2")
 
-    def test_rejects_ipv6_next_hop(self) -> None:
+    def test_build_ipv6_policy_route_payload(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="2091::1",
+            in_interface="any",
+            outgoing_interface="",
+            service="any",
+            weight=100,
+            time_obj="",
+            route_type="ipv6",
+        )
+
+        self.assertEqual(payload["val"]["type"], "ipv6")
+        self.assertTrue(payload["val"]["active"])
+        self.assertEqual(payload["val"]["forwarding_paths"][0]["next_hop_ip"], "2091::1")
+        self.assertEqual(payload["val"]["forwarding_paths"][0]["health_check"], {})
+        self.assertEqual(payload["val"]["config_source"], 0)
+
+    def test_rejects_next_hop_version_mismatch(self) -> None:
         with self.assertRaises(RunnerError) as context:
             build_policy_route_payload(
                 source_network="src",
@@ -70,6 +95,7 @@ class PolicyRoutePayloadTests(unittest.TestCase):
                 service="any",
                 weight=1,
                 time_obj="",
+                route_type="ipv4",
             )
 
         self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
@@ -90,6 +116,22 @@ class PolicyRoutePayloadTests(unittest.TestCase):
 
         self.assertTrue(payload["val"]["source_network_is_group"])
         self.assertTrue(payload["val"]["dst_network_is_group"])
+
+    def test_build_policy_route_delete_payload(self) -> None:
+        self.assertEqual(build_policy_route_delete_payload(entry_id="15"), {"id": 15})
+
+    def test_build_policy_route_priority_payload(self) -> None:
+        payload = build_policy_route_priority_payload(
+            targetsite="before",
+            targetid="1",
+            moveid="15",
+            route_type="ipv6",
+        )
+
+        self.assertEqual(
+            payload,
+            {"val": {"targetsite": "before", "targetid": 1, "moveid": 15, "is_ip6": True}},
+        )
 
 
 class AddressObjectPayloadTests(unittest.TestCase):
@@ -436,6 +478,125 @@ class RunCommandEnvelopeTests(unittest.TestCase):
         self.assertEqual(payload["status"], "dry_run")
         self.assertEqual(payload["data"]["request"]["method"], "POST")
         self.assertEqual(payload["data"]["request"]["payload"]["val"]["network"], "191.0.0.0/24")
+        self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
+
+    def test_cli_policy_route_ipv6_post_dry_run_json_uses_fixed_envelope(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_config_policy_route",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--policy-route-type",
+                    "ipv6",
+                    "--source-network",
+                    "any",
+                    "--dst-network",
+                    "any",
+                    "--next-hop-ip",
+                    "2091::1",
+                    "--in-interface",
+                    "any",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_policy_route")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["type"], "ipv6")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["forwarding_paths"][0]["weight"], 100)
+        self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
+
+    def test_cli_policy_route_get_uses_query_and_no_body(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_verify_policy_route",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--policy-route-type",
+                    "ipv6",
+                    "--page",
+                    "1",
+                    "--size",
+                    "40",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/policyroute?page=1&size=40&is_ip6=true"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+        self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
+
+    def test_cli_policy_route_delete_uses_body_id(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_delete_policy_route",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--id",
+                    "15",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["method"], "DELETE")
+        self.assertEqual(payload["data"]["request"]["payload"], {"id": 15})
+        self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
+
+    def test_cli_policy_route_priority_uses_pridpriconf(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_update_policy_route_priority",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--targetsite",
+                    "before",
+                    "--targetid",
+                    "1",
+                    "--moveid",
+                    "15",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/pridpriconf"))
+        self.assertEqual(
+            payload["data"]["request"]["payload"],
+            {"val": {"targetsite": "before", "targetid": 1, "moveid": 15, "is_ip6": False}},
+        )
         self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
 
     def test_cli_ospfv2_delete_dry_run_json_uses_fixed_envelope(self) -> None:

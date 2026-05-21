@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_config_policy_route
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_policy_route
-description: Define policy route configuration contract for NGFW capacity operations.
+description: Create an IPv4 or IPv6 NGFW policy route.
 parameters:
   state_ref:
     type: string
@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Policy route configuration object. source_network and dst_network are address object names unless the matching is_group flag is true.
+    description: Policy route create object. type must be ipv4 or ipv6 and next_hop_ip must match the selected IP version.
   idempotency_key:
     type: string
     required: true
@@ -33,12 +33,17 @@ inputs:
     source_network_is_group: false
     dst_network: any
     dst_network_is_group: false
+    type: ipv4
     next_hop_ip: 18.18.2.2
     in_interface: GE0_12
     outgoing_interface: ""
     service: any
-    weight: 1
+    service_is_group: false
+    active: true
+    weight: 100
     time_obj: ""
+    action: 1
+    config_source: 0
   idempotency_key: "<idempotency-key>"
 returns:
   status: success
@@ -81,6 +86,7 @@ preconditions:
   - Gate evidence exists before this high-risk configuration contract is used.
 postconditions:
   - Configuration result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_policy_route query can confirm the device route state.
 tags:
   - firewall
   - capacity

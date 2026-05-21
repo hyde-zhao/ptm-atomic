@@ -1,28 +1,31 @@
 schema_version: "1.1"
 op_id: fw_verify_policy_route
 device_type: fw
-description: Verify policy route configuration contract result for NGFW capacity.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_policy_route
+description: Query IPv4 or IPv6 NGFW policy routes.
 parameters:
-  config_result_ref:
+  session_ref:
     type: string
     required: false
-    description: Non-sensitive reference to the related configuration result.
-  config_result:
-    type: json
-    required: false
-    description: Inline non-sensitive configuration result envelope.
-  verification_rules:
-    type: list
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
     required: true
-    description: Rules used to check policy route configuration state.
-  expected_route_ref:
-    type: string
+    description: Query page number.
+  size:
+    type: int
     required: true
-    description: Expected route reference.
+    description: Query page size.
+  is_ip6:
+    type: bool
+    required: true
+    description: false queries IPv4 policy routes and true queries IPv6 policy routes.
 inputs:
-  state_ref: "<state-ref>"
-  config_result_ref: "<policy-route-config-result-ref>"
+  session_ref: "<session-ref>"
   config_domain: policy_route
+  page: 1
+  size: 40
+  is_ip6: false
 returns:
   status: success
   data:
@@ -42,15 +45,14 @@ error_types:
 verification:
   kind: capacity_domain
   rules:
-    - name: policy_route_state_matches
-      input_ref: "<policy-route-config-result-ref>"
-      expected_result: route, source, destination, and next hop references match
+    - name: policy_route_query_returns_requested_address_family
+      input_ref: "<policy-route-query-result-ref>"
+      expected_result: page, size, and is_ip6 filters are applied by the device query.
   summary_ref: "<policy-route-verification-summary-ref>"
 preconditions:
-  - A related policy route configuration result reference is available.
+  - External orchestration holds a valid session_ref.
 postconditions:
-  - Verification summary and diagnostic references are available to the caller.
-  - Any failed check is reported for manual handling.
+  - Policy route query result and diagnostic references are available to the caller.
 tags:
   - firewall
   - capacity
