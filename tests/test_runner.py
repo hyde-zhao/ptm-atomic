@@ -621,7 +621,7 @@ class RunCommandEnvelopeTests(unittest.TestCase):
         )
         self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
 
-    def test_cli_ospfv2_delete_dry_run_json_uses_fixed_envelope(self) -> None:
+    def test_cli_ospfv2_network_delete_uses_query_id(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
 
@@ -643,7 +643,8 @@ class RunCommandEnvelopeTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["op_id"], "fw_delete_ospfv2_network")
         self.assertEqual(payload["data"]["request"]["method"], "DELETE")
-        self.assertEqual(payload["data"]["request"]["payload"], {"id": "7"})
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/ospfnetwork?id=7"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
         self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
 
     def test_cli_ospfv2_interface_delete_uses_query_id(self) -> None:
@@ -787,7 +788,7 @@ class Ospfv2ExecuteTests(unittest.TestCase):
         self.assertIsNone(kwargs["json_payload"])
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer abc123")
 
-    def test_execute_delete_sends_id_payload(self) -> None:
+    def test_execute_ospfv2_network_delete_uses_query_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             session_file = Path(temp_dir) / "session.json"
             write_session_file(
@@ -814,8 +815,8 @@ class Ospfv2ExecuteTests(unittest.TestCase):
         request.assert_called_once()
         args, kwargs = request.call_args
         self.assertEqual(args[0], "DELETE")
-        self.assertTrue(args[1].endswith("/api/v1/ospfnetwork"))
-        self.assertEqual(kwargs["json_payload"], {"id": "7"})
+        self.assertTrue(args[1].endswith("/api/v1/ospfnetwork?id=7"))
+        self.assertIsNone(kwargs["json_payload"])
         self.assertEqual(kwargs["headers"]["AuthorizationToken"], "abc123")
 
     def test_execute_ospfv2_interface_delete_uses_query_id(self) -> None:

@@ -383,8 +383,7 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -396,7 +395,7 @@ operations:
       runner_required: true
       notes:
         - Network deletion requires an explicit entry id.
-        - The runner sends the id as the DELETE JSON body.
+        - The runner sends the id as a DELETE query value and sends no JSON body.
         - atomic-ops run can execute this request only when --execute is explicit.
   fw_verify_ospfv2_network:
     atom_ref: atoms/fw/fw_verify_ospfv2_network.yaml

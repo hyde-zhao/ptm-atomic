@@ -32,7 +32,7 @@ OSPFV2_ENDPOINTS = {
     "fw_capture_ospfv2_log": ("GET", "/api/v1/ospflog"),
 }
 PAGINATED_OPS = {"fw_verify_ospfv2_neighbor", "fw_capture_ospfv2_log"}
-QUERY_ID_DELETE_OPS = {"fw_delete_ospfv2_interface"}
+QUERY_ID_DELETE_OPS = {"fw_delete_ospfv2_network", "fw_delete_ospfv2_interface"}
 REDISTRIBUTE_PROTOCOLS = {"connected", "static", "rip"}
 
 

@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: OSPFv2 network delete object with id field.
+    description: OSPFv2 network delete selector with id query value; DELETE sends no JSON body.
   idempotency_key:
     type: string
     required: true
@@ -69,6 +69,7 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk routing configuration is used.
+  - DELETE must use id as a query value and must not send a JSON body.
 postconditions:
   - OSPFv2 network deletion result and diagnostic references are available to the caller.
 tags:
