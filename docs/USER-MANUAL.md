@@ -530,6 +530,7 @@ uv run atomic-ops adapter fw_config_policy_route
 uv run --python 3.11 python scripts/validate_schema.py atoms
 uv run --python 3.11 python scripts/layout_check.py
 uv run --python 3.11 python scripts/security_gate_check.py
+uv run --python 3.11 python scripts/check_aliases.py
 ```
 
 这些命令不连接设备，不读取 `.input`，不保存凭据。
