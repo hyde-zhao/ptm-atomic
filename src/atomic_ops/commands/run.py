@@ -57,10 +57,18 @@ POLICY_ROUTE_OPS = (
     "fw_verify_policy_route",
     "fw_update_policy_route_priority",
 )
+INTERFACE_OPS = (
+    "fw_config_interface",
+    "fw_update_interface",
+    "fw_verify_interface",
+    "fw_delete_interface",
+    "fw_delete_batch_interface",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_config_object",
     *POLICY_ROUTE_OPS,
+    *INTERFACE_OPS,
     *OSPFV2_OPS,
     *OSPFV3_BFD_OPS,
 )
@@ -133,9 +141,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Treat --dst-network as an address-group name.",
     )
-    parser.add_argument("--next-hop-ip", help="Policy-route forwarding next-hop IP address.")
+    parser.add_argument(
+        "--next-hop-ip",
+        help="Policy-route forwarding next-hop IP address. Required unless --outgoing-interface is set.",
+    )
     parser.add_argument("--in-interface", help="Policy-route incoming interface.")
-    parser.add_argument("--outgoing-interface", default="", help="Policy-route outgoing interface.")
+    parser.add_argument(
+        "--outgoing-interface",
+        default="",
+        help="Policy-route outgoing interface. Required unless --next-hop-ip is set.",
+    )
     parser.add_argument("--service", default="any", help="Policy-route service object/name.")
     parser.add_argument("--service-is-group", action="store_true", help="Treat --service as a service-group name.")
     parser.add_argument("--weight", type=int, default=100, help="Policy-route forwarding path weight.")
@@ -170,7 +185,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--targetid", help="Policy-route priority target id.")
     parser.add_argument("--moveid", help="Policy-route priority moving route id.")
 
-    parser.add_argument("--id", help="OSPFv2 entry id for global, redistribution, update, or delete operations.")
+    parser.add_argument(
+        "--id",
+        action="append",
+        help="Entry id. May be repeated for fw_delete_batch_interface.",
+    )
     enable_group = parser.add_mutually_exclusive_group()
     enable_group.add_argument("--enable", dest="enable", action="store_true", default=None, help="Enable OSPFv2 globally.")
     enable_group.add_argument("--disable", dest="enable", action="store_false", help="Disable OSPFv2 globally.")
@@ -207,6 +226,56 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1, help="OSPFv2 paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="OSPFv2 paginated query page size.")
     parser.add_argument(
+        "--interface-kind",
+        choices=("bvi", "sub", "physical", "bond"),
+        help="NGFW interface kind for /api/v1/intf payload generation.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("Route", "Switch", "Pair", "Monitor"),
+        default="Route",
+        help="NGFW interface mode for /api/v1/intf payload generation.",
+    )
+    parser.add_argument("--name", help="Interface val.name. Defaults to --id.")
+    parser.add_argument("--desc", default="", help="Interface description.")
+    interface_enabled_group = parser.add_mutually_exclusive_group()
+    interface_enabled_group.add_argument(
+        "--interface-enabled",
+        dest="interface_enabled",
+        action="store_true",
+        default=True,
+        help="Enable the NGFW interface.",
+    )
+    interface_enabled_group.add_argument(
+        "--interface-disabled",
+        dest="interface_enabled",
+        action="store_false",
+        help="Disable the NGFW interface.",
+    )
+    parser.add_argument(
+        "--ip-address",
+        action="append",
+        default=[],
+        help="Interface CIDR address. May be repeated for IPv4 and IPv6.",
+    )
+    parser.add_argument("--parent-name", help="Subinterface parent interface name.")
+    parser.add_argument("--sub-id", type=int, help="Subinterface VLAN/sub id.")
+    parser.add_argument("--bvi-instance", type=int, help="BVI instance id. Defaults to the numeric id suffix.")
+    parser.add_argument("--bond-id", type=int, help="Bond id. Defaults to the numeric id suffix.")
+    parser.add_argument(
+        "--bond-member",
+        action="append",
+        default=[],
+        help="Physical interface member for a bond. May be repeated.",
+    )
+    parser.add_argument("--bond-mode", type=int, default=5, help="Bond mode field.")
+    parser.add_argument("--bond-lb", type=int, default=0, help="Bond load-balance field.")
+    parser.add_argument("--link-type", type=int, help="Interface linkType field.")
+    parser.add_argument("--pvid", type=int, default=1, help="Switch/Pair/Monitor mode PVID.")
+    parser.add_argument("--allow-pass", help="Switch/Pair/Monitor mode allowPass field.")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+    parser.add_argument(
         "--auth-header",
         choices=("Authorization", "AuthorizationToken"),
         default="Authorization",
@@ -233,6 +302,8 @@ def run(args: argparse.Namespace) -> int:
             payload = _run_object(args)
         elif op_id in POLICY_ROUTE_OPS:
             payload = _run_policy_route(args)
+        elif op_id in INTERFACE_OPS:
+            payload = _run_interface(args)
         elif op_id in OSPFV2_OPS:
             payload = _run_ospfv2(args)
         elif op_id in OSPFV3_BFD_OPS:
@@ -354,7 +425,6 @@ def _run_policy_route(args: argparse.Namespace) -> dict[str, Any]:
     payload: dict[str, Any] | None
     if op_id in {"fw_config_policy_route", "fw_update_policy_route"}:
         _require_arg(args, "source_network")
-        _require_arg(args, "next_hop_ip")
         _require_arg(args, "in_interface")
         if op_id == "fw_update_policy_route":
             _require_arg(args, "id")
@@ -363,22 +433,22 @@ def _run_policy_route(args: argparse.Namespace) -> dict[str, Any]:
             source_network_is_group=bool(getattr(args, "source_network_is_group")),
             dst_network=getattr(args, "dst_network"),
             dst_network_is_group=bool(getattr(args, "dst_network_is_group")),
-            next_hop_ip=getattr(args, "next_hop_ip"),
+            next_hop_ip=getattr(args, "next_hop_ip") or "",
             in_interface=getattr(args, "in_interface"),
-            outgoing_interface=getattr(args, "outgoing_interface"),
+            outgoing_interface=getattr(args, "outgoing_interface") or "",
             service=getattr(args, "service"),
             service_is_group=bool(getattr(args, "service_is_group")),
             weight=int(getattr(args, "weight")),
             time_obj=getattr(args, "time_obj"),
             route_type=route_type,
-            entry_id=getattr(args, "id") if op_id == "fw_update_policy_route" else 0,
+            entry_id=_single_arg(args, "id") if op_id == "fw_update_policy_route" else 0,
             active=bool(getattr(args, "policy_route_active")),
             action=int(getattr(args, "policy_route_action")),
             config_source=int(getattr(args, "config_source")),
         )
     elif op_id == "fw_delete_policy_route":
         _require_arg(args, "id")
-        payload = build_policy_route_delete_payload(entry_id=getattr(args, "id"))
+        payload = build_policy_route_delete_payload(entry_id=_single_arg(args, "id"))
     elif op_id == "fw_update_policy_route_priority":
         _require_arg(args, "targetsite")
         _require_arg(args, "targetid")
@@ -426,7 +496,7 @@ def _run_ospfv2(args: argparse.Namespace) -> dict[str, Any]:
     payload = build_ospfv2_payload(
         op_id,
         {
-            "id": getattr(args, "id"),
+            "id": _single_arg(args, "id"),
             "enable": getattr(args, "enable"),
             "router_id": getattr(args, "router_id"),
             "originate": getattr(args, "originate"),
@@ -486,7 +556,7 @@ def _run_ospfv3_bfd(args: argparse.Namespace) -> dict[str, Any]:
     payload = build_ospfv3_bfd_payload(
         op_id,
         {
-            "id": getattr(args, "id"),
+            "id": _single_arg(args, "id"),
             "enable": getattr(args, "enable"),
             "router_id": getattr(args, "router_id"),
             "redistribute": getattr(args, "redistribute"),
@@ -526,14 +596,113 @@ def _run_ospfv3_bfd(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _run_interface(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.interface import (
+        build_interface_batch_delete_payload,
+        build_interface_dry_run,
+        build_interface_payload,
+        execute_interface,
+        load_json_payload,
+        validate_delete_payload,
+        validate_interface_payload,
+    )
+
+    op_id = getattr(args, "op_id")
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    raw_payload = load_json_payload(
+        payload_file=getattr(args, "payload_file"),
+        payload_json=getattr(args, "payload_json"),
+    )
+    payload: dict[str, Any] | None
+    if op_id == "fw_verify_interface":
+        payload = None
+    elif op_id == "fw_delete_interface":
+        payload = raw_payload or {"id": _single_arg(args, "id")}
+        payload = validate_delete_payload(payload)
+    elif op_id == "fw_delete_batch_interface":
+        payload = raw_payload or build_interface_batch_delete_payload(entry_ids=_arg_list(args, "id"))
+        payload = validate_interface_payload(payload, op_id=op_id)
+    else:
+        if raw_payload is not None:
+            payload = validate_interface_payload(raw_payload, op_id=op_id)
+        else:
+            _require_arg(args, "interface_kind")
+            _require_arg(args, "id")
+            payload = build_interface_payload(
+                interface_kind=getattr(args, "interface_kind"),
+                entry_id=_single_arg(args, "id"),
+                mode=getattr(args, "mode"),
+                ip_addresses=list(getattr(args, "ip_address") or []),
+                name=getattr(args, "name"),
+                desc=getattr(args, "desc"),
+                enabled=bool(getattr(args, "interface_enabled")),
+                parent_name=getattr(args, "parent_name"),
+                sub_id=getattr(args, "sub_id"),
+                bvi_instance=getattr(args, "bvi_instance"),
+                bond_id=getattr(args, "bond_id"),
+                bond_members=list(getattr(args, "bond_member") or []),
+                bond_mode=int(getattr(args, "bond_mode")),
+                bond_lb=int(getattr(args, "bond_lb")),
+                link_type=getattr(args, "link_type"),
+                pvid=int(getattr(args, "pvid")),
+                allow_pass=getattr(args, "allow_pass"),
+            )
+        payload = validate_interface_payload(payload, op_id=op_id)
+    if not getattr(args, "execute"):
+        return build_interface_dry_run(
+            op_id=op_id,
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            payload=payload,
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout")),
+        )
+    return execute_interface(
+        op_id=op_id,
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        payload=payload,
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout")),
+    )
+
+
 def _require_arg(args: argparse.Namespace, name: str) -> None:
     value = getattr(args, name)
-    if value is None or (isinstance(value, str) and not value.strip()):
+    if isinstance(value, list):
+        value = [item for item in value if isinstance(item, str) and item.strip()]
+    if value is None or value == [] or (isinstance(value, str) and not value.strip()):
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "Missing required runner argument.",
             {"argument": f"--{name.replace('_', '-')}"},
         )
+
+
+def _single_arg(args: argparse.Namespace, name: str) -> str | None:
+    value = getattr(args, name)
+    if isinstance(value, list):
+        if not value:
+            return None
+        if len(value) > 1:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Runner argument can only be provided once for this operation.",
+                {"argument": f"--{name.replace('_', '-')}"},
+            )
+        return value[0]
+    return value
+
+
+def _arg_list(args: argparse.Namespace, name: str) -> list[str]:
+    value = getattr(args, name)
+    if isinstance(value, list):
+        return [item for item in value if item]
+    if value:
+        return [value]
+    return []
 
 
 def _read_secret_env(env_name: str | None, field_name: str) -> str:

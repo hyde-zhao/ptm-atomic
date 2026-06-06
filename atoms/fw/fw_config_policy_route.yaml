@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Policy route create object. type must be ipv4 or ipv6 and next_hop_ip must match the selected IP version.
+    description: Policy route create object. type must be ipv4 or ipv6; forwarding path requires next_hop_ip or outgoing_interface, and next_hop_ip must match the selected IP version when provided.
   idempotency_key:
     type: string
     required: true
@@ -92,4 +92,9 @@ tags:
   - capacity
   - policy_route
   - configuration
+aliases:
+  - ipv6-route
+  - ipv6
+  - pbr
+  - policy-based-routing
 since_version: "1.1.0"

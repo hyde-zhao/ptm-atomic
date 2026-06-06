@@ -94,13 +94,15 @@ def _write_success(payload: dict[str, Any], output_format: str) -> None:
 
 
 def _operation_table(operations: list[dict[str, Any]]) -> str:
-    headers = ("op_id", "device_type", "idempotent", "since_version", "description")
+    headers = ("op_id", "device_type", "idempotent", "since_version", "tags", "aliases", "description")
     rows = [
         (
             str(item.get("op_id") or ""),
             str(item.get("device_type") or ""),
             str(item.get("idempotent")).lower(),
             str(item.get("since_version") or ""),
+            ", ".join(item.get("tags") or []),
+            ", ".join(item.get("aliases") or []),
             str(item.get("description") or ""),
         )
         for item in operations

@@ -211,6 +211,18 @@ atomic-ops run fw_config_policy_route \
   --in-interface GE0_12
 ```
 
+策略路由也支持出接口转发模式。此模式不传 `--next-hop-ip`，但必须传 `--outgoing-interface`；IPv4 和 IPv6 策略路由都适用：
+
+```bash
+atomic-ops run fw_config_policy_route \
+  --base-url https://<device-management-ip> \
+  --source-network any \
+  --dst-network any \
+  --in-interface GE0_2.106 \
+  --outgoing-interface tunnel2 \
+  --weight 123
+```
+
 确认无误后显式执行：
 
 ```bash
@@ -221,6 +233,42 @@ atomic-ops run fw_config_policy_route \
   --next-hop-ip 18.18.2.2 \
   --in-interface GE0_12 \
   --execute
+```
+
+接口配置 runner 调用 `/api/v1/intf`，按方法拆为 `fw_config_interface`、`fw_update_interface`、`fw_verify_interface`、`fw_delete_interface`，批量删除使用独立的 `fw_delete_batch_interface` 调用 `/api/v1/batch`。BVI 和子接口只支持 `Route` 模式；物理口和聚合口支持 `Route`、`Switch`、`Pair`、`Monitor`；物理口只允许 `PUT/GET`。
+
+创建 BVI 接口 dry-run：
+
+```bash
+atomic-ops run fw_config_interface \
+  --base-url https://<device-management-ip> \
+  --interface-kind bvi \
+  --id bvi109 \
+  --ip-address 191.109.0.31/24 \
+  --ip-address 2091:109::31/64
+```
+
+更新子接口或物理口使用 `fw_update_interface`；单个删除使用查询参数 `id` 且不发送请求体；查询接口返回全量接口：
+
+```bash
+atomic-ops run fw_update_interface \
+  --base-url https://<device-management-ip> \
+  --interface-kind sub \
+  --id GE0_2.106 \
+  --ip-address 192.106.0.31/24 \
+  --ip-address 2092:106::31/64
+
+atomic-ops run fw_verify_interface --base-url https://<device-management-ip>
+atomic-ops run fw_delete_interface --base-url https://<device-management-ip> --id GE0_2.106
+```
+
+批量删除是独立 batch 请求：
+
+```bash
+atomic-ops run fw_delete_batch_interface \
+  --base-url https://<device-management-ip> \
+  --id bvi109 \
+  --id GE0_2.106
 ```
 
 OSPFv2 按 HTTP 方法拆分为独立原子操作。先 dry-run 查看全局配置请求体：
@@ -339,7 +387,7 @@ atomic-ops run fw_capture_bfd_log --base-url https://<device-management-ip> --pa
 | `networking` | 1 | `fw_verify_acl_rule` |
 | `security` | 1 | `fw_verify_acl_rule` |
 | `ngfw_installation` | 5 | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
-| `ngfw_capacity_config` | 27 | `fw_config_interface`、`fw_config_policy_route`、`fw_config_ospfv2_global`、`fw_config_ospfv3_global`、`fw_config_bfd_global` |
+| `ngfw_capacity_config` | 33 | `fw_config_interface`、`fw_update_interface`、`fw_delete_interface`、`fw_config_policy_route`、`fw_config_ospfv2_global` |
 | `ngfw_verification` | 25 | `fw_verify_interface`、`fw_verify_policy_route`、`fw_verify_ospfv2_neighbor`、`fw_verify_ospfv3_neighbor`、`fw_verify_bfd_session` |
 | `ngfw_batch_config` | 10 | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_acl_policy`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
 

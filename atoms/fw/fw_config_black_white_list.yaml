@@ -79,4 +79,9 @@ tags:
   - capacity
   - black_white_list
   - configuration
+aliases:
+  - blacklist
+  - whitelist
+  - url-filter
+  - url-filtering
 since_version: "1.1.0"

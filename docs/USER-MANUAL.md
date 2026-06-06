@@ -81,6 +81,27 @@ atomic-ops list
 atomic-ops list --format json
 ```
 
+`list` 表格输出包含 `op_id`、`device_type`、`idempotent`、`since_version`、`tags`（逗号连接）、`aliases`（逗号连接，同义搜索词）和 `description` 七列。JSON 输出额外包含 `parameters_summary` 字段（参数名、类型、是否必填），示例如下：
+
+```json
+{
+  "op_id": "fw_config_interface",
+  "description": "Create an NGFW interface entry through /api/v1/intf.",
+  "idempotent": true,
+  "device_type": "fw",
+  "since_version": "1.3.0",
+  "tags": ["firewall", "capacity", "interface", "configuration"],
+  "aliases": ["subinterface", "trunk", "lag", "bond", "bvi", "vlan-interface"],
+  "parameters_summary": [
+    {"name": "state_ref", "type": "string", "required": false},
+    {"name": "config_domain", "type": "string", "required": true},
+    {"name": "params", "type": "json", "required": true}
+  ]
+}
+```
+
+`aliases` 为上游语义匹配消费者（如 m-analyzer）提供自然语言同义搜索词。例如用户描述 "创建子接口" 时，m-analyzer 可通过 `aliases` 中的 `subinterface` 匹配到 `fw_config_interface`。没有变体名的 op 此字段为空列表。
+
 按设备和 package 过滤：
 
 ```bash
@@ -187,6 +208,18 @@ atomic-ops run fw_config_policy_route \
   --in-interface GE0_12
 ```
 
+策略路由也支持出接口转发模式。此模式不传 `--next-hop-ip`，但必须传 `--outgoing-interface`；IPv4 和 IPv6 策略路由都适用：
+
+```bash
+atomic-ops run fw_config_policy_route \
+  --base-url https://<device-management-ip> \
+  --source-network any \
+  --dst-network any \
+  --in-interface GE0_2.106 \
+  --outgoing-interface tunnel2 \
+  --weight 123
+```
+
 策略路由真实执行：
 
 ```bash
@@ -199,7 +232,45 @@ atomic-ops run fw_config_policy_route \
   --execute
 ```
 
-策略路由 runner 调用 `POST /api/v1/policyroute`，默认使用登录会话和 `Authorization` 头。`--source-network` 和 `--dst-network` 是地址对象名；如果传入的是地址组名，必须同时加 `--source-network-is-group` 或 `--dst-network-is-group`。若目标版本要求 capacity 风格头名，可传 `--auth-header AuthorizationToken`。
+策略路由 runner 调用 `POST /api/v1/policyroute`，默认使用登录会话和 `Authorization` 头。`--source-network` 和 `--dst-network` 是地址对象名；如果传入的是地址组名，必须同时加 `--source-network-is-group` 或 `--dst-network-is-group`。转发路径要求 `--next-hop-ip` 或 `--outgoing-interface` 至少提供一个；提供 `--next-hop-ip` 时地址族必须匹配 `--policy-route-type`。若目标版本要求 capacity 风格头名，可传 `--auth-header AuthorizationToken`。
+
+接口配置 runner 调用 `/api/v1/intf`。`fw_config_interface` 使用 `POST` 创建 BVI、子接口或聚合口；`fw_update_interface` 使用 `PUT` 更新 BVI、子接口、物理口或聚合口；`fw_verify_interface` 使用 `GET` 查询全量接口且不发送请求体；`fw_delete_interface` 使用 `DELETE /api/v1/intf?id=<id>` 单删且不发送请求体。`fw_delete_batch_interface` 是独立的 `/api/v1/batch` 批量删除命令。
+
+BVI 和子接口只支持 `Route` 模式；物理口和聚合口支持 `Route`、`Switch`、`Pair`、`Monitor`。物理口只支持 `PUT/GET`，不支持创建或删除。
+
+创建 BVI 接口 dry-run：
+
+```bash
+atomic-ops run fw_config_interface \
+  --base-url https://<device-management-ip> \
+  --interface-kind bvi \
+  --id bvi109 \
+  --ip-address 191.109.0.31/24 \
+  --ip-address 2091:109::31/64
+```
+
+更新子接口、查询全量接口、删除单个接口：
+
+```bash
+atomic-ops run fw_update_interface \
+  --base-url https://<device-management-ip> \
+  --interface-kind sub \
+  --id GE0_2.106 \
+  --ip-address 192.106.0.31/24 \
+  --ip-address 2092:106::31/64
+
+atomic-ops run fw_verify_interface --base-url https://<device-management-ip>
+atomic-ops run fw_delete_interface --base-url https://<device-management-ip> --id GE0_2.106
+```
+
+批量删除接口：
+
+```bash
+atomic-ops run fw_delete_batch_interface \
+  --base-url https://<device-management-ip> \
+  --id bvi109 \
+  --id GE0_2.106
+```
 
 OSPFv2、OSPFv3 和 BFD runner 按 HTTP 方法拆分 op。GET 查询发送空请求体；POST 创建；PUT 更新；network DELETE 使用 `{"id": "<id>"}`；OSPFv2/OSPFv3 interface DELETE 使用 `?id=<interface>`。所有真实请求都需要已有登录 session 和 `--execute`。
 
@@ -337,7 +408,7 @@ atomic-ops packages --format json
 | `networking` | 网络连通性与防火墙策略验证示例 | 1 |
 | `security` | 安全策略与访问控制验证示例 | 1 |
 | `ngfw_installation` | NGFW 安装、初始化、登录和健康检查合同 | 5 |
-| `ngfw_capacity_config` | 容量域、OSPFv2、OSPFv3 和 BFD 的单设备配置合同 | 27 |
+| `ngfw_capacity_config` | 容量域、OSPFv2、OSPFv3 和 BFD 的单设备配置合同 | 33 |
 | `ngfw_verification` | 容量域、OSPFv2、OSPFv3 和 BFD 的只读验证合同 | 25 |
 | `ngfw_batch_config` | 十个容量域的多设备批量配置合同 | 10 |
 
@@ -348,7 +419,7 @@ atomic-ops packages --format json
 | Package | 示例 op_id |
 |---|---|
 | `ngfw_installation` | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
-| `ngfw_capacity_config` | `fw_config_interface`、`fw_config_policy_route`、`fw_config_ospfv2_global`、`fw_config_ospfv3_global`、`fw_config_bfd_global` |
+| `ngfw_capacity_config` | `fw_config_interface`、`fw_update_interface`、`fw_delete_interface`、`fw_config_policy_route`、`fw_config_ospfv2_global` |
 | `ngfw_verification` | `fw_verify_interface`、`fw_verify_policy_route`、`fw_verify_ospfv2_neighbor`、`fw_verify_ospfv3_neighbor`、`fw_verify_bfd_session` |
 | `ngfw_batch_config` | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_acl_policy`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
 
@@ -426,7 +497,7 @@ atom 顶层使用 `schema_version: "1.1"`。字段参考见 `docs/schema-field-r
 | 边界 | 说明 |
 |---|---|
 | 非白名单设备连接 | 不连接真实防火墙或管理面。 |
-| 通用 atom 执行 | 不执行 `fw_install_ngfw_image`、`fw_config_interface` 等未接入 runner 的 atom。 |
+| 通用 atom 执行 | 不执行 `fw_install_ngfw_image` 等未接入 runner 的 atom。 |
 | 通用配置下发 | 不推送白名单以外的配置，不修改白名单以外的设备状态。 |
 | 凭据保存 | 不保存账号、密码、cookie、私钥；会话材料只写入用户指定 session 文件，且不允许写入仓库目录。 |
 | 自动回滚 | 不在失败后自动回滚设备配置。 |

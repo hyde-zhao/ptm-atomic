@@ -139,6 +139,17 @@ properties:
       contract. The referenced profile describes endpoint and payload shape only;
       it does not contain device addresses, credentials, cookies, or production
       response data.
+  aliases:
+    type: array
+    description: >-
+      Natural-language synonyms that consumers (e.g. m-analyzer) use to match
+      user descriptions to this operation. For example, fw_config_interface may
+      list subinterface, trunk, lag, bond, bvi as aliases because it covers all
+      these interface sub-types via its params.type field.
+    items:
+      type: string
+      minLength: 1
+    uniqueItems: true
   preconditions:
     type: array
     description: Human-readable preconditions that must hold before execution.

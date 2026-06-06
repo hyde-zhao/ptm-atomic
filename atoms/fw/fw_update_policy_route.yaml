@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Policy route update object with matching top-level id and val.id, type, match fields, and forwarding path.
+    description: Policy route update object with matching top-level id and val.id, type, match fields, and forwarding path. The forwarding path requires next_hop_ip or outgoing_interface; next_hop_ip must match the selected IP version when provided.
   idempotency_key:
     type: string
     required: true
@@ -94,4 +94,9 @@ tags:
   - capacity
   - policy_route
   - configuration
+aliases:
+  - ipv6-route
+  - ipv6
+  - pbr
+  - policy-based-routing
 since_version: "1.2.0"

@@ -4,6 +4,138 @@ device_type: fw
 profile_family: ngfw
 description: Public non-sensitive NGFW API shape profile for external script generators.
 operations:
+  fw_config_interface:
+    atom_ref: atoms/fw/fw_config_interface.yaml
+    intent: Build an interface creation request for bvi, subinterface, or bond objects.
+    request:
+      method: POST
+      path: /api/v1/intf
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <interface-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - BVI and subinterface payloads only support Route mode.
+        - Physical interfaces are not created; use fw_update_interface for existing physical interfaces.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_update_interface:
+    atom_ref: atoms/fw/fw_update_interface.yaml
+    intent: Build an interface update request for bvi, subinterface, physical, or bond objects.
+    request:
+      method: PUT
+      path: /api/v1/intf
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <interface-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Physical and bond interfaces support Route, Switch, Pair, and Monitor modes.
+        - BVI and subinterface payloads only support Route mode.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_verify_interface:
+    atom_ref: atoms/fw/fw_verify_interface.yaml
+    intent: Build an all-interface query request.
+    request:
+      method: GET
+      path: /api/v1/intf
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <interface-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET /api/v1/intf returns all interfaces and sends no JSON body.
+  fw_delete_interface:
+    atom_ref: atoms/fw/fw_delete_interface.yaml
+    intent: Build a single-interface delete request by query id.
+    request:
+      method: DELETE
+      path: /api/v1/intf
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <interface-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE sends the interface id as ?id=<interface-id> and sends no JSON body.
+        - Physical interfaces are not deletable.
+        - atomic-ops run can execute this request only when --execute is explicit.
+  fw_delete_batch_interface:
+    atom_ref: atoms/fw/fw_delete_batch_interface.yaml
+    intent: Build a batch request that deletes multiple interface entries.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/intf
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <interface-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch interface deletion is independent from single-interface DELETE /api/v1/intf.
+        - Each batch item must be DELETE /api/v1/intf with body.id as a non-empty list.
+        - atomic-ops run can execute this request only when --execute is explicit.
   fw_config_object:
     atom_ref: atoms/fw/fw_config_object.yaml
     intent: Build an IPv4 address-object configuration request from a validated atom parameter set.
@@ -81,7 +213,8 @@ operations:
       runner_required: true
       notes:
         - Adapter profiles describe endpoint and payload shape without runtime values.
-        - type must be ipv4 or ipv6; next_hop_ip must match the selected IP version.
+        - type must be ipv4 or ipv6; forwarding_paths entries require next_hop_ip or outgoing_interface.
+        - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - source_network and dst_network are address object names unless the matching is_group flag is true.
         - Live endpoint, session material, and credentials must come from runner input.
         - atomic-ops run can execute this request only when --execute is explicit.
@@ -130,7 +263,8 @@ operations:
       runner_required: true
       notes:
         - PUT updates an existing policy-route id on /api/v1/policyroute.
-        - type must be ipv4 or ipv6; next_hop_ip must match the selected IP version.
+        - type must be ipv4 or ipv6; forwarding_paths entries require next_hop_ip or outgoing_interface.
+        - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - Live endpoint, session material, and credentials must come from runner input.
         - atomic-ops run can execute this request only when --execute is explicit.
   fw_delete_policy_route:

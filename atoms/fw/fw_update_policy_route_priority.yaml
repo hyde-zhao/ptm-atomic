@@ -81,4 +81,9 @@ tags:
   - capacity
   - policy_route
   - configuration
+aliases:
+  - ipv6-route
+  - ipv6
+  - pbr
+  - policy-based-routing
 since_version: "1.2.0"

@@ -34,9 +34,9 @@ def build_policy_route_payload(
     source_network_is_group: bool,
     dst_network: str,
     dst_network_is_group: bool,
-    next_hop_ip: str,
+    next_hop_ip: str | None,
     in_interface: str,
-    outgoing_interface: str,
+    outgoing_interface: str | None,
     service: str,
     weight: int,
     time_obj: str,
@@ -49,24 +49,32 @@ def build_policy_route_payload(
 ) -> dict[str, Any]:
     _validate_non_empty("source_network", source_network)
     _validate_non_empty("dst_network", dst_network)
-    _validate_non_empty("next_hop_ip", next_hop_ip)
     _validate_non_empty("in_interface", in_interface)
     route_type = _validate_route_type(route_type)
-    try:
-        parsed_next_hop = ip_address(next_hop_ip)
-    except ValueError as exc:
+    next_hop_ip = (next_hop_ip or "").strip()
+    outgoing_interface = (outgoing_interface or "").strip()
+    if not next_hop_ip and not outgoing_interface:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
-            "next-hop IP must be a valid IP address.",
-            {"field": "next_hop_ip"},
-        ) from exc
-    expected_version = 6 if route_type == "ipv6" else 4
-    if parsed_next_hop.version != expected_version:
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Policy-route next-hop IP version must match the route type.",
-            {"field": "next_hop_ip", "route_type": route_type, "version": parsed_next_hop.version},
+            "Policy-route forwarding path requires next-hop IP or outgoing interface.",
+            {"fields": ["next_hop_ip", "outgoing_interface"]},
         )
+    if next_hop_ip:
+        try:
+            parsed_next_hop = ip_address(next_hop_ip)
+        except ValueError as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "next-hop IP must be a valid IP address.",
+                {"field": "next_hop_ip"},
+            ) from exc
+        expected_version = 6 if route_type == "ipv6" else 4
+        if parsed_next_hop.version != expected_version:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Policy-route next-hop IP version must match the route type.",
+                {"field": "next_hop_ip", "route_type": route_type, "version": parsed_next_hop.version},
+            )
     if weight < 1:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",

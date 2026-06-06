@@ -1,34 +1,26 @@
 schema_version: "1.1"
 op_id: fw_verify_interface
 device_type: fw
-description: Verify interface configuration contract result for NGFW capacity operations.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_interface
+description: Query all NGFW interface entries from /api/v1/intf.
 parameters:
-  config_result_ref:
+  session_ref:
     type: string
     required: false
-    description: Non-sensitive reference to the related configuration result.
-  config_result:
-    type: json
-    required: false
-    description: Inline non-sensitive configuration result envelope.
-  verification_rules:
-    type: list
-    required: true
-    description: Rules used to check interface configuration state.
-  expected_interface_ref:
+    description: Non-sensitive session reference from an external orchestrator.
+  query_domain:
     type: string
     required: true
-    description: Expected interface reference.
+    description: Must be interface for this operation.
 inputs:
-  state_ref: "<state-ref>"
-  config_result_ref: "<interface-config-result-ref>"
-  config_domain: interface
+  session_ref: "<session-ref>"
+  query_domain: interface
 returns:
   status: success
   data:
-    verification_summary_ref: "<interface-verification-summary-ref>"
-    verification_status: passed
-    manual_handling_ref: "<manual-handling-ref>"
+    observed_state_ref: "<interface-state-ref>"
+    state_status: valid
+    expires_at: null
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
@@ -36,24 +28,23 @@ timeout_ms: 30000
 error_types:
   - NONE
   - VALIDATION_FAILED
-  - CONFIG_RESULT_MISSING
-  - STATE_MISMATCH
-  - MANUAL_HANDLING_REQUIRED
-verification:
-  kind: capacity_domain
-  rules:
-    - name: interface_state_matches
-      input_ref: "<interface-config-result-ref>"
-      expected_result: interface reference, admin state, address reference, and digest match
-  summary_ref: "<interface-verification-summary-ref>"
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
 preconditions:
-  - A related interface configuration result reference is available.
+  - External orchestration holds a valid session_ref or runner session file.
 postconditions:
-  - Verification summary and diagnostic references are available to the caller.
-  - Any failed check is reported for manual handling.
+  - All interface entries are available to the caller.
 tags:
   - firewall
   - capacity
   - interface
   - verification
-since_version: "1.1.0"
+aliases:
+  - subinterface
+  - trunk
+  - lag
+  - bond
+  - bvi
+  - vlan-interface
+since_version: "1.3.0"

@@ -68,6 +68,9 @@ class OperationSummary:
     idempotent: bool
     device_type: str
     since_version: str | None
+    tags: list[str]
+    parameters_summary: list[dict[str, Any]]
+    aliases: list[str]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -361,6 +364,9 @@ class Repository:
             idempotent=bool(data.get("idempotent", False)),
             device_type=device_type,
             since_version=_optional_string_field(data, "since_version"),
+            tags=_tags_field(data, "tags"),
+            parameters_summary=_parameters_summary(data.get("parameters")),
+            aliases=_tags_field(data, "aliases"),
         )
 
     def _package_manifest_from_data(self, path: Path, data: Any) -> PackageManifest:
@@ -458,3 +464,26 @@ def _string_field(data: dict[str, Any], key: str) -> str:
 def _optional_string_field(data: dict[str, Any], key: str) -> str | None:
     value = data.get(key)
     return value if isinstance(value, str) else None
+
+
+def _tags_field(data: dict[str, Any], key: str) -> list[str]:
+    """从 YAML 数据中提取 tags 列表，缺失或类型不符时返回空列表。"""
+    value = data.get(key)
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return value
+    return []
+
+
+def _parameters_summary(parameters: Any) -> list[dict[str, Any]]:
+    """从 YAML parameters 节点提取参数摘要：名称、类型、是否必填。"""
+    if not isinstance(parameters, dict):
+        return []
+    result: list[dict[str, Any]] = []
+    for name, spec in parameters.items():
+        if isinstance(spec, dict):
+            result.append({
+                "name": name,
+                "type": spec.get("type", ""),
+                "required": bool(spec.get("required", False)),
+            })
+    return result

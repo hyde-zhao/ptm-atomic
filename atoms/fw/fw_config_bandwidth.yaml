@@ -79,4 +79,8 @@ tags:
   - capacity
   - bandwidth
   - configuration
+aliases:
+  - qos
+  - traffic-shaping
+  - rate-limit
 since_version: "1.1.0"

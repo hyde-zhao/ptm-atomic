@@ -12,6 +12,11 @@ from unittest.mock import patch
 from atomic_ops.cli import main as cli_main
 from atomic_ops.commands.run import _to_run_envelope
 from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.interface import (
+    build_interface_batch_delete_payload,
+    build_interface_payload,
+    execute_interface,
+)
 from atomic_ops.runner.ngfw_login import login
 from atomic_ops.runner.object import build_address_object_payload
 from atomic_ops.runner.ospfv2 import (
@@ -38,6 +43,71 @@ from atomic_ops.runner.policy_route import (
     build_policy_route_priority_payload,
 )
 from atomic_ops.runner.session import read_session_file, write_session_file
+
+
+class InterfacePayloadTests(unittest.TestCase):
+    def test_build_bvi_route_payload(self) -> None:
+        payload = build_interface_payload(
+            interface_kind="bvi",
+            entry_id="bvi109",
+            ip_addresses=["191.109.0.31/24", "2091:109::31/64"],
+        )
+
+        self.assertEqual(payload["id"], "bvi109")
+        self.assertEqual(payload["val"]["name"], "bvi109")
+        self.assertEqual(payload["val"]["type"], 14)
+        self.assertEqual(payload["val"]["mode"], "Route")
+        self.assertEqual(payload["val"]["bvi"]["instance"], 109)
+        self.assertEqual(payload["val"]["bvi"]["bridge"]["name"], "bvi109")
+        self.assertEqual(payload["val"]["ip_addresses"], ["191.109.0.31/24", "2091:109::31/64"])
+
+    def test_build_subinterface_route_payload(self) -> None:
+        payload = build_interface_payload(
+            interface_kind="sub",
+            entry_id="GE0_2.106",
+            ip_addresses=["192.106.0.31/24", "2092:106::31/64"],
+        )
+
+        self.assertEqual(payload["val"]["type"], 1)
+        self.assertEqual(payload["val"]["sub"], {"parent_name": "GE0_2", "sub_id": 106})
+        self.assertEqual(payload["val"]["ip6_nd"], {"ip_prefix": []})
+        self.assertEqual(payload["val"]["ip6_racfg"], {"suppress": 0})
+
+    def test_build_physical_monitor_payload(self) -> None:
+        payload = build_interface_payload(interface_kind="physical", entry_id="GE0_18", mode="Monitor")
+
+        self.assertEqual(payload["val"]["type"], 3)
+        self.assertEqual(payload["val"]["mode"], "Monitor")
+        self.assertEqual(payload["val"]["allowPass"], "1-4094")
+        self.assertEqual(payload["val"]["linkType"], 2)
+
+    def test_build_bond_switch_payload(self) -> None:
+        payload = build_interface_payload(
+            interface_kind="bond",
+            entry_id="bond1",
+            mode="Switch",
+            bond_members=["GE0_3"],
+            ip_addresses=["3.3.3.3/22"],
+        )
+
+        self.assertEqual(payload["val"]["type"], 10)
+        self.assertEqual(payload["val"]["bond"]["id"], 1)
+        self.assertEqual(payload["val"]["bond"]["bonded_interfaces"][0]["name"], "GE0_3")
+        self.assertEqual(payload["val"]["pvid"], 1)
+
+    def test_rejects_bvi_non_route_mode(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_interface_payload(interface_kind="bvi", entry_id="bvi109", mode="Switch")
+
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_build_batch_delete_payload(self) -> None:
+        payload = build_interface_batch_delete_payload(entry_ids=["bvi109", "GE0_2.106"])
+
+        self.assertEqual(payload["batch"][0]["method"], "DELETE")
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/intf")
+        self.assertEqual(payload["batch"][0]["body"], {"id": ["bvi109"]})
+        self.assertEqual(payload["batch"][1]["body"], {"id": ["GE0_2.106"]})
 
 
 class PolicyRoutePayloadTests(unittest.TestCase):
@@ -81,6 +151,65 @@ class PolicyRoutePayloadTests(unittest.TestCase):
         self.assertEqual(payload["val"]["forwarding_paths"][0]["next_hop_ip"], "2091::1")
         self.assertEqual(payload["val"]["forwarding_paths"][0]["health_check"], {})
         self.assertEqual(payload["val"]["config_source"], 0)
+
+    def test_build_ipv4_policy_route_payload_with_outgoing_interface_only(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="",
+            in_interface="GE0_2.106",
+            outgoing_interface="tunnel2",
+            service="any",
+            weight=123,
+            time_obj="",
+            route_type="ipv4",
+        )
+
+        forwarding_path = payload["val"]["forwarding_paths"][0]
+        self.assertEqual(payload["val"]["type"], "ipv4")
+        self.assertEqual(payload["val"]["in_interface"], "GE0_2.106")
+        self.assertEqual(forwarding_path["next_hop_ip"], "")
+        self.assertEqual(forwarding_path["outgoing_interface"], "tunnel2")
+        self.assertEqual(forwarding_path["weight"], 123)
+
+    def test_build_ipv6_policy_route_payload_with_outgoing_interface_only(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="",
+            in_interface="GE0_4",
+            outgoing_interface="tunnel64",
+            service="any",
+            weight=100,
+            time_obj="",
+            route_type="ipv6",
+        )
+
+        forwarding_path = payload["val"]["forwarding_paths"][0]
+        self.assertEqual(payload["val"]["type"], "ipv6")
+        self.assertEqual(forwarding_path["next_hop_ip"], "")
+        self.assertEqual(forwarding_path["outgoing_interface"], "tunnel64")
+
+    def test_rejects_policy_route_without_next_hop_or_outgoing_interface(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_policy_route_payload(
+                source_network="any",
+                source_network_is_group=False,
+                dst_network="any",
+                dst_network_is_group=False,
+                next_hop_ip="",
+                in_interface="GE0_12",
+                outgoing_interface="",
+                service="any",
+                weight=1,
+                time_obj="",
+            )
+
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
 
     def test_rejects_next_hop_version_mismatch(self) -> None:
         with self.assertRaises(RunnerError) as context:
@@ -471,6 +600,112 @@ class RunCommandEnvelopeTests(unittest.TestCase):
         self.assertEqual(payload["data"]["request"]["method"], "POST")
         self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
 
+    def test_cli_interface_bvi_post_generates_payload(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_config_interface",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--interface-kind",
+                    "bvi",
+                    "--id",
+                    "bvi109",
+                    "--ip-address",
+                    "191.109.0.31/24",
+                    "--ip-address",
+                    "2091:109::31/64",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_interface")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/intf"))
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["type"], 14)
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["bvi"]["instance"], 109)
+        self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
+
+    def test_cli_interface_get_sends_no_body(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_verify_interface",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/intf"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_interface_delete_uses_query_id_and_no_body(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_delete_interface",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--id",
+                    "GE0_2.106",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["method"], "DELETE")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/intf?id=GE0_2.106"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_interface_batch_delete_uses_batch_body(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_delete_batch_interface",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--id",
+                    "bvi109",
+                    "--id",
+                    "GE0_2.106",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/batch"))
+        self.assertEqual(payload["data"]["request"]["payload"]["batch"][0]["body"], {"id": ["bvi109"]})
+        self.assertEqual(payload["data"]["request"]["payload"]["batch"][1]["body"], {"id": ["GE0_2.106"]})
+
     def test_cli_ospfv2_post_dry_run_json_uses_fixed_envelope(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -531,6 +766,43 @@ class RunCommandEnvelopeTests(unittest.TestCase):
         self.assertEqual(payload["data"]["request"]["method"], "POST")
         self.assertEqual(payload["data"]["request"]["payload"]["val"]["type"], "ipv6")
         self.assertEqual(payload["data"]["request"]["payload"]["val"]["forwarding_paths"][0]["weight"], 100)
+        self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
+
+    def test_cli_policy_route_outgoing_interface_only_dry_run_json(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "fw_config_policy_route",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "--source-network",
+                    "any",
+                    "--dst-network",
+                    "any",
+                    "--in-interface",
+                    "GE0_2.106",
+                    "--outgoing-interface",
+                    "tunnel2",
+                    "--weight",
+                    "123",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        forwarding_path = payload["data"]["request"]["payload"]["val"]["forwarding_paths"][0]
+        self.assertEqual(payload["op_id"], "fw_config_policy_route")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["type"], "ipv4")
+        self.assertEqual(forwarding_path["next_hop_ip"], "")
+        self.assertEqual(forwarding_path["outgoing_interface"], "tunnel2")
+        self.assertEqual(forwarding_path["weight"], 123)
         self.assertIn("TLS_VERIFY_DISABLED", stderr.getvalue())
 
     def test_cli_policy_route_get_uses_query_and_no_body(self) -> None:
@@ -847,6 +1119,63 @@ class Ospfv2ExecuteTests(unittest.TestCase):
         self.assertEqual(args[0], "DELETE")
         self.assertTrue(args[1].endswith("/api/v1/ospfinterface?id=GE0_12"))
         self.assertIsNone(kwargs["json_payload"])
+
+
+class InterfaceExecuteTests(unittest.TestCase):
+    def test_execute_interface_get_sends_no_json_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.interface.request_json", return_value=(200, {"vals": []}, "{}")) as request:
+                result = execute_interface(
+                    op_id="fw_verify_interface",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=None,
+                    verify_tls=False,
+                    timeout=10,
+                )
+
+        self.assertEqual(result["status"], "success")
+        args, kwargs = request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertTrue(args[1].endswith("/api/v1/intf"))
+        self.assertIsNone(kwargs["json_payload"])
+
+    def test_execute_interface_delete_uses_query_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.interface.request_json", return_value=(200, {"ok": True}, "{}")) as request:
+                result = execute_interface(
+                    op_id="fw_delete_interface",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="AuthorizationToken",
+                    payload={"id": "GE0_2.106"},
+                    verify_tls=False,
+                    timeout=10,
+                )
+
+        self.assertEqual(result["status"], "success")
+        args, kwargs = request.call_args
+        self.assertEqual(args[0], "DELETE")
+        self.assertTrue(args[1].endswith("/api/v1/intf?id=GE0_2.106"))
+        self.assertIsNone(kwargs["json_payload"])
+        self.assertEqual(kwargs["headers"]["AuthorizationToken"], "abc123")
 
 
 class Ospfv3BfdExecuteTests(unittest.TestCase):

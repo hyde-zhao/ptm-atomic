@@ -84,9 +84,10 @@ Most `atomic-ops` commands remain read-only. `atomic-ops run` is the only execut
 | Method | `POST` |
 | Path | `/api/v1/policyroute` |
 | Payload root | `id` and `val` |
-| Required route fields | `val.source_network`, `val.dst_network`, `val.source_network_is_group`, `val.dst_network_is_group`, `val.forwarding_paths[].next_hop_ip`, `val.in_interface` |
+| Required route fields | `val.source_network`, `val.dst_network`, `val.source_network_is_group`, `val.dst_network_is_group`, `val.in_interface`, and at least one of `val.forwarding_paths[].next_hop_ip` or `val.forwarding_paths[].outgoing_interface` |
 
 `val.source_network` and `val.dst_network` are address object names by default. If either value is an address group name, the corresponding `*_is_group` field must be `true`.
+`val.forwarding_paths[].next_hop_ip` may be empty for outgoing-interface forwarding mode. When it is provided, it must be a valid IPv4 or IPv6 address matching `val.type`.
 
 The runner obtains live session material from the local session file created by `atomic-ops run fw_login_web_management --execute`.
 
@@ -94,6 +95,8 @@ OSPFv2 operations are represented one HTTP method at a time because adapter sche
 
 | Operation family | Methods | Paths |
 |---|---|---|
+| Interface entries | `POST`, `PUT`, `DELETE`, `GET` | `/api/v1/intf` |
+| Interface batch deletion | `POST` | `/api/v1/batch` |
 | OSPFv2 global config | `PUT`, `GET` | `/api/v1/ospfconfig` |
 | OSPFv2 redistribution | `PUT`, `GET` | `/api/v1/ospfredist` |
 | OSPFv2 network entries | `POST`, `PUT`, `DELETE`, `GET` | `/api/v1/ospfnetwork` |
@@ -110,7 +113,7 @@ OSPFv2 operations are represented one HTTP method at a time because adapter sche
 | BFD sessions | `GET` | `/api/v1/bfdsession` |
 | BFD logs | `GET` | `/api/v1/bfdlog` |
 
-GET entries keep `payload_template: {}` to satisfy the schema while the runner sends no JSON body. Network DELETE entries use the id-only JSON shape `{"id": "<id>"}`. OSPFv2/OSPFv3 interface DELETE entries use `?id=<interface>` because the device ignores id-only DELETE bodies for interface deletion.
+GET entries keep `payload_template: {}` to satisfy the schema while the runner sends no JSON body. Interface GET calls `/api/v1/intf` without filters and returns all interfaces. Interface DELETE and OSPFv2/OSPFv3 interface DELETE entries use `?id=<interface>` and send no body. Network DELETE entries use the id-only JSON shape `{"id": "<id>"}`. Interface batch deletion is modeled separately as `POST /api/v1/batch`.
 
 ## Validation
 

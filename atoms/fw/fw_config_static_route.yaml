@@ -79,4 +79,6 @@ tags:
   - capacity
   - static_route
   - configuration
+aliases:
+  - static-routing
 since_version: "1.1.0"

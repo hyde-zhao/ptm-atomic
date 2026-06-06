@@ -81,4 +81,9 @@ tags:
   - capacity
   - object
   - configuration
+aliases:
+  - address-object
+  - service-object
+  - ip-pool
+  - ippool
 since_version: "1.1.0"

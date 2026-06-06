@@ -68,6 +68,7 @@ atomic-ops adapter fw_config_ospfv3_global
 atomic-ops adapter fw_config_bfd_global
 atomic-ops run fw_config_object --base-url https://<device-management-ip> --object-name srcObj --ipaddr 192.168.0.0 --mask 16
 atomic-ops run fw_config_policy_route --base-url https://<device-management-ip> --source-network srcObj --dst-network dstObj --next-hop-ip 1.1.1.1 --in-interface GE0_12
+atomic-ops run fw_config_policy_route --base-url https://<device-management-ip> --source-network any --dst-network any --in-interface GE0_2.106 --outgoing-interface tunnel2 --weight 123
 atomic-ops run fw_verify_ospfv2_neighbor --base-url https://<device-management-ip> --page 1 --size 40
 atomic-ops run fw_verify_bfd_session --base-url https://<device-management-ip> --page 1 --size 40
 atomic-ops validate --package ngfw_installation
@@ -97,6 +98,7 @@ atoms/fw/fw_verify_interface.yaml
 | `verification` | 配置类 atom 应声明验证方式或验证引用。 |
 | `batch` | 批量 atom 应声明并发、失败策略和结果摘要字段。 |
 | `adapter_contract_ref` | 可选引用公开 adapter profile operation；profile 只描述 API shape，不保存运行时材料。 |
+| `aliases` | 可选的同义搜索词列表。用于上游消费者（m-analyzer）将自然语言变体（subinterface、trunk）匹配到标准 op_id。例如 `fw_config_interface` 的 aliases 为 `[subinterface, trunk, lag, bond, bvi, vlan-interface]`。无变体名时为空列表。 |
 
 字段细节见 `docs/schema-field-reference.md`。批量配置字段见 `docs/batch-configuration-contract.md`。
 Adapter profile 维护规则见 `docs/API-ADAPTER-SPEC.md`。
@@ -123,6 +125,9 @@ Adapter profile 维护规则见 `docs/API-ADAPTER-SPEC.md`。
 容量配置域：
 
 - `fw_config_interface`
+- `fw_update_interface`
+- `fw_delete_interface`
+- `fw_delete_batch_interface`
 - `fw_config_object`
 - `fw_config_acl_policy`
 - `fw_config_policy_route`
