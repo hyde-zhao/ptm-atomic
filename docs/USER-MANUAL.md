@@ -531,6 +531,7 @@ uv run --python 3.11 python scripts/validate_schema.py atoms
 uv run --python 3.11 python scripts/layout_check.py
 uv run --python 3.11 python scripts/security_gate_check.py
 uv run --python 3.11 python scripts/check_aliases.py
+uv run --python 3.11 python scripts/check_package_refs.py
 ```
 
 这些命令不连接设备，不读取 `.input`，不保存凭据。

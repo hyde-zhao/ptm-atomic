@@ -263,6 +263,7 @@ uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/layout_check.py
 uv run --python 3.11 python scripts/security_gate_check.py
 uv run --python 3.11 python scripts/check_aliases.py
+uv run --python 3.11 python scripts/check_package_refs.py
 ```
 
 如果修改了 `packages/*.yaml` 或 `atoms/**/*.yaml`，还要检查 package-reference invariant：每个 `packages/*.yaml` 的 `operations[]` 必须解析到对应 atom 文件，且 `package_id` 必须等于文件名。
