@@ -56,4 +56,6 @@ tags:
   - capacity
   - static_route
   - verification
+aliases:
+  - static-routing
 since_version: "1.1.0"
