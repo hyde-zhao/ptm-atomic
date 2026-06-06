@@ -50,7 +50,7 @@
 | Adapter profile | `adapters/ngfw/default.yaml` 为地址对象、策略路由、OSPFv2、OSPFv3 和 BFD runner 提供公开 API shape 映射；合同见 `docs/API-ADAPTER-SPEC.md`。 |
 | CLI | 当前 CLI 提供 `sync`、`list`、`show`、`adapter`、`run`、`packages`、`validate`；除 `run` 白名单外，其余命令只读。 |
 | 安全门禁 | `scripts/security_gate_check.py` 执行敏感赋值模式检测，并检查高风险 atom 的 gate 合同完整性。 |
-| 静态检查 | `scripts/validate_schema.py`、`scripts/validate_adapter_profiles.py`、`scripts/layout_check.py`、`scripts/security_gate_check.py` 均可通过 `uv run --python 3.11 python ...` 执行。 |
+| 静态检查 | `scripts/validate_schema.py`、`scripts/validate_adapter_profiles.py`、`scripts/layout_check.py`、`scripts/security_gate_check.py`、`scripts/check_aliases.py`、`scripts/check_package_refs.py` 均可通过 `uv run --python 3.11 python ...` 执行。 |
 
 ## 3. 目录结构
 
@@ -80,6 +80,8 @@
 │   ├── adapter-profile.schema.yaml
 │   └── atomic-op.schema.yaml
 ├── scripts/
+│   ├── check_aliases.py
+│   ├── check_package_refs.py
 │   ├── layout_check.py
 │   ├── security_gate_check.py
 │   ├── validate_adapter_profiles.py
@@ -447,9 +449,11 @@ uv run --python 3.11 python scripts/validate_schema.py atoms
 uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/layout_check.py
 uv run --python 3.11 python scripts/security_gate_check.py
+uv run --python 3.11 python scripts/check_aliases.py
+uv run --python 3.11 python scripts/check_package_refs.py
 ```
 
-如需证明 package manifest 与当前工作树 atom 文件一致，还应运行仓库级 package 引用不变量检查，确认每个 `packages/*.yaml` 中的 `operations[]` 都有对应 `atoms/<device>/<op_id>.yaml`。
+如需证明 package manifest 与当前工作树 atom 文件一致，`check_package_refs.py` 已直接读取工作树交叉校验，无需依赖缓存。
 
 再运行消费者缓存 smoke check：
 
@@ -460,7 +464,18 @@ uv run atomic-ops validate --package ngfw_installation
 
 `atomic-ops packages`、`atomic-ops adapter <op_id>` 和 `atomic-ops validate --package ...` 是缓存消费者检查，只反映本地 synced cache；如果缓存未同步到当前提交，它们不会看到未提交或未同步的本地 manifest 修改。要查询新增或修改后的 adapter profile，必须先同步到包含 `adapters/` 的目标提交。
 
-静态检查脚本只读取仓库文件并输出检查结果。`validate_adapter_profiles.py` 校验 `adapters/` 中的公开 profile，并确认 atom 的 `adapter_contract_ref` 指向存在的 profile operation。`security_gate_check.py` 默认扫描 `atoms/`、`adapters/`、`packages/`、`docs/`、`schemas/`、`scripts/`、`src/atomic_ops/`，并排除 `.input/`、版本控制目录、虚拟环境和缓存目录；默认模式下若 `adapters/` 尚不存在，不会因此阻断安全门。它检测敏感赋值模式，对 adapter profile 执行结构化敏感字段和值扫描，并对 `risk.level=high` 或 `op_id` 匹配 `^fw_(install|init|login|config|config_batch)_` 的 atom 检查 `gate.required`、`gate.reason`、`gate.approver_role` 和 `gate.evidence_required`。
+静态检查脚本只读取仓库文件并输出检查结果：
+
+| 脚本 | 检查内容 |
+|---|---|
+| `validate_schema.py` | atom YAML 是否符合 `atomic-op.schema.yaml` |
+| `validate_adapter_profiles.py` | adapter profile 结构 + atom `adapter_contract_ref` 引用完整性 |
+| `layout_check.py` | 仓库目录结构是否包含必需路径 |
+| `security_gate_check.py` | 敏感信息零落盘 + 高风险 atom gate 合同完整性 |
+| `check_aliases.py` | 别名格式（小写连字符）+ 别名与 op_id 冲突检测 |
+| `check_package_refs.py` | package `operations[]` 是否全部解析到 atom 文件 |
+
+`security_gate_check.py` 默认扫描 `atoms/`、`adapters/`、`packages/`、`docs/`、`schemas/`、`scripts/`、`src/atomic_ops/`，并排除 `.input/`、版本控制目录、虚拟环境和缓存目录；默认模式下若 `adapters/` 尚不存在，不会因此阻断安全门。它检测敏感赋值模式，对 adapter profile 执行结构化敏感字段和值扫描，并对 `risk.level=high` 或 `op_id` 匹配 `^fw_(install|init|login|config|config_batch)_` 的 atom 检查 `gate.required`、`gate.reason`、`gate.approver_role` 和 `gate.evidence_required`。
 
 `.input/`、`process/`、`checkpoints/`、本地生成的 `AGENTS.md`、本地 agent 配置目录和缓存/日志目录是被 `.gitignore` 忽略的过程或运行时产物，不属于交付文档，也不应在发布包中承诺为用户可见内容。
 
