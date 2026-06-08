@@ -1,4 +1,4 @@
-"""Implementation for the atomic-ops sync command."""
+"""Implementation for the ptm-atomic sync command."""
 
 from __future__ import annotations
 
@@ -226,10 +226,10 @@ def _stable_message(error_code: str, detail: str) -> str:
 
 def _suggestion(error_code: str) -> str:
     if error_code == ERROR_GIT_AUTH_FAILED:
-        return "Configure SSH keys or the system Git credential helper, then rerun atomic-ops sync."
+        return "Configure SSH keys or the system Git credential helper, then rerun ptm-atomic sync."
     if error_code == ERROR_GIT_NETWORK_ERROR:
-        return "Check network access to the Git repository and rerun atomic-ops sync."
-    return "Run atomic-ops sync again after fixing the cache path or removing the damaged cache."
+        return "Check network access to the Git repository and rerun ptm-atomic sync."
+    return "Run ptm-atomic sync again after fixing the cache path or removing the damaged cache."
 
 
 def _retryable(error_code: str) -> bool:

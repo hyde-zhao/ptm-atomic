@@ -1,0 +1,165 @@
+"""Network interface runner commands."""
+
+from __future__ import annotations
+
+import argparse
+from typing import Any
+
+from atomic_ops.commands import CommandSpec
+from atomic_ops.commands.run import (
+    _arg_list,
+    _require_arg,
+    _single_arg,
+    _to_run_envelope,
+    _write_output,
+    resolve_run_context,
+)
+from atomic_ops.errors import CliError, write_error, write_warning
+from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.session import resolve_session_file
+
+
+def build_subtree() -> tuple[CommandSpec, ...]:
+    return (
+        CommandSpec(name="create", help="Create a new network interface.", description="Create a new NGFW network interface.", handler=_run_create, add_args=_add_interface_args),
+        CommandSpec(name="update", help="Update an existing network interface.", description="Update an existing NGFW network interface.", handler=_run_update, add_args=_add_interface_args),
+        CommandSpec(name="delete", help="Delete a network interface.", description="Delete a single NGFW network interface.", handler=_run_delete, add_args=_add_delete_args),
+        CommandSpec(name="delete-batch", help="Delete multiple network interfaces.", description="Batch-delete NGFW network interfaces.", handler=_run_delete_batch, add_args=_add_delete_args),
+        CommandSpec(name="verify", help="Verify a network interface.", description="Verify a NGFW network interface.", handler=_run_verify, add_args=_add_verify_args),
+    )
+
+
+def _add_interface_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", required=True, action="append", help="Entry id. May be repeated for batch operations.")
+    parser.add_argument("--interface-kind", choices=("bvi", "sub", "physical", "bond"), required=True, help="NGFW interface kind.")
+    parser.add_argument("--mode", choices=("Route", "Switch", "Pair", "Monitor"), default="Route", help="NGFW interface mode.")
+    parser.add_argument("--name", help="Interface val.name. Defaults to --id.")
+    parser.add_argument("--desc", default="", help="Interface description.")
+    interface_enabled_group = parser.add_mutually_exclusive_group()
+    interface_enabled_group.add_argument("--interface-enabled", dest="interface_enabled", action="store_true", default=True, help="Enable the NGFW interface.")
+    interface_enabled_group.add_argument("--interface-disabled", dest="interface_enabled", action="store_false", help="Disable the NGFW interface.")
+    parser.add_argument("--ip-address", action="append", default=[], help="Interface CIDR address. May be repeated for IPv4 and IPv6.")
+    parser.add_argument("--parent-name", help="Subinterface parent interface name.")
+    parser.add_argument("--sub-id", type=int, help="Subinterface VLAN/sub id.")
+    parser.add_argument("--bvi-instance", type=int, help="BVI instance id.")
+    parser.add_argument("--bond-id", type=int, help="Bond id.")
+    parser.add_argument("--bond-member", action="append", default=[], help="Physical interface member for a bond. May be repeated.")
+    parser.add_argument("--bond-mode", type=int, default=5, help="Bond mode field.")
+    parser.add_argument("--bond-lb", type=int, default=0, help="Bond load-balance field.")
+    parser.add_argument("--link-type", type=int, help="Interface linkType field.")
+    parser.add_argument("--pvid", type=int, default=1, help="Switch/Pair/Monitor mode PVID.")
+    parser.add_argument("--allow-pass", help="Switch/Pair/Monitor mode allowPass field.")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_delete_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", action="append", help="Entry id. May be repeated for fw_delete_batch_interface.")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_verify_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", action="append", help="Entry id.")
+
+
+def _run_create(args: argparse.Namespace) -> int:
+    return _run_interface(args, "fw_config_interface")
+
+
+def _run_update(args: argparse.Namespace) -> int:
+    return _run_interface(args, "fw_update_interface")
+
+
+def _run_delete(args: argparse.Namespace) -> int:
+    return _run_interface(args, "fw_delete_interface")
+
+
+def _run_delete_batch(args: argparse.Namespace) -> int:
+    return _run_interface(args, "fw_delete_batch_interface")
+
+
+def _run_verify(args: argparse.Namespace) -> int:
+    return _run_interface(args, "fw_verify_interface")
+
+
+def _run_interface(args: argparse.Namespace, op_id: str) -> int:
+    from atomic_ops.runner.interface import (
+        build_interface_batch_delete_payload,
+        build_interface_dry_run,
+        build_interface_payload,
+        execute_interface,
+        load_json_payload,
+        validate_delete_payload,
+        validate_interface_payload,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        if not ctx.get("verify_tls"):
+            write_warning({"warning_code": "TLS_VERIFY_DISABLED", "message": "Device TLS verification is disabled."}, output_format)
+
+        session_file = resolve_session_file(ctx.get("session_file"))
+        raw_payload = load_json_payload(
+            payload_file=getattr(args, "payload_file", None),
+            payload_json=getattr(args, "payload_json", None),
+        )
+        payload: dict[str, Any] | None
+
+        if op_id == "fw_verify_interface":
+            payload = None
+        elif op_id == "fw_delete_interface":
+            payload = raw_payload or {"id": _single_arg(args, "id")}
+            payload = validate_delete_payload(payload)
+        elif op_id == "fw_delete_batch_interface":
+            payload = raw_payload or build_interface_batch_delete_payload(entry_ids=_arg_list(args, "id"))
+            payload = validate_interface_payload(payload, op_id=op_id)
+        else:
+            if raw_payload is not None:
+                payload = validate_interface_payload(raw_payload, op_id=op_id)
+            else:
+                _require_arg(args, "interface_kind")
+                _require_arg(args, "id")
+                payload = build_interface_payload(
+                    interface_kind=getattr(args, "interface_kind"),
+                    entry_id=_single_arg(args, "id"),
+                    mode=getattr(args, "mode", "Route"),
+                    ip_addresses=list(getattr(args, "ip_address") or []),
+                    name=getattr(args, "name"),
+                    desc=getattr(args, "desc", ""),
+                    enabled=bool(getattr(args, "interface_enabled", True)),
+                    parent_name=getattr(args, "parent_name"),
+                    sub_id=getattr(args, "sub_id"),
+                    bvi_instance=getattr(args, "bvi_instance"),
+                    bond_id=getattr(args, "bond_id"),
+                    bond_members=list(getattr(args, "bond_member") or []),
+                    bond_mode=int(getattr(args, "bond_mode", 5)),
+                    bond_lb=int(getattr(args, "bond_lb", 0)),
+                    link_type=getattr(args, "link_type"),
+                    pvid=int(getattr(args, "pvid", 1)),
+                    allow_pass=getattr(args, "allow_pass"),
+                )
+            payload = validate_interface_payload(payload, op_id=op_id)
+
+        if not ctx.get("execute"):
+            result = build_interface_dry_run(
+                op_id=op_id, base_url=ctx["base_url"], session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            result = execute_interface(
+                op_id=op_id, base_url=ctx["base_url"], session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )

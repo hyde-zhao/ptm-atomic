@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate that every op_id referenced in packages/*.yaml resolves to an atom.
 
-This is the automated equivalent of `atomic-ops validate --package <name>`,
+This is the automated equivalent of `ptm-atomic validate --package <name>`,
 but reads the working tree directly without depending on a synced cache.
 """
 

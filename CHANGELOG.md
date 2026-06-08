@@ -2,8 +2,8 @@
 
 This repository uses two version streams:
 
-- `atoms-vX.Y.Z`: operation data, schema, package manifests, naming rules, and documentation consumed by `atomic-ops sync`.
-- `cli-vX.Y.Z`: CLI package code, command behavior, CLI error handling, and CLI packaging changes consumed by `uv tool upgrade atomic-ops`.
+- `atoms-vX.Y.Z`: operation data, schema, package manifests, naming rules, and documentation consumed by `ptm-atomic sync`.
+- `cli-vX.Y.Z`: CLI package code, command behavior, CLI error handling, and CLI packaging changes consumed by `uv tool upgrade ptm-atomic`.
 
 The two streams are intentionally separate. A schema or operation-library change does not imply a CLI package release, and a CLI bug fix does not imply a new operation-library release.
 
@@ -24,26 +24,26 @@ The two streams are intentionally separate. A schema or operation-library change
 - Add schema v1.1 documentation coverage for `risk`, `credential_ref`, `session_ref`, `state_ref`, `gate`, `verification`, and `batch`.
 - Add user-facing guidance for `ngfw_installation`, `ngfw_capacity_config`, `ngfw_verification`, and `ngfw_batch_config`.
 - Add the CR-004 public adapter profile layer with `schemas/adapter-profile.schema.yaml`, `adapters/ngfw/default.yaml`, and `docs/API-ADAPTER-SPEC.md`.
-- Add the read-only `atomic-ops adapter <op_id>` command for querying a synced atom's referenced adapter profile operation.
-- Add the allowlisted `atomic-ops run` runner for `fw_login_web_management`, `fw_config_object`, and `fw_config_policy_route`, with dry-run by default and explicit `--execute` for live device requests.
+- Add the read-only `ptm-atomic adapter <op_id>` command for querying a synced atom's referenced adapter profile operation.
+- Add the allowlisted `ptm-atomic run` runner for `fw_login_web_management`, `fw_config_object`, and `fw_config_policy_route`, with dry-run by default and explicit `--execute` for live device requests.
 - Add OSPFv2 atom specs, adapter profile mappings, and allowlisted runner support for global config, redistribution, network, interface, neighbor, and log endpoints.
 - Add OSPFv3 and BFD atom specs, adapter profile mappings, and allowlisted runner support for config, query, delete, session, and log endpoints.
-- Add release guidance for repository checks using `uv run atomic-ops --help`, `uv run atomic-ops packages`, `uv run --python 3.11 python scripts/validate_schema.py atoms`, `uv run --python 3.11 python scripts/layout_check.py`, and `uv run --python 3.11 python scripts/security_gate_check.py`.
+- Add release guidance for repository checks using `uv run ptm-atomic --help`, `uv run ptm-atomic packages`, `uv run --python 3.11 python scripts/validate_schema.py atoms`, `uv run --python 3.11 python scripts/layout_check.py`, and `uv run --python 3.11 python scripts/security_gate_check.py`.
 
 ### Changed
 
 - Update README, user manual, engineer handbook, and test-case template to reflect the verified schema v1.1, NGFW atom/package, batch contract, security gate, and read-only CLI boundary.
-- Replace environment-specific repository address examples with `<atomic-ops-git-repository-url>` placeholders.
+- Replace environment-specific repository address examples with `<ptm-atomic-git-repository-url>` placeholders.
 - Align Python command examples with `uv run` and `uv tool` usage.
 - Clarify that package manifests are filter views for `op_id` selection only; they do not install, copy, execute, or distribute atoms.
 - Record current package integrity facts: 6 manifests, 69 package entries, 68 unique `op_id` values, and all package references resolving to `atoms/fw/*.yaml`.
 - Separate working-tree repository checks from synced-cache consumer smoke checks, and document the stale-cache caveat for `list`, `show`, `packages`, and `validate`.
 - Align error-code documentation with the current `scripts/security_gate_check.py` behavior and the CLI error object shape, including the optional `suggestion` field.
 - Add `adapter_contract_ref` to `fw_config_policy_route` so external generators can consume the public adapter profile instead of reading `.input/capacity`.
-- Include `adapters/` in the `atomic-ops sync` sparse checkout paths so adapter profile queries can work from the local cache.
+- Include `adapters/` in the `ptm-atomic sync` sparse checkout paths so adapter profile queries can work from the local cache.
 - Align `fw_config_policy_route` with the executable NGFW API shape: `POST /api/v1/policyroute` and `val.source_network` / `val.dst_network` / `val.forwarding_paths[].next_hop_ip`.
 - Clarify that policy route `source_network` and `dst_network` reference address object names by default, with explicit `*_is_group` flags for address group names.
-- Make successful `atomic-ops run` stdout use the fixed envelope `op_id`, `status`, `data`, `error_type`, and `diag_snapshot_ref`; runner-specific request, session, and response details now live under `data`.
+- Make successful `ptm-atomic run` stdout use the fixed envelope `op_id`, `status`, `data`, `error_type`, and `diag_snapshot_ref`; runner-specific request, session, and response details now live under `data`.
 - Allow digits in the `op_id` target segment so protocol names such as `ospfv2` can be represented directly.
 
 ### Deprecated
@@ -60,7 +60,7 @@ The two streams are intentionally separate. A schema or operation-library change
 
 ### Security
 
-- Document that only the `atomic-ops run` allowlist can connect to devices or push configuration, while other CLI commands remain cache/query/validation commands.
+- Document that only the `ptm-atomic run` allowlist can connect to devices or push configuration, while other CLI commands remain cache/query/validation commands.
 - Document the sensitive-information boundary for user-facing examples; the only allowed password-policy literal remains `Ngfw@123`.
 - Document `.gitignore` hygiene for `.input/`, `process/`, `checkpoints/`, generated local `AGENTS.md`, local agent config, caches, and logs as process/runtime artifacts rather than delivery docs.
 - Extend adapter validation and the default security scan to cover `adapters/`, rejecting runtime-sensitive adapter fields or values and hidden `.input/capacity` dependencies.
@@ -103,7 +103,7 @@ Initial CLI version stream placeholder.
 
 ### Added
 
-- Reserve the `cli-vX.Y.Z` tag stream for future `atomic-ops` package releases.
+- Reserve the `cli-vX.Y.Z` tag stream for future `ptm-atomic` package releases.
 
 ### Changed
 

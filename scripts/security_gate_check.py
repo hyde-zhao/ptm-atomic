@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only static security gate for atomic-ops repository content."""
+"""Read-only static security gate for ptm-atomic repository content."""
 
 from __future__ import annotations
 
@@ -182,7 +182,7 @@ def display_path(path: Path | None) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = SecurityGateArgumentParser(
         description=(
-            "Run the read-only atomic-ops static security gate. "
+            "Run the read-only ptm-atomic static security gate. "
             "Defaults scan atoms/, adapters/, packages/, docs/, schemas/, scripts/, and src/atomic_ops/."
         )
     )

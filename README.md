@@ -1,4 +1,4 @@
-# atomic-ops
+# ptm-atomic
 
 防火墙测试原子操作规范仓库与本地 CLI。
 
@@ -18,7 +18,7 @@
 
 ## 1. 项目定位
 
-`atomic-ops` 用于维护防火墙测试原子操作的 YAML 规范、package 过滤视图和本地查询校验 CLI。它解决三类问题：
+`ptm-atomic` 用于维护防火墙测试原子操作的 YAML 规范、package 过滤视图和本地查询校验 CLI。它解决三类问题：
 
 - 原子操作字段和命名统一，测试用例以稳定的 `op_id` 引用操作。
 - 操作库可通过 git 同步到本地缓存，离线执行查询和引用校验。
@@ -33,7 +33,7 @@
 | `packages/` | package 清单，作为 `op_id` 过滤视图；不安装、复制、执行或分发 atom。 |
 | `adapters/` | 公开、非敏感的 adapter profile，描述 CLI runner 和外部脚本生成器可消费的 API shape 映射。 |
 | `docs/` | 用户手册、工程师手册、字段参考、错误码、命名规范和测试用例模板。 |
-| `src/atomic_ops/` | `atomic-ops` CLI 实现。 |
+| `src/atomic_ops/` | `ptm-atomic` CLI 实现。 |
 | `scripts/` | 仓库级校验脚本。 |
 | `pyproject.toml` | Python 包和依赖声明。 |
 | `uv.lock` | Python 依赖锁定结果。 |
@@ -97,13 +97,13 @@
 
 ```bash
 uv tool install .
-atomic-ops --version
+ptm-atomic --version
 ```
 
 开发和本地验证可直接使用：
 
 ```bash
-uv run atomic-ops --help
+uv run ptm-atomic --help
 ```
 
 本项目使用 `uv` 管理 Python 运行、工具安装和依赖锁定。仓库文档中的 Python 命令统一使用 `uv run`、`uv run --python 3.11 python ...` 或 `uv tool`，不把裸 `pip install` 作为默认路径。
@@ -111,7 +111,7 @@ uv run atomic-ops --help
 ### 同步操作库缓存
 
 ```bash
-atomic-ops sync --repo <atomic-ops-git-repository-url>
+ptm-atomic sync --repo <ptm-atomic-git-repository-url>
 ```
 
 同步使用 git 访问远端仓库并写入本地缓存。同步后，`list`、`show`、`adapter`、`packages`、`validate` 只读取本地缓存，不读取当前未同步的工作树修改。若同步失败但已有完整缓存，缓存可能以 `STALE` 状态继续服务只读查询，并可能落后于仓库最新提交。
@@ -119,37 +119,54 @@ atomic-ops sync --repo <atomic-ops-git-repository-url>
 ### 查看和校验
 
 ```bash
-atomic-ops packages
-atomic-ops list --package ngfw_installation
-atomic-ops show fw_verify_ngfw_health
-atomic-ops adapter fw_config_policy_route
-atomic-ops run fw_login_web_management --base-url https://<device-management-ip>
-atomic-ops run fw_config_object --base-url https://<device-management-ip> --object-name srcObj --ipaddr 192.168.0.0 --mask 16
-atomic-ops run fw_config_policy_route --base-url https://<device-management-ip> --source-network srcObj --dst-network dstObj --next-hop-ip 18.18.2.2 --in-interface GE0_12
-atomic-ops run fw_config_ospfv2_global --base-url https://<device-management-ip> --enable --router-id <DUT_IP> --originate --always
-atomic-ops run fw_config_ospfv3_global --base-url https://<device-management-ip> --enable --router-id <DUT_IP>
-atomic-ops run fw_verify_ospfv2_neighbor --base-url https://<device-management-ip> --page 1 --size 40
-atomic-ops run fw_verify_bfd_session --base-url https://<device-management-ip> --page 1 --size 40
-atomic-ops validate docs/test-case-template.yaml
-atomic-ops validate --package ngfw_installation
+ptm-atomic packages
+ptm-atomic list --package ngfw_installation
+ptm-atomic show fw_verify_ngfw_health
+ptm-atomic adapter fw_config_policy_route
+ptm-atomic validate docs/test-case-template.yaml
+ptm-atomic validate --package ngfw_installation
 ```
+
+### 执行操作（新格式）
+
+`run` 命令按操作族分为嵌套子命令。共享参数（`--base-url`、`--execute`、`--format` 等）在 `run` 层级定义：
+
+```bash
+# 认证
+ptm-atomic run auth login --base-url https://<device-management-ip> --username admin
+
+# 地址对象
+ptm-atomic run object config --base-url https://<device-management-ip> --object-name srcObj --ipaddr 192.168.0.0 --mask 16
+
+# 策略路由
+ptm-atomic run policy-route config --base-url https://<device-management-ip> --source-network srcObj --dst-network dstObj --next-hop-ip 18.18.2.2 --in-interface GE0_12
+
+# OSPFv2
+ptm-atomic run ospf config global --base-url https://<device-management-ip> --enable --router-id <DUT_IP> --originate --always
+
+# OSPFv3 + BFD
+ptm-atomic run ospfv3 config global --base-url https://<device-management-ip> --enable --router-id <DUT_IP>
+ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-ip> --page 1 --size 40
+```
+
+旧格式 `ptm-atomic run <op_id>` 仍然兼容，但会显示 deprecation warning。迁移指引：`ptm-atomic run --help` 查看所有可用操作族。
 
 ## 5. CLI 命令
 
 | 命令 | 用途 | 范围 |
 |---|---|---|
-| `atomic-ops sync` | 同步本地操作库缓存 | 访问 git 仓库，写入本地缓存。 |
-| `atomic-ops list` | 列出本地缓存中的 atom 摘要 | 读取本地缓存。 |
-| `atomic-ops show <op_id>` | 输出单个 atom 的 YAML 或 JSON | 读取本地缓存。 |
-| `atomic-ops adapter <op_id>` | 输出单个 atom 引用的 adapter profile operation | 读取本地缓存中的 atom 与 `adapters/`。 |
-| `atomic-ops run <op_id>` | 执行白名单 runner op，默认 dry-run | 支持 Web 登录、地址对象、策略路由和 OSPFv2 白名单 op；真实请求必须显式 `--execute`。 |
-| `atomic-ops packages` | 列出 package 清单 | 读取本地缓存。 |
-| `atomic-ops validate <test_case.yaml>` | 校验测试用例中的 `op_id` 引用 | 读取本地缓存和指定 YAML。 |
-| `atomic-ops validate --package <package_id>` | 校验 package 清单中的 `op_id` 引用 | 读取本地缓存。 |
+| `ptm-atomic sync` | 同步本地操作库缓存 | 访问 git 仓库，写入本地缓存。 |
+| `ptm-atomic list` | 列出本地缓存中的 atom 摘要 | 读取本地缓存。 |
+| `ptm-atomic show <op_id>` | 输出单个 atom 的 YAML 或 JSON | 读取本地缓存。 |
+| `ptm-atomic adapter <op_id>` | 输出单个 atom 引用的 adapter profile operation | 读取本地缓存中的 atom 与 `adapters/`。 |
+| `ptm-atomic run <family> <action> [target]` | 按操作族执行 runner op，默认 dry-run | 共享参数在 `run` 层级；支持 `auth`、`object`、`policy-route`、`interface`、`ospf`、`ospfv3` 六个操作族。真实请求必须显式 `--execute`。旧格式 `run <op_id>` 仍兼容。 |
+| `ptm-atomic packages` | 列出 package 清单 | 读取本地缓存。 |
+| `ptm-atomic validate <test_case.yaml>` | 校验测试用例中的 `op_id` 引用 | 读取本地缓存和指定 YAML。 |
+| `ptm-atomic validate --package <package_id>` | 校验 package 清单中的 `op_id` 引用 | 读取本地缓存。 |
 
-除 `atomic-ops run` 的白名单 runner 外，其他 CLI 命令仍是只读缓存查询或校验。`run` 默认 dry-run，不发设备请求；登录真实执行需要 `--execute --password-env <ENV>`，地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 真实执行需要已有 session 文件和 `--execute`。CLI 不接受明文密码参数，不打印完整会话值，不把运行时材料写入仓库。
+除 `ptm-atomic run` 的白名单 runner 外，其他 CLI 命令仍是只读缓存查询或校验。`run` 默认 dry-run，不发设备请求；登录真实执行需要 `--execute --password-env <ENV>`，地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 真实执行需要已有 session 文件和 `--execute`。CLI 不接受明文密码参数，不打印完整会话值，不把运行时材料写入仓库。
 
-`atomic-ops run` 成功输出使用固定 envelope。runner 细节统一放入 `data`，调用方不应从顶层读取 `request`、`session`、`response` 等旧字段：
+`ptm-atomic run` 成功输出使用固定 envelope。runner 细节统一放入 `data`，调用方不应从顶层读取 `request`、`session`、`response` 等旧字段：
 
 ```yaml
 op_id: fw_config_object
@@ -172,7 +189,7 @@ data:
         networks:
           - ipaddr: 192.168.0.0
             mask: "16"
-  session_file: ~/.local/state/atomic-ops/ngfw/session.json
+  session_file: ~/.local/state/ptm-atomic/ngfw/session.json
   verify_tls: false
   timeout: 10.0
 error_type: NONE
@@ -184,7 +201,7 @@ diag_snapshot_ref: ""
 登录防火墙 Web 管理面，并把会话材料写入用户 state 目录：
 
 ```bash
-NGFW_PASSWORD='<password>' atomic-ops run fw_login_web_management \
+NGFW_PASSWORD='<password>' ptm-atomic run auth login \
   --base-url https://<device-management-ip> \
   --username admin \
   --password-env NGFW_PASSWORD \
@@ -194,7 +211,7 @@ NGFW_PASSWORD='<password>' atomic-ops run fw_login_web_management \
 先创建策略路由要引用的 IPv4 地址对象。`--object-name` 是设备对象名，策略路由的 `--source-network` / `--dst-network` 后续引用这个名称：
 
 ```bash
-atomic-ops run fw_config_object \
+ptm-atomic run object config \
   --base-url https://<device-management-ip> \
   --object-name srcObj \
   --ipaddr 192.168.0.0 \
@@ -205,7 +222,7 @@ atomic-ops run fw_config_object \
 先 dry-run 查看策略路由请求体。`--source-network` 和 `--dst-network` 是地址对象名；如果传入的是地址组名，必须同时加 `--source-network-is-group` 或 `--dst-network-is-group`：
 
 ```bash
-atomic-ops run fw_config_policy_route \
+ptm-atomic run policy-route config \
   --base-url https://<device-management-ip> \
   --source-network srcObj \
   --dst-network dstObj \
@@ -216,7 +233,7 @@ atomic-ops run fw_config_policy_route \
 策略路由也支持出接口转发模式。此模式不传 `--next-hop-ip`，但必须传 `--outgoing-interface`；IPv4 和 IPv6 策略路由都适用：
 
 ```bash
-atomic-ops run fw_config_policy_route \
+ptm-atomic run policy-route config \
   --base-url https://<device-management-ip> \
   --source-network any \
   --dst-network any \
@@ -228,7 +245,7 @@ atomic-ops run fw_config_policy_route \
 确认无误后显式执行：
 
 ```bash
-atomic-ops run fw_config_policy_route \
+ptm-atomic run policy-route config \
   --base-url https://<device-management-ip> \
   --source-network srcObj \
   --dst-network dstObj \
@@ -237,12 +254,12 @@ atomic-ops run fw_config_policy_route \
   --execute
 ```
 
-接口配置 runner 调用 `/api/v1/intf`，按方法拆为 `fw_config_interface`、`fw_update_interface`、`fw_verify_interface`、`fw_delete_interface`，批量删除使用独立的 `fw_delete_batch_interface` 调用 `/api/v1/batch`。BVI 和子接口只支持 `Route` 模式；物理口和聚合口支持 `Route`、`Switch`、`Pair`、`Monitor`；物理口只允许 `PUT/GET`。
+接口配置 runner 调用 `/api/v1/intf`，按方法拆为 `create`、`update`、`verify`、`delete`，批量删除使用独立的 `delete-batch` 调用 `/api/v1/batch`。BVI 和子接口只支持 `Route` 模式；物理口和聚合口支持 `Route`、`Switch`、`Pair`、`Monitor`；物理口只允许 `PUT/GET`。
 
 创建 BVI 接口 dry-run：
 
 ```bash
-atomic-ops run fw_config_interface \
+ptm-atomic run interface create \
   --base-url https://<device-management-ip> \
   --interface-kind bvi \
   --id bvi109 \
@@ -250,24 +267,24 @@ atomic-ops run fw_config_interface \
   --ip-address 2091:109::31/64
 ```
 
-更新子接口或物理口使用 `fw_update_interface`；单个删除使用查询参数 `id` 且不发送请求体；查询接口返回全量接口：
+更新子接口或物理口使用 `update`；单个删除使用查询参数 `id` 且不发送请求体；查询接口返回全量接口：
 
 ```bash
-atomic-ops run fw_update_interface \
+ptm-atomic run interface update \
   --base-url https://<device-management-ip> \
   --interface-kind sub \
   --id GE0_2.106 \
   --ip-address 192.106.0.31/24 \
   --ip-address 2092:106::31/64
 
-atomic-ops run fw_verify_interface --base-url https://<device-management-ip>
-atomic-ops run fw_delete_interface --base-url https://<device-management-ip> --id GE0_2.106
+ptm-atomic run interface verify --base-url https://<device-management-ip>
+ptm-atomic run interface delete --base-url https://<device-management-ip> --id GE0_2.106
 ```
 
 批量删除是独立 batch 请求：
 
 ```bash
-atomic-ops run fw_delete_batch_interface \
+ptm-atomic run interface delete-batch \
   --base-url https://<device-management-ip> \
   --id bvi109 \
   --id GE0_2.106
@@ -276,7 +293,7 @@ atomic-ops run fw_delete_batch_interface \
 OSPFv2 按 HTTP 方法拆分为独立原子操作。先 dry-run 查看全局配置请求体：
 
 ```bash
-atomic-ops run fw_config_ospfv2_global \
+ptm-atomic run ospf config global \
   --base-url https://<device-management-ip> \
   --enable \
   --router-id <DUT_IP> \
@@ -287,28 +304,28 @@ atomic-ops run fw_config_ospfv2_global \
 配置 OSPFv2 路由引入：
 
 ```bash
-atomic-ops run fw_config_ospfv2_redistribution \
+ptm-atomic run ospf config redistribution \
   --base-url https://<device-management-ip> \
   --redistribute connected=333 \
   --redistribute static=666 \
   --redistribute rip=333
 ```
 
-新增、更新和删除 OSPFv2 network 使用不同 op；PUT 和 DELETE 必须显式传 `--id`：
+新增、更新和删除 OSPFv2 network 使用不同子命令；PUT 和 DELETE 必须显式传 `--id`：
 
 ```bash
-atomic-ops run fw_config_ospfv2_network \
+ptm-atomic run ospf config network \
   --base-url https://<device-management-ip> \
   --network 191.0.0.0/24 \
   --area 0
 
-atomic-ops run fw_config_ospfv2_network_update \
+ptm-atomic run ospf config network-update \
   --base-url https://<device-management-ip> \
   --id <ospfv2-network-id> \
   --network 191.0.0.0/24 \
   --area 0
 
-atomic-ops run fw_delete_ospfv2_network \
+ptm-atomic run ospf delete network \
   --base-url https://<device-management-ip> \
   --id <ospfv2-network-id>
 ```
@@ -316,7 +333,7 @@ atomic-ops run fw_delete_ospfv2_network \
 接口配置同样按 POST、PUT、DELETE 拆分：
 
 ```bash
-atomic-ops run fw_config_ospfv2_interface \
+ptm-atomic run ospf config interface \
   --base-url https://<device-management-ip> \
   --interface bvi109 \
   --cost 1 \
@@ -333,10 +350,10 @@ atomic-ops run fw_config_ospfv2_interface \
   --min-tx-interval 300
 ```
 
-OSPFv2 interface 删除使用接口名作为 `--id`，runner 会发送 `DELETE /api/v1/ospfinterface?id=<interface>`：
+OSPFv2 interface 删除使用接口名作为 `--id`：
 
 ```bash
-atomic-ops run fw_delete_ospfv2_interface \
+ptm-atomic run ospf delete interface \
   --base-url https://<device-management-ip> \
   --id GE0_12 \
   --execute
@@ -345,42 +362,42 @@ atomic-ops run fw_delete_ospfv2_interface \
 查询邻居和日志时 `--page` 默认 `1`，`--size` 默认 `40`：
 
 ```bash
-atomic-ops run fw_verify_ospfv2_neighbor --base-url https://<device-management-ip>
-atomic-ops run fw_capture_ospfv2_log --base-url https://<device-management-ip> --page 1 --size 40
+ptm-atomic run ospf verify neighbor --base-url https://<device-management-ip>
+ptm-atomic run ospf verify neighbor --base-url https://<device-management-ip> --page 1 --size 40
 ```
 
 OSPFv3 使用相同的按方法拆分模式，接口路径为 `ospf6*`：
 
 ```bash
-atomic-ops run fw_config_ospfv3_global \
+ptm-atomic run ospfv3 config global \
   --base-url https://<device-management-ip> \
   --enable \
   --router-id <DUT_IP>
 
-atomic-ops run fw_config_ospfv3_redistribution \
+ptm-atomic run ospfv3 config redistribution \
   --base-url https://<device-management-ip> \
   --redistribute connected=333 \
   --redistribute static=333
 
-atomic-ops run fw_config_ospfv3_network \
+ptm-atomic run ospfv3 config network \
   --base-url https://<device-management-ip> \
   --interface bvi109 \
   --area 0
 
-atomic-ops run fw_verify_ospfv3_neighbor --base-url https://<device-management-ip> --page 1 --size 40
-atomic-ops run fw_capture_ospfv3_log --base-url https://<device-management-ip> --page 1 --size 40
+ptm-atomic run ospfv3 verify neighbor --base-url https://<device-management-ip> --page 1 --size 40
 ```
 
-BFD 支持全局启停、会话查询和日志查询：
+BFD 支持全局启停、会话查询：
 
 ```bash
-atomic-ops run fw_config_bfd_global \
+ptm-atomic run ospfv3 bfd config \
   --base-url https://<device-management-ip> \
   --enable
 
-atomic-ops run fw_verify_bfd_session --base-url https://<device-management-ip> --page 1 --size 40
-atomic-ops run fw_capture_bfd_log --base-url https://<device-management-ip> --page 1 --size 40
+ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-ip> --page 1 --size 40
 ```
+
+> **兼容模式**：旧格式 `ptm-atomic run fw_config_ospfv2_global ...` 等仍可用，但会显示 deprecation warning 提示迁移到新格式。兼容模式将在 1-2 个版本后移除。
 
 ## 6. 当前 Package 和 Op ID
 
@@ -427,11 +444,11 @@ v1.1 atom 使用 `schema_version: "1.1"`。重要字段包括：
 
 ## 8. 安全边界
 
-`atomic-ops` 当前主要是本地规范消费和校验工具；只有 `run` 白名单 op 具备受控设备执行能力。
+`ptm-atomic` 当前主要是本地规范消费和校验工具；只有 `run` 白名单 op 具备受控设备执行能力。
 
 | 边界 | 说明 |
 |---|---|
-| 设备连接 | 除 `atomic-ops run` 的 Web 登录、地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 白名单 op 外，CLI 不连接真实防火墙、流量发生器、交换机或管理面。 |
+| 设备连接 | 除 `ptm-atomic run` 的 Web 登录、地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 白名单 op 外，CLI 不连接真实防火墙、流量发生器、交换机或管理面。 |
 | 配置变更 | 除地址对象、策略路由、OSPFv2、OSPFv3 和 BFD runner 白名单外，CLI 不执行 atom，不下发配置，不触发安装、初始化或策略修改。 |
 | 凭据处理 | CLI 不接受明文密码参数；登录 runner 只从环境变量读取口令，会话材料默认写入用户 state 目录，文档和 YAML 不写真实凭据值。 |
 | 回滚 | CLI 不执行自动回滚；回滚只能作为 atom 合同或人工流程描述。 |
@@ -444,7 +461,7 @@ v1.1 atom 使用 `schema_version: "1.1"`。重要字段包括：
 发布或合并前先运行工作树检查：
 
 ```bash
-uv run atomic-ops --help
+uv run ptm-atomic --help
 uv run --python 3.11 python scripts/validate_schema.py atoms
 uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/layout_check.py
@@ -458,11 +475,11 @@ uv run --python 3.11 python scripts/check_package_refs.py
 再运行消费者缓存 smoke check：
 
 ```bash
-uv run atomic-ops packages
-uv run atomic-ops validate --package ngfw_installation
+uv run ptm-atomic packages
+uv run ptm-atomic validate --package ngfw_installation
 ```
 
-`atomic-ops packages`、`atomic-ops adapter <op_id>` 和 `atomic-ops validate --package ...` 是缓存消费者检查，只反映本地 synced cache；如果缓存未同步到当前提交，它们不会看到未提交或未同步的本地 manifest 修改。要查询新增或修改后的 adapter profile，必须先同步到包含 `adapters/` 的目标提交。
+`ptm-atomic packages`、`ptm-atomic adapter <op_id>` 和 `ptm-atomic validate --package ...` 是缓存消费者检查，只反映本地 synced cache；如果缓存未同步到当前提交，它们不会看到未提交或未同步的本地 manifest 修改。要查询新增或修改后的 adapter profile，必须先同步到包含 `adapters/` 的目标提交。
 
 静态检查脚本只读取仓库文件并输出检查结果：
 
@@ -488,7 +505,7 @@ uv run atomic-ops validate --package ngfw_installation
 | `docs/engineer-handbook.md` | 面向维护者的贡献流程、发布检查和安全边界。 |
 | `docs/schema-field-reference.md` | schema v1.1 字段参考和兼容性说明。 |
 | `docs/batch-configuration-contract.md` | 多设备批量配置合同。 |
-| `docs/test-case-template.yaml` | 可被 `atomic-ops validate` 读取的测试用例模板。 |
+| `docs/test-case-template.yaml` | 可被 `ptm-atomic validate` 读取的测试用例模板。 |
 | `docs/error-codes.md` | CLI、脚本和操作级错误码说明。 |
 | `docs/naming-convention.md` | `op_id` 命名、动词和 CLI 命令边界。 |
 

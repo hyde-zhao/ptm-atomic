@@ -1,6 +1,6 @@
 # Error Codes
 
-This document defines the atomic operation error contract and the `atomic-ops` CLI top-level error contract.
+This document defines the atomic operation error contract and the `ptm-atomic` CLI top-level error contract.
 
 The contract has two layers:
 
@@ -9,12 +9,12 @@ The contract has two layers:
 
 The current runtime baseline contains exactly 23 error codes: 9 operation-level
 codes and 14 CLI-level codes. Repository scripts additionally use static check
-exit semantics; those static check exits are not `atomic-ops` CLI-level
+exit semantics; those static check exits are not `ptm-atomic` CLI-level
 `error_code` values and do not represent real device execution failures.
 
 ## Operation-Level Error Types
 
-Operation-level errors describe the result of an atomic operation or a content validation finding. They do not directly define the process exit code of the `atomic-ops` CLI.
+Operation-level errors describe the result of an atomic operation or a content validation finding. They do not directly define the process exit code of the `ptm-atomic` CLI.
 
 | error_type | Meaning | Typical trigger | Suggested handling |
 |---|---|---|---|
@@ -30,16 +30,16 @@ Operation-level errors describe the result of an atomic operation or a content v
 
 ## CLI-Level Error Codes
 
-CLI-level errors describe command execution failures. These are the only errors in this document that define fixed `atomic-ops` process exit codes.
+CLI-level errors describe command execution failures. These are the only errors in this document that define fixed `ptm-atomic` process exit codes.
 
 | error_code | Exit code | Meaning | Typical trigger | Suggested handling | Retryable |
 |---|---:|---|---|---|---|
-| `GIT_AUTH_FAILED` | 21 | Git repository authentication failed. | SSH key or system credential helper is not configured for the repository. | Configure Git authentication and rerun `atomic-ops sync`. | No |
+| `GIT_AUTH_FAILED` | 21 | Git repository authentication failed. | SSH key or system credential helper is not configured for the repository. | Configure Git authentication and rerun `ptm-atomic sync`. | No |
 | `GIT_NETWORK_ERROR` | 22 | Git network access failed. | DNS failure, remote endpoint unreachable, TLS failure, offline host, git timeout. | If a valid cache exists, continue read-only work from the cache; otherwise rerun after network recovery. | Yes |
-| `OP_NOT_FOUND` | 23 | The requested `op_id` or operation-level adapter reference does not exist in the local operation repository. | `show` or `validate` references an unknown operation; `adapter` references an operation without `adapter_contract_ref`; or the op_id prefix maps to no valid path. | Run `atomic-ops sync`, check spelling, and use nearest `op_id` suggestions when available; for `adapter`, confirm the atom declares `adapter_contract_ref`. | No |
-| `REPO_NOT_SYNCED` | 24 | The local operation repository cache is missing, unreadable, damaged, or missing a referenced adapter profile file. | First run before `sync`, missing `_metadata.json`, unreadable cache, incomplete clone, or cache synced before `adapters/` was included. | Run `atomic-ops sync`; if the cache is damaged, remove the cache through the documented recovery path and sync again. | Yes |
-| `PACKAGE_NOT_FOUND` | 25 | The requested package manifest does not exist. | `list --package` or `validate --package` references an unknown package name. | Run `atomic-ops packages` and choose one of the listed package names. | No |
-| `RUNNER_UNSUPPORTED_OP` | 41 | `atomic-ops run` does not support the requested operation. | The op is not in the runner allowlist. | Use `atomic-ops adapter` for contract lookup, or add a dedicated runner implementation. | No |
+| `OP_NOT_FOUND` | 23 | The requested `op_id` or operation-level adapter reference does not exist in the local operation repository. | `show` or `validate` references an unknown operation; `adapter` references an operation without `adapter_contract_ref`; or the op_id prefix maps to no valid path. | Run `ptm-atomic sync`, check spelling, and use nearest `op_id` suggestions when available; for `adapter`, confirm the atom declares `adapter_contract_ref`. | No |
+| `REPO_NOT_SYNCED` | 24 | The local operation repository cache is missing, unreadable, damaged, or missing a referenced adapter profile file. | First run before `sync`, missing `_metadata.json`, unreadable cache, incomplete clone, or cache synced before `adapters/` was included. | Run `ptm-atomic sync`; if the cache is damaged, remove the cache through the documented recovery path and sync again. | Yes |
+| `PACKAGE_NOT_FOUND` | 25 | The requested package manifest does not exist. | `list --package` or `validate --package` references an unknown package name. | Run `ptm-atomic packages` and choose one of the listed package names. | No |
+| `RUNNER_UNSUPPORTED_OP` | 41 | `ptm-atomic run` does not support the requested operation. | The op is not in the runner allowlist. | Use `ptm-atomic adapter` for contract lookup, or add a dedicated runner implementation. | No |
 | `RUNNER_EXECUTE_REQUIRED` | 42 | Live execution was requested by workflow policy but `--execute` was missing. | A caller expected a real device action but invoked dry-run. | Add `--execute` after reviewing the dry-run output. | No |
 | `RUNNER_CREDENTIAL_MISSING` | 43 | Required runtime credential input is unavailable. | `--password-env` or `--new-password-env` is absent, unset, or empty. | Set the environment variable and rerun. | No |
 | `RUNNER_LOGIN_FAILED` | 44 | NGFW Web login failed. | Login response has no session reference, returns a device error, or requires default password change without explicit approval. | Check credentials, management reachability, and default-password-change policy. | No |
@@ -52,7 +52,7 @@ CLI-level errors describe command execution failures. These are the only errors 
 ## Static Repository Check Exit Semantics
 
 The following exit codes are used by current read-only repository checks,
-including `scripts/security_gate_check.py`. They are not top-level `atomic-ops`
+including `scripts/security_gate_check.py`. They are not top-level `ptm-atomic`
 CLI `error_code` values and must not be used to describe a real firewall
 execution result.
 
@@ -79,7 +79,7 @@ When a CLI command fails in JSON mode, stdout remains reserved for successful re
     "cache_status": "STALE"
   },
   "retryable": true,
-  "suggestion": "Check network access to the Git repository and rerun atomic-ops sync."
+  "suggestion": "Check network access to the Git repository and rerun ptm-atomic sync."
 }
 ```
 
@@ -96,7 +96,7 @@ Field contract:
 ## Stdout And Stderr Rules
 
 - Successful CLI results go to stdout in the requested output format.
-- Successful `atomic-ops run` results use the fixed envelope `op_id`, `status`,
+- Successful `ptm-atomic run` results use the fixed envelope `op_id`, `status`,
   `data`, `error_type`, and `diag_snapshot_ref`; runner-specific fields are
   nested under `data`.
 - JSON-mode CLI failures write the fixed error object to stderr.
@@ -107,7 +107,7 @@ Field contract:
 
 ## Validate Finding Boundary
 
-`atomic-ops validate` is a reference checker, not a full schema validator. It reads either a test-case YAML file or a package manifest from the synced cache, extracts `op_id` references, and reports missing references or test-case structure findings.
+`ptm-atomic validate` is a reference checker, not a full schema validator. It reads either a test-case YAML file or a package manifest from the synced cache, extracts `op_id` references, and reports missing references or test-case structure findings.
 
 Examples:
 
@@ -165,7 +165,7 @@ To add or change a static repository check exit code:
 - The 5 CLI-level exit codes are exactly `21`, `22`, `23`, `24`, and `25`.
 - Static repository check exits `31`, `32`, and `33` are documented separately
   from CLI-level `error_code` values.
-- Process files such as `process/*` are workflow/internal artifacts ignored by source control policy; they are not shipped delivery docs for `atomic-ops`.
+- Process files such as `process/*` are workflow/internal artifacts ignored by source control policy; they are not shipped delivery docs for `ptm-atomic`.
 - The JSON error object contains `error_code`, `message`, `details`, `retryable`, and may include `suggestion`.
 - JSON-mode failures write the error object to stderr and keep stdout for successful results.
 - Text-mode failures include the `error_code` string in stderr.

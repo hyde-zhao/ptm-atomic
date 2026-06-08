@@ -30,11 +30,11 @@ adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_policy_ro
 | `atoms/fw/fw_config_ospfv2_*.yaml` | References OSPFv2 method-level profile operations through `adapter_contract_ref`. |
 | `atoms/fw/fw_config_ospfv3_*.yaml` | References OSPFv3 method-level profile operations through `adapter_contract_ref`. |
 | `atoms/fw/fw_config_bfd_global.yaml` | References the BFD global profile operation through `adapter_contract_ref`. |
-| `atomic-ops adapter fw_config_object` | Reads the synced cache and shows the address-object adapter operation. |
-| `atomic-ops adapter fw_config_policy_route` | Reads the synced cache and shows the policy-route adapter operation. |
-| `atomic-ops adapter fw_config_ospfv2_global` | Reads the synced cache and shows an OSPFv2 adapter operation. |
-| `atomic-ops adapter fw_config_ospfv3_global` | Reads the synced cache and shows an OSPFv3 adapter operation. |
-| `atomic-ops adapter fw_config_bfd_global` | Reads the synced cache and shows a BFD adapter operation. |
+| `ptm-atomic adapter fw_config_object` | Reads the synced cache and shows the address-object adapter operation. |
+| `ptm-atomic adapter fw_config_policy_route` | Reads the synced cache and shows the policy-route adapter operation. |
+| `ptm-atomic adapter fw_config_ospfv2_global` | Reads the synced cache and shows an OSPFv2 adapter operation. |
+| `ptm-atomic adapter fw_config_ospfv3_global` | Reads the synced cache and shows an OSPFv3 adapter operation. |
+| `ptm-atomic adapter fw_config_bfd_global` | Reads the synced cache and shows a BFD adapter operation. |
 | `scripts/validate_adapter_profiles.py` | Checks profile schema validity and atom reference integrity. |
 | `scripts/security_gate_check.py` | Includes `adapters/` in the default read-only security scan and performs structured adapter sensitive-content checks. |
 
@@ -66,7 +66,7 @@ Adapter profiles must not contain runtime-sensitive information or local input d
 
 ## Runtime Boundary
 
-Most `atomic-ops` commands remain read-only. `atomic-ops run` is the only execution entry and is limited to explicit allowlisted operations. Adapter profiles still do not store device addresses, passwords, session material, or production samples.
+Most `ptm-atomic` commands remain read-only. `ptm-atomic run` is the only execution entry and is limited to explicit allowlisted operations. Adapter profiles still do not store device addresses, passwords, session material, or production samples.
 
 `fw_config_object` currently maps to:
 
@@ -89,7 +89,7 @@ Most `atomic-ops` commands remain read-only. `atomic-ops run` is the only execut
 `val.source_network` and `val.dst_network` are address object names by default. If either value is an address group name, the corresponding `*_is_group` field must be `true`.
 `val.forwarding_paths[].next_hop_ip` may be empty for outgoing-interface forwarding mode. When it is provided, it must be a valid IPv4 or IPv6 address matching `val.type`.
 
-The runner obtains live session material from the local session file created by `atomic-ops run fw_login_web_management --execute`.
+The runner obtains live session material from the local session file created by `ptm-atomic run auth login --execute`.
 
 OSPFv2 operations are represented one HTTP method at a time because adapter schema v1.0 has a single `request.method` per operation. The default NGFW profile maps:
 
@@ -120,14 +120,14 @@ GET entries keep `payload_template: {}` to satisfy the schema while the runner s
 Run the adapter profile check together with the normal repository checks:
 
 ```bash
-uv run atomic-ops adapter fw_config_object
-uv run atomic-ops adapter fw_config_policy_route
-uv run atomic-ops adapter fw_config_ospfv2_global
-uv run atomic-ops adapter fw_delete_ospfv2_network
-uv run atomic-ops adapter fw_config_ospfv3_global
-uv run atomic-ops adapter fw_config_bfd_global
+uv run ptm-atomic adapter fw_config_object
+uv run ptm-atomic adapter fw_config_policy_route
+uv run ptm-atomic adapter fw_config_ospfv2_global
+uv run ptm-atomic adapter fw_delete_ospfv2_network
+uv run ptm-atomic adapter fw_config_ospfv3_global
+uv run ptm-atomic adapter fw_config_bfd_global
 uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/security_gate_check.py
 ```
 
-`atomic-ops adapter <op_id>` is a read-only cache query. It requires the local cache to be synced to a repository version that includes both the atom `adapter_contract_ref` and the referenced `adapters/` profile file.
+`ptm-atomic adapter <op_id>` is a read-only cache query. It requires the local cache to be synced to a repository version that includes both the atom `adapter_contract_ref` and the referenced `adapters/` profile file.

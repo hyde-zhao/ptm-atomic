@@ -12,7 +12,7 @@ from typing import Any
 from atomic_ops.runner.errors import RunnerError
 
 
-DEFAULT_SESSION_FILE = Path.home() / ".local" / "state" / "atomic-ops" / "ngfw" / "session.json"
+DEFAULT_SESSION_FILE = Path.home() / ".local" / "state" / "ptm-atomic" / "ngfw" / "session.json"
 SESSION_FILE_MODE = 0o600
 
 
@@ -33,7 +33,7 @@ def ensure_session_path_allowed(path: Path, *, cwd: Path | None = None) -> None:
         "RUNNER_SESSION_INVALID",
         "Session file must not be written inside the current repository.",
         {"session_file": str(path)},
-        suggestion="Use the default session path or a path under ~/.local/state/atomic-ops/.",
+        suggestion="Use the default session path or a path under ~/.local/state/ptm-atomic/.",
     )
 
 
@@ -71,7 +71,7 @@ def read_session_file(path: Path) -> dict[str, Any]:
             "RUNNER_SESSION_INVALID",
             "Session file does not exist.",
             {"session_file": str(path)},
-            suggestion="Run atomic-ops run fw_login_web_management --execute first.",
+            suggestion="Run ptm-atomic run fw_login_web_management --execute first.",
         )
     mode = path.stat().st_mode & 0o777
     if mode & 0o077:

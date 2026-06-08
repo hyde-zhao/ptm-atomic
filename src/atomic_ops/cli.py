@@ -1,11 +1,10 @@
-"""Command-line entry point for atomic-ops."""
+"""Command-line entry point for ptm-atomic."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 
 from atomic_ops import __version__
 from atomic_ops.commands import adapter as adapter_command
@@ -15,82 +14,139 @@ from atomic_ops.commands import run as run_command
 from atomic_ops.commands import show as show_command
 from atomic_ops.commands import sync as sync_command
 from atomic_ops.commands import validate as validate_command
+from atomic_ops.commands import CommandGroup, CommandSpec
 
 
 EXIT_NOT_IMPLEMENTED = 2
 
 
-@dataclass(frozen=True)
-class CommandSpec:
-    name: str
-    help: str
-    description: str
+# ── 根命令清单（扁平子命令层） ──────────────────────────
 
 
-COMMANDS: tuple[CommandSpec, ...] = (
+ROOT_COMMANDS: tuple[CommandSpec | CommandGroup, ...] = (
     CommandSpec(
         name="sync",
         help="Synchronize the local atomic operation repository cache.",
         description="Synchronize the local atomic operation repository cache.",
+        handler=sync_command.run,
+        add_args=sync_command.add_arguments,
     ),
     CommandSpec(
         name="list",
         help="List available atomic operations.",
         description="List available atomic operations.",
+        handler=list_command.run,
+        add_args=list_command.add_arguments,
     ),
     CommandSpec(
         name="show",
         help="Show one atomic operation by op_id.",
         description="Show one atomic operation by op_id.",
+        handler=show_command.run,
+        add_args=show_command.add_arguments,
     ),
     CommandSpec(
         name="adapter",
         help="Show one adapter profile operation by op_id.",
         description="Show one adapter profile operation by op_id.",
-    ),
-    CommandSpec(
-        name="run",
-        help="Run a supported atomic operation against an NGFW device.",
-        description="Run a supported atomic operation against an NGFW device.",
+        handler=adapter_command.run,
+        add_args=adapter_command.add_arguments,
     ),
     CommandSpec(
         name="validate",
         help="Validate operation references or package manifests.",
         description="Validate operation references or package manifests.",
+        handler=validate_command.run,
+        add_args=validate_command.add_arguments,
     ),
     CommandSpec(
         name="packages",
         help="List available package manifests.",
         description="List available package manifests.",
+        handler=packages_command.run,
+        add_args=packages_command.add_arguments,
+    ),
+    # run 是嵌套命令组，由 run_command 提供子结构
+    CommandGroup(
+        name="run",
+        help="Run a supported atomic operation against an NGFW device.",
+        description="Run a supported atomic operation against an NGFW device.",
+        add_shared_args=run_command.add_shared_arguments,
+        children=run_command.build_run_subtree(),
+        legacy_handler=run_command.run_legacy,
     ),
 )
+
+
+# ── 注册函数 ──────────────────────────────────────────────
 
 
 def _placeholder_handler(args: argparse.Namespace) -> int:
     command = getattr(args, "command", "<unknown>")
     print(
-        f"error: command '{command}' is registered but not implemented in STORY-07",
+        f"error: command '{command}' is registered but not implemented",
         file=sys.stderr,
     )
     return EXIT_NOT_IMPLEMENTED
 
 
-def _register_subcommand(
+def _register_command_spec(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     spec: CommandSpec,
-    handler: Callable[[argparse.Namespace], int],
 ) -> None:
+    """注册叶子命令。"""
     parser = subparsers.add_parser(
         spec.name,
         help=spec.help,
         description=spec.description,
     )
-    parser.set_defaults(command=spec.name, handler=handler)
+    parser.set_defaults(command=spec.name, handler=spec.handler)
+    if spec.add_args is not None:
+        spec.add_args(parser)
+
+
+def _register_command_group(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    group: CommandGroup,
+) -> None:
+    """递归注册嵌套命令组。"""
+    parser = subparsers.add_parser(
+        group.name,
+        help=group.help,
+        description=group.description,
+    )
+    # 注册 group 级别的共享参数
+    if group.add_shared_args is not None:
+        group.add_shared_args(parser)
+
+    # 创建子命令层
+    child_subparsers = parser.add_subparsers(
+        title=f"{group.name} commands",
+        dest=f"{group.name}_subcommand",
+    )
+    child_subparsers.required = True
+
+    for child in group.children:
+        if isinstance(child, CommandSpec):
+            _register_command_spec(child_subparsers, child)
+        elif isinstance(child, CommandGroup):
+            _register_command_group(child_subparsers, child)
+        else:
+            raise TypeError(f"Unknown child type: {type(child)}")
+
+    # 设置 group 级别的默认 handler（用于旧格式兼容或 fallback）
+    if group.legacy_handler is not None:
+        parser.set_defaults(handler=group.legacy_handler)
+    else:
+        parser.set_defaults(handler=_placeholder_handler)
+
+
+# ── 构建解析器 ────────────────────────────────────────────
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="atomic-ops",
+        prog="ptm-atomic",
         description="Manage local atomic operation specifications.",
     )
     parser.add_argument(
@@ -105,30 +161,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers.required = True
 
-    for spec in COMMANDS:
-        if spec.name == "sync":
-            _register_subcommand(subparsers, spec, sync_command.run)
-            sync_command.add_arguments(subparsers.choices[spec.name])
-        elif spec.name == "list":
-            _register_subcommand(subparsers, spec, list_command.run)
-            list_command.add_arguments(subparsers.choices[spec.name])
-        elif spec.name == "show":
-            _register_subcommand(subparsers, spec, show_command.run)
-            show_command.add_arguments(subparsers.choices[spec.name])
-        elif spec.name == "adapter":
-            _register_subcommand(subparsers, spec, adapter_command.run)
-            adapter_command.add_arguments(subparsers.choices[spec.name])
-        elif spec.name == "run":
-            _register_subcommand(subparsers, spec, run_command.run)
-            run_command.add_arguments(subparsers.choices[spec.name])
-        elif spec.name == "packages":
-            _register_subcommand(subparsers, spec, packages_command.run)
-            packages_command.add_arguments(subparsers.choices[spec.name])
-        elif spec.name == "validate":
-            _register_subcommand(subparsers, spec, validate_command.run)
-            validate_command.add_arguments(subparsers.choices[spec.name])
+    for item in ROOT_COMMANDS:
+        if isinstance(item, CommandSpec):
+            _register_command_spec(subparsers, item)
+        elif isinstance(item, CommandGroup):
+            _register_command_group(subparsers, item)
         else:
-            _register_subcommand(subparsers, spec, _placeholder_handler)
+            raise TypeError(f"Unknown root item type: {type(item)}")
 
     return parser
 

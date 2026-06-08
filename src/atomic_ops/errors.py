@@ -1,4 +1,4 @@
-"""Shared CLI error and output helpers for atomic-ops commands."""
+"""Shared CLI error and output helpers for ptm-atomic commands."""
 
 from __future__ import annotations
 
@@ -6,10 +6,18 @@ import json
 import re
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from atomic_ops.metadata import redact_sensitive as _redact_sensitive
-from atomic_ops.repository import EXIT_CODES
+from atomic_ops.repository import (
+    ERROR_OP_NOT_FOUND,
+    ERROR_PACKAGE_NOT_FOUND,
+    ERROR_REPO_NOT_SYNCED,
+    EXIT_CODES,
+)
+
+if TYPE_CHECKING:
+    from atomic_ops.repository import ReadError, Repository
 
 
 SENSITIVE_KEY_PARTS = ("authorization", "header", "password", "passwd", "pwd", "secret", "token")
@@ -105,7 +113,49 @@ def _is_sensitive_key(key: str) -> bool:
     return any(part in normalized for part in SENSITIVE_KEY_PARTS)
 
 
-def _details_text(details: Any) -> str:
+def details_text(details: Any) -> str:
+    """Convert a details dict to a human-readable string."""
     if not isinstance(details, dict) or not details:
         return "{}"
     return ", ".join(f"{key}={value}" for key, value in details.items())
+
+
+# 保留内部版本用于 write_error 内部
+_details_text = details_text
+
+
+def write_stale_warning(repo: Repository, output_format: str) -> None:
+    """输出统一的 stale cache 警告。"""
+    if not repo.is_stale:
+        return
+    write_warning(
+        {
+            "warning_code": "STALE_CACHE",
+            "message": "cache_status=STALE; using stale local cache for read-only operation",
+            "details": {"command": "unknown", "cache_status": "STALE"},
+        },
+        output_format,
+    )
+
+
+def write_read_error(exc: ReadError, output_format: str, command: str) -> int:
+    """统一的 ReadError → CliError 转换和输出。
+
+    根据 error_code 自动选择对应的 suggestion。
+    """
+    suggestion_map = {
+        ERROR_REPO_NOT_SYNCED: "Run ptm-atomic sync before using read commands.",
+        ERROR_OP_NOT_FOUND: "Run ptm-atomic sync and check the op_id spelling.",
+        ERROR_PACKAGE_NOT_FOUND: "Run ptm-atomic packages and choose one of the listed package names.",
+    }
+    suggestion = suggestion_map.get(exc.error_code, "Rerun the command after fixing the local cache.")
+    return write_error(
+        CliError(
+            error_code=exc.error_code,
+            message=exc.message,
+            details={"command": command, **exc.details},
+            retryable=exc.retryable,
+            suggestion=suggestion,
+        ),
+        output_format,
+    )

@@ -30,7 +30,7 @@ operations:
       notes:
         - BVI and subinterface payloads only support Route mode.
         - Physical interfaces are not created; use fw_update_interface for existing physical interfaces.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_interface:
     atom_ref: atoms/fw/fw_update_interface.yaml
     intent: Build an interface update request for bvi, subinterface, physical, or bond objects.
@@ -57,7 +57,7 @@ operations:
       notes:
         - Physical and bond interfaces support Route, Switch, Pair, and Monitor modes.
         - BVI and subinterface payloads only support Route mode.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_interface:
     atom_ref: atoms/fw/fw_verify_interface.yaml
     intent: Build an all-interface query request.
@@ -104,7 +104,7 @@ operations:
       notes:
         - DELETE sends the interface id as ?id=<interface-id> and sends no JSON body.
         - Physical interfaces are not deletable.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_batch_interface:
     atom_ref: atoms/fw/fw_delete_batch_interface.yaml
     intent: Build a batch request that deletes multiple interface entries.
@@ -135,7 +135,7 @@ operations:
       notes:
         - Batch interface deletion is independent from single-interface DELETE /api/v1/intf.
         - Each batch item must be DELETE /api/v1/intf with body.id as a non-empty list.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_object:
     atom_ref: atoms/fw/fw_config_object.yaml
     intent: Build an IPv4 address-object configuration request from a validated atom parameter set.
@@ -168,7 +168,7 @@ operations:
       notes:
         - Address-object names are later referenced by policy route source_network or dst_network fields.
         - CIDR input must be split into ipaddr and mask before calling this endpoint.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_policy_route:
     atom_ref: atoms/fw/fw_config_policy_route.yaml
     intent: Build an IPv4 or IPv6 policy-route create request from a validated atom parameter set.
@@ -217,7 +217,7 @@ operations:
         - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - source_network and dst_network are address object names unless the matching is_group flag is true.
         - Live endpoint, session material, and credentials must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_policy_route:
     atom_ref: atoms/fw/fw_update_policy_route.yaml
     intent: Build an IPv4 or IPv6 policy-route update request from a validated atom parameter set.
@@ -266,7 +266,7 @@ operations:
         - type must be ipv4 or ipv6; forwarding_paths entries require next_hop_ip or outgoing_interface.
         - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - Live endpoint, session material, and credentials must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_policy_route:
     atom_ref: atoms/fw/fw_delete_policy_route.yaml
     intent: Build a policy-route delete request by id and address family.
@@ -292,7 +292,7 @@ operations:
         - DELETE uses id and is_ip6 as query values and sends no JSON body.
         - is_ip6=false deletes an IPv4 policy route id; is_ip6=true deletes an IPv6 policy route id.
         - Live endpoint, session material, and credentials must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_policy_route:
     atom_ref: atoms/fw/fw_verify_policy_route.yaml
     intent: Build a policy-route query request for IPv4 or IPv6 routes.
@@ -345,7 +345,7 @@ operations:
       notes:
         - targetsite supports before, after, first, and last.
         - is_ip6=false moves IPv4 policy route priority; is_ip6=true moves IPv6 policy route priority.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_ospfv2_global:
     atom_ref: atoms/fw/fw_config_ospfv2_global.yaml
     intent: Build an OSPFv2 global configuration request from a validated atom parameter set.
@@ -376,7 +376,7 @@ operations:
       notes:
         - Router ID must be an IPv4 address.
         - Live endpoint and session material must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_ospfv2_global:
     atom_ref: atoms/fw/fw_verify_ospfv2_global.yaml
     intent: Build an OSPFv2 global configuration query request.
@@ -426,7 +426,7 @@ operations:
       notes:
         - Supported redistribution protocols are connected, static, and rip.
         - Live endpoint and session material must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_ospfv2_redistribution:
     atom_ref: atoms/fw/fw_verify_ospfv2_redistribution.yaml
     intent: Build an OSPFv2 route redistribution query request.
@@ -476,7 +476,7 @@ operations:
       notes:
         - Network must be an IPv4 CIDR.
         - Live endpoint and session material must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_ospfv2_network_update:
     atom_ref: atoms/fw/fw_config_ospfv2_network_update.yaml
     intent: Build an OSPFv2 network update request by entry id.
@@ -505,7 +505,7 @@ operations:
       notes:
         - Network update requires an explicit entry id.
         - Live endpoint and session material must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_ospfv2_network:
     atom_ref: atoms/fw/fw_delete_ospfv2_network.yaml
     intent: Build an OSPFv2 network deletion request by entry id.
@@ -530,7 +530,7 @@ operations:
       notes:
         - Network deletion requires an explicit entry id.
         - The runner sends the id as a DELETE query value and sends no JSON body.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_ospfv2_network:
     atom_ref: atoms/fw/fw_verify_ospfv2_network.yaml
     intent: Build an OSPFv2 network query request.
@@ -591,7 +591,7 @@ operations:
       notes:
         - Timer and BFD interval values must be validated before execution.
         - Live endpoint and session material must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_ospfv2_interface_update:
     atom_ref: atoms/fw/fw_config_ospfv2_interface_update.yaml
     intent: Build an OSPFv2 interface update request by entry id.
@@ -631,7 +631,7 @@ operations:
       notes:
         - Interface update requires an explicit entry id.
         - Live endpoint and session material must come from runner input.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_ospfv2_interface:
     atom_ref: atoms/fw/fw_delete_ospfv2_interface.yaml
     intent: Build an OSPFv2 interface deletion request by entry id.
@@ -657,7 +657,7 @@ operations:
       notes:
         - Interface deletion requires an explicit entry id.
         - The runner sends the id as the DELETE query value.
-        - atomic-ops run can execute this request only when --execute is explicit.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_ospfv2_interface:
     atom_ref: atoms/fw/fw_verify_ospfv2_interface.yaml
     intent: Build an OSPFv2 interface query request.

@@ -1,18 +1,22 @@
-"""Implementation for the atomic-ops run command."""
+"""Implementation for the ptm-atomic run command.
+
+提供共享参数注册和操作族子命令树。各操作族的 runner 逻辑位于独立的
+run_<family>.py 模块中。
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
+import sys
 from typing import Any
 
-import yaml
-
+from atomic_ops.commands import CommandGroup, CommandSpec
 from atomic_ops.errors import CliError, write_error, write_warning
 from atomic_ops.runner.errors import RunnerError
-from atomic_ops.runner.session import DEFAULT_SESSION_FILE, resolve_session_file
+from atomic_ops.runner.session import DEFAULT_SESSION_FILE
 
+# ── 受支持操作列表（维护旧格式兼容映射） ─────────────────
 
 OSPFV2_OPS = (
     "fw_config_ospfv2_global",
@@ -73,20 +77,71 @@ SUPPORTED_OPS = (
     *OSPFV3_BFD_OPS,
 )
 
+# ── 旧 op_id → 新子命令路径映射 ──────────────────────────
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("op_id", help="Operation id to run.")
-    parser.add_argument(
-        "--format",
-        choices=("json", "yaml"),
-        default="yaml",
-        help="Output format.",
-    )
-    parser.add_argument(
-        "--execute",
-        action="store_true",
-        help="Perform live device requests. Omit for dry-run.",
-    )
+DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
+    "fw_login_web_management": ("auth", "login"),
+    "fw_config_object": ("object", "config"),
+    "fw_config_policy_route": ("policy-route", "config"),
+    "fw_update_policy_route": ("policy-route", "update"),
+    "fw_delete_policy_route": ("policy-route", "delete"),
+    "fw_verify_policy_route": ("policy-route", "verify"),
+    "fw_update_policy_route_priority": ("policy-route", "priority"),
+    "fw_config_interface": ("interface", "create"),
+    "fw_update_interface": ("interface", "update"),
+    "fw_verify_interface": ("interface", "verify"),
+    "fw_delete_interface": ("interface", "delete"),
+    "fw_delete_batch_interface": ("interface", "delete-batch"),
+    "fw_config_ospfv2_global": ("ospf", "config", "global"),
+    "fw_verify_ospfv2_global": ("ospf", "verify", "global"),
+    "fw_config_ospfv2_redistribution": ("ospf", "config", "redistribution"),
+    "fw_verify_ospfv2_redistribution": ("ospf", "verify", "redistribution"),
+    "fw_config_ospfv2_network": ("ospf", "config", "network"),
+    "fw_config_ospfv2_network_update": ("ospf", "config", "network-update"),
+    "fw_delete_ospfv2_network": ("ospf", "delete", "network"),
+    "fw_verify_ospfv2_network": ("ospf", "verify", "network"),
+    "fw_config_ospfv2_interface": ("ospf", "config", "interface"),
+    "fw_config_ospfv2_interface_update": ("ospf", "config", "interface-update"),
+    "fw_delete_ospfv2_interface": ("ospf", "delete", "interface"),
+    "fw_verify_ospfv2_interface": ("ospf", "verify", "interface"),
+    "fw_verify_ospfv2_neighbor": ("ospf", "verify", "neighbor"),
+    "fw_capture_ospfv2_log": ("ospf", "verify", "neighbor"),
+    "fw_config_ospfv3_global": ("ospfv3", "config", "global"),
+    "fw_verify_ospfv3_global": ("ospfv3", "verify", "global"),
+    "fw_config_ospfv3_redistribution": ("ospfv3", "config", "redistribution"),
+    "fw_verify_ospfv3_redistribution": ("ospfv3", "verify", "redistribution"),
+    "fw_config_ospfv3_network": ("ospfv3", "config", "network"),
+    "fw_config_ospfv3_network_update": ("ospfv3", "config", "network-update"),
+    "fw_delete_ospfv3_network": ("ospfv3", "delete", "network"),
+    "fw_verify_ospfv3_network": ("ospfv3", "verify", "network"),
+    "fw_config_ospfv3_interface": ("ospfv3", "config", "interface"),
+    "fw_config_ospfv3_interface_update": ("ospfv3", "config", "interface-update"),
+    "fw_delete_ospfv3_interface": ("ospfv3", "delete", "interface"),
+    "fw_verify_ospfv3_interface": ("ospfv3", "verify", "interface"),
+    "fw_verify_ospfv3_neighbor": ("ospfv3", "verify", "neighbor"),
+    "fw_capture_ospfv3_log": ("ospfv3", "verify", "neighbor"),
+    "fw_config_bfd_global": ("ospfv3", "bfd", "config"),
+    "fw_verify_bfd_global": ("ospfv3", "bfd", "verify-global"),
+    "fw_verify_bfd_session": ("ospfv3", "bfd", "verify-session"),
+    "fw_capture_bfd_log": ("ospfv3", "bfd", "verify-session"),
+}
+
+# 共享参数名列表（子命令通过 getattr 从父解析器结果中读取）
+SHARED_ARG_NAMES = (
+    "base_url",
+    "session_file",
+    "timeout",
+    "verify_tls",
+    "output_format",
+    "execute",
+    "auth_header",
+)
+
+# ── 共享参数注册 ──────────────────────────────────────────
+
+
+def add_shared_arguments(parser: argparse.ArgumentParser) -> None:
+    """注册所有 run 子命令共享的参数。"""
     parser.add_argument(
         "--base-url",
         required=True,
@@ -95,7 +150,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--session-file",
         default=str(DEFAULT_SESSION_FILE),
-        help="Session file path. Defaults to ~/.local/state/atomic-ops/ngfw/session.json.",
+        help="Session file path. Defaults to ~/.local/state/ptm-atomic/ngfw/session.json.",
     )
     parser.add_argument(
         "--timeout",
@@ -108,173 +163,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Verify the device TLS certificate. Disabled by default for lab NGFW devices.",
     )
-
-    parser.add_argument("--username", help="NGFW web-management username for fw_login_web_management.")
     parser.add_argument(
-        "--password-env",
-        help="Environment variable containing the NGFW web-management password.",
+        "--format",
+        choices=("json", "yaml"),
+        default="yaml",
+        dest="output_format",
+        help="Output format.",
     )
     parser.add_argument(
-        "--change-default-password",
+        "--execute",
         action="store_true",
-        help="Allow fw_login_web_management to call /api/v1/changeDefPwd when the device requires it.",
+        help="Perform live device requests. Omit for dry-run.",
     )
-    parser.add_argument(
-        "--new-password-env",
-        help="Environment variable containing the replacement password for --change-default-password.",
-    )
-
-    parser.add_argument("--object-name", help="Address-object name for fw_config_object.")
-    parser.add_argument("--ipaddr", help="IPv4 address or network address for fw_config_object.")
-    parser.add_argument("--mask", help="IPv4 mask length for fw_config_object, for example 16 or 24.")
-    parser.add_argument("--object-desc", help="Optional address-object description.")
-
-    parser.add_argument("--source-network", help="Policy-route source address object or address-group name.")
-    parser.add_argument(
-        "--source-network-is-group",
-        action="store_true",
-        help="Treat --source-network as an address-group name.",
-    )
-    parser.add_argument("--dst-network", default="any", help="Policy-route destination address object or address-group name.")
-    parser.add_argument(
-        "--dst-network-is-group",
-        action="store_true",
-        help="Treat --dst-network as an address-group name.",
-    )
-    parser.add_argument(
-        "--next-hop-ip",
-        help="Policy-route forwarding next-hop IP address. Required unless --outgoing-interface is set.",
-    )
-    parser.add_argument("--in-interface", help="Policy-route incoming interface.")
-    parser.add_argument(
-        "--outgoing-interface",
-        default="",
-        help="Policy-route outgoing interface. Required unless --next-hop-ip is set.",
-    )
-    parser.add_argument("--service", default="any", help="Policy-route service object/name.")
-    parser.add_argument("--service-is-group", action="store_true", help="Treat --service as a service-group name.")
-    parser.add_argument("--weight", type=int, default=100, help="Policy-route forwarding path weight.")
-    parser.add_argument("--time-obj", default="", help="Policy-route time object.")
-    parser.add_argument(
-        "--policy-route-type",
-        choices=("ipv4", "ipv6"),
-        default="ipv4",
-        help="Policy-route address family. Also controls is_ip6 for query and priority operations.",
-    )
-    policy_route_active_group = parser.add_mutually_exclusive_group()
-    policy_route_active_group.add_argument(
-        "--policy-route-active",
-        dest="policy_route_active",
-        action="store_true",
-        default=True,
-        help="Enable the policy route.",
-    )
-    policy_route_active_group.add_argument(
-        "--policy-route-inactive",
-        dest="policy_route_active",
-        action="store_false",
-        help="Disable the policy route.",
-    )
-    parser.add_argument("--policy-route-action", type=int, default=1, help="Policy-route action value.")
-    parser.add_argument("--config-source", type=int, default=0, help="Policy-route config_source value.")
-    parser.add_argument(
-        "--targetsite",
-        choices=("before", "after", "first", "last"),
-        help="Policy-route priority target site for fw_update_policy_route_priority.",
-    )
-    parser.add_argument("--targetid", help="Policy-route priority target id.")
-    parser.add_argument("--moveid", help="Policy-route priority moving route id.")
-
-    parser.add_argument(
-        "--id",
-        action="append",
-        help="Entry id. May be repeated for fw_delete_batch_interface.",
-    )
-    enable_group = parser.add_mutually_exclusive_group()
-    enable_group.add_argument("--enable", dest="enable", action="store_true", default=None, help="Enable OSPFv2 globally.")
-    enable_group.add_argument("--disable", dest="enable", action="store_false", help="Disable OSPFv2 globally.")
-    parser.add_argument("--router-id", help="OSPFv2 router ID IPv4 address.")
-    originate_group = parser.add_mutually_exclusive_group()
-    originate_group.add_argument("--originate", dest="originate", action="store_true", default=None, help="Enable default route origination.")
-    originate_group.add_argument("--no-originate", dest="originate", action="store_false", help="Disable default route origination.")
-    always_group = parser.add_mutually_exclusive_group()
-    always_group.add_argument("--always", dest="always", action="store_true", default=None, help="Always originate the default route.")
-    always_group.add_argument("--no-always", dest="always", action="store_false", help="Do not always originate the default route.")
-    parser.add_argument(
-        "--redistribute",
-        action="append",
-        default=[],
-        help="OSPFv2 redistribution mapping in protocol=metric form. May be repeated.",
-    )
-    parser.add_argument("--network", help="OSPFv2 network in IPv4 CIDR form.")
-    parser.add_argument("--area", help="OSPFv2 area id.")
-    parser.add_argument("--interface", help="OSPFv2 interface name.")
-    parser.add_argument("--cost", help="OSPFv2 interface cost.")
-    parser.add_argument("--priority", help="OSPFv2 interface priority.")
-    parser.add_argument("--hello-interval", help="OSPFv2 hello interval.")
-    parser.add_argument("--retransmit-interval", help="OSPFv2 retransmit interval.")
-    parser.add_argument("--dead-interval", help="OSPFv2 dead interval.")
-    parser.add_argument("--transmit-delay", help="OSPFv2 transmit delay.")
-    parser.add_argument("--type-network", type=int, help="OSPFv2 interface network type.")
-    parser.add_argument("--int-auth-mode", type=int, help="OSPFv2 interface authentication mode.")
-    bfd_group = parser.add_mutually_exclusive_group()
-    bfd_group.add_argument("--bfd-enable", dest="bfd_enable", action="store_true", default=None, help="Enable BFD on the OSPFv2 interface.")
-    bfd_group.add_argument("--bfd-disable", dest="bfd_enable", action="store_false", help="Disable BFD on the OSPFv2 interface.")
-    parser.add_argument("--detect-multiplier", type=int, help="OSPFv2 BFD detect multiplier.")
-    parser.add_argument("--min-rx-interval", type=int, help="OSPFv2 BFD minimum receive interval.")
-    parser.add_argument("--min-tx-interval", type=int, help="OSPFv2 BFD minimum transmit interval.")
-    parser.add_argument("--page", type=int, default=1, help="OSPFv2 paginated query page.")
-    parser.add_argument("--size", type=int, default=40, help="OSPFv2 paginated query page size.")
-    parser.add_argument(
-        "--interface-kind",
-        choices=("bvi", "sub", "physical", "bond"),
-        help="NGFW interface kind for /api/v1/intf payload generation.",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=("Route", "Switch", "Pair", "Monitor"),
-        default="Route",
-        help="NGFW interface mode for /api/v1/intf payload generation.",
-    )
-    parser.add_argument("--name", help="Interface val.name. Defaults to --id.")
-    parser.add_argument("--desc", default="", help="Interface description.")
-    interface_enabled_group = parser.add_mutually_exclusive_group()
-    interface_enabled_group.add_argument(
-        "--interface-enabled",
-        dest="interface_enabled",
-        action="store_true",
-        default=True,
-        help="Enable the NGFW interface.",
-    )
-    interface_enabled_group.add_argument(
-        "--interface-disabled",
-        dest="interface_enabled",
-        action="store_false",
-        help="Disable the NGFW interface.",
-    )
-    parser.add_argument(
-        "--ip-address",
-        action="append",
-        default=[],
-        help="Interface CIDR address. May be repeated for IPv4 and IPv6.",
-    )
-    parser.add_argument("--parent-name", help="Subinterface parent interface name.")
-    parser.add_argument("--sub-id", type=int, help="Subinterface VLAN/sub id.")
-    parser.add_argument("--bvi-instance", type=int, help="BVI instance id. Defaults to the numeric id suffix.")
-    parser.add_argument("--bond-id", type=int, help="Bond id. Defaults to the numeric id suffix.")
-    parser.add_argument(
-        "--bond-member",
-        action="append",
-        default=[],
-        help="Physical interface member for a bond. May be repeated.",
-    )
-    parser.add_argument("--bond-mode", type=int, default=5, help="Bond mode field.")
-    parser.add_argument("--bond-lb", type=int, default=0, help="Bond load-balance field.")
-    parser.add_argument("--link-type", type=int, help="Interface linkType field.")
-    parser.add_argument("--pvid", type=int, default=1, help="Switch/Pair/Monitor mode PVID.")
-    parser.add_argument("--allow-pass", help="Switch/Pair/Monitor mode allowPass field.")
-    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
-    parser.add_argument("--payload-json", help="Complete JSON request payload.")
     parser.add_argument(
         "--auth-header",
         choices=("Authorization", "AuthorizationToken"),
@@ -283,10 +183,108 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def run(args: argparse.Namespace) -> int:
-    output_format = getattr(args, "format", "yaml")
+def resolve_run_context(args: argparse.Namespace) -> dict[str, Any]:
+    """从解析结果中提取共享参数，返回 dict 供 runner 使用。"""
+    ctx: dict[str, Any] = {}
+    for name in SHARED_ARG_NAMES:
+        value = getattr(args, name, None)
+        if value is not None:
+            ctx[name] = value
+    return ctx
+
+
+# ── 子命令树构建 ──────────────────────────────────────────
+
+
+def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
+    """构建 run 子命令树。每个操作族为一个 CommandGroup。"""
+    from atomic_ops.commands import run_auth as run_auth
+    from atomic_ops.commands import run_object as run_object
+    from atomic_ops.commands import run_policy_route as run_policy_route
+    from atomic_ops.commands import run_interface as run_interface
+    from atomic_ops.commands import run_ospf as run_ospf
+    from atomic_ops.commands import run_ospfv3 as run_ospfv3
+
+    return (
+        CommandGroup(
+            name="auth",
+            help="Authentication operations (login).",
+            description="Authentication operations for NGFW device login.",
+            children=run_auth.build_subtree(),
+        ),
+        CommandGroup(
+            name="object",
+            help="Address object operations.",
+            description="Address object configuration operations.",
+            children=run_object.build_subtree(),
+        ),
+        CommandGroup(
+            name="policy-route",
+            help="Policy-based routing operations.",
+            description="Policy-route configuration, update, delete, verify, and priority operations.",
+            children=run_policy_route.build_subtree(),
+        ),
+        CommandGroup(
+            name="interface",
+            help="Network interface operations.",
+            description="Interface create, update, delete, delete-batch, and verify operations.",
+            children=run_interface.build_subtree(),
+        ),
+        CommandGroup(
+            name="ospf",
+            help="OSPFv2 routing operations.",
+            description="OSPFv2 global, network, interface, and redistribution config/delete/verify operations.",
+            children=run_ospf.build_subtree(),
+        ),
+        CommandGroup(
+            name="ospfv3",
+            help="OSPFv3 and BFD routing operations.",
+            description="OSPFv3 and BFD config, delete, verify operations.",
+            children=run_ospfv3.build_subtree(),
+        ),
+    )
+
+
+# ── 旧格式兼容 ────────────────────────────────────────────
+
+
+def run_legacy(args: argparse.Namespace) -> int:
+    """处理旧格式 'ptm-atomic run <op_id> [--params]'。
+
+    检测到 op_id 时输出 deprecation warning，映射到对应的新子命令路径。
+    此兼容入口将在 1-2 个版本后移除。
+    """
+    op_id = getattr(args, "op_id", None)
+    if op_id and op_id in DEPRECATED_OP_MAP:
+        path = DEPRECATED_OP_MAP[op_id]
+        new_cmd = " ".join(path)
+        print(
+            f"warning: '{op_id}' is deprecated, "
+            f"use 'ptm-atomic run {new_cmd}' instead.",
+            file=sys.stderr,
+        )
+        # 将参数转发到对应的操作族 handler
+        return _dispatch_legacy(op_id, args)
+
+    if op_id and op_id not in SUPPORTED_OPS:
+        raise RunnerError(
+            "RUNNER_UNSUPPORTED_OP",
+            "Runner does not support this operation.",
+            {"op_id": op_id, "supported_ops": list(SUPPORTED_OPS)},
+            suggestion="Use ptm-atomic adapter for unsupported operations, or add a dedicated runner.",
+        )
+
+    # 不应到达此处：正常的 run 子命令已在 cli.py 被子命令解析器捕获
+    return _dispatch_legacy(op_id, args) if op_id else 2
+
+
+def _dispatch_legacy(op_id: str, args: argparse.Namespace) -> int:
+    """将旧格式 op_id 分发到对应的操作族 handler。"""
+    from atomic_ops.runner.session import DEFAULT_SESSION_FILE, resolve_session_file
+
+    output_format = getattr(args, "output_format", "yaml")
     try:
-        if not getattr(args, "verify_tls"):
+        if not getattr(args, "verify_tls", False):
             write_warning(
                 {
                     "warning_code": "TLS_VERIFY_DISABLED",
@@ -295,25 +293,24 @@ def run(args: argparse.Namespace) -> int:
                 output_format,
             )
 
-        op_id = getattr(args, "op_id")
         if op_id == "fw_login_web_management":
-            payload = _run_login(args)
+            payload = _run_login_legacy(args)
         elif op_id == "fw_config_object":
-            payload = _run_object(args)
+            payload = _run_object_legacy(args)
         elif op_id in POLICY_ROUTE_OPS:
-            payload = _run_policy_route(args)
+            payload = _run_policy_route_legacy(args)
         elif op_id in INTERFACE_OPS:
-            payload = _run_interface(args)
+            payload = _run_interface_legacy(args)
         elif op_id in OSPFV2_OPS:
-            payload = _run_ospfv2(args)
+            payload = _run_ospfv2_legacy(args)
         elif op_id in OSPFV3_BFD_OPS:
-            payload = _run_ospfv3_bfd(args)
+            payload = _run_ospfv3_bfd_legacy(args)
         else:
             raise RunnerError(
                 "RUNNER_UNSUPPORTED_OP",
                 "Runner does not support this operation.",
                 {"op_id": op_id, "supported_ops": list(SUPPORTED_OPS)},
-                suggestion="Use atomic-ops adapter for unsupported operations, or add a dedicated runner.",
+                suggestion="Use ptm-atomic adapter for unsupported operations, or add a dedicated runner.",
             )
         _write_output(_to_run_envelope(payload), output_format)
         return 0
@@ -330,7 +327,10 @@ def run(args: argparse.Namespace) -> int:
         )
 
 
-def _run_login(args: argparse.Namespace) -> dict[str, Any]:
+# ── 旧格式 runner 函数（保持原有实现） ──────────────────
+
+
+def _run_login_legacy(args: argparse.Namespace) -> dict[str, Any]:
     from atomic_ops.runner.ngfw_login import build_login_dry_run, login
     from atomic_ops.runner.session import session_summary, write_session_file
 
@@ -374,14 +374,13 @@ def _run_login(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _run_object(args: argparse.Namespace) -> dict[str, Any]:
+def _run_object_legacy(args: argparse.Namespace) -> dict[str, Any]:
     from atomic_ops.runner.object import (
         build_address_object_dry_run,
         build_address_object_payload,
         execute_address_object,
     )
 
-    session_file = resolve_session_file(getattr(args, "session_file", None))
     _require_arg(args, "object_name")
     _require_arg(args, "ipaddr")
     _require_arg(args, "mask")
@@ -394,7 +393,7 @@ def _run_object(args: argparse.Namespace) -> dict[str, Any]:
     if not getattr(args, "execute"):
         return build_address_object_dry_run(
             base_url=getattr(args, "base_url"),
-            session_file=session_file,
+            session_file=resolve_session_file(getattr(args, "session_file", None)),
             auth_header=getattr(args, "auth_header"),
             payload=payload,
             verify_tls=bool(getattr(args, "verify_tls")),
@@ -402,7 +401,7 @@ def _run_object(args: argparse.Namespace) -> dict[str, Any]:
         )
     return execute_address_object(
         base_url=getattr(args, "base_url"),
-        session_file=session_file,
+        session_file=resolve_session_file(getattr(args, "session_file", None)),
         auth_header=getattr(args, "auth_header"),
         payload=payload,
         verify_tls=bool(getattr(args, "verify_tls")),
@@ -410,7 +409,7 @@ def _run_object(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def _run_policy_route(args: argparse.Namespace) -> dict[str, Any]:
+def _run_policy_route_legacy(args: argparse.Namespace) -> dict[str, Any]:
     from atomic_ops.runner.policy_route import (
         build_policy_route_delete_payload,
         build_policy_route_dry_run,
@@ -488,115 +487,7 @@ def _run_policy_route(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def _run_ospfv2(args: argparse.Namespace) -> dict[str, Any]:
-    from atomic_ops.runner.ospfv2 import build_ospfv2_dry_run, build_ospfv2_payload, execute_ospfv2
-
-    op_id = getattr(args, "op_id")
-    session_file = resolve_session_file(getattr(args, "session_file", None))
-    payload = build_ospfv2_payload(
-        op_id,
-        {
-            "id": _single_arg(args, "id"),
-            "enable": getattr(args, "enable"),
-            "router_id": getattr(args, "router_id"),
-            "originate": getattr(args, "originate"),
-            "always": getattr(args, "always"),
-            "redistribute": getattr(args, "redistribute"),
-            "network": getattr(args, "network"),
-            "area": getattr(args, "area"),
-            "interface": getattr(args, "interface"),
-            "cost": getattr(args, "cost"),
-            "priority": getattr(args, "priority"),
-            "hello_interval": getattr(args, "hello_interval"),
-            "retransmit_interval": getattr(args, "retransmit_interval"),
-            "dead_interval": getattr(args, "dead_interval"),
-            "transmit_delay": getattr(args, "transmit_delay"),
-            "type_network": getattr(args, "type_network"),
-            "int_auth_mode": getattr(args, "int_auth_mode"),
-            "bfd_enable": getattr(args, "bfd_enable"),
-            "detect_multiplier": getattr(args, "detect_multiplier"),
-            "min_rx_interval": getattr(args, "min_rx_interval"),
-            "min_tx_interval": getattr(args, "min_tx_interval"),
-        },
-    )
-    if not getattr(args, "execute"):
-        return build_ospfv2_dry_run(
-            op_id=op_id,
-            base_url=getattr(args, "base_url"),
-            session_file=session_file,
-            auth_header=getattr(args, "auth_header"),
-            payload=payload,
-            page=int(getattr(args, "page")),
-            size=int(getattr(args, "size")),
-            verify_tls=bool(getattr(args, "verify_tls")),
-            timeout=float(getattr(args, "timeout")),
-        )
-    return execute_ospfv2(
-        op_id=op_id,
-        base_url=getattr(args, "base_url"),
-        session_file=session_file,
-        auth_header=getattr(args, "auth_header"),
-        payload=payload,
-        page=int(getattr(args, "page")),
-        size=int(getattr(args, "size")),
-        verify_tls=bool(getattr(args, "verify_tls")),
-        timeout=float(getattr(args, "timeout")),
-    )
-
-
-def _run_ospfv3_bfd(args: argparse.Namespace) -> dict[str, Any]:
-    from atomic_ops.runner.ospfv3_bfd import (
-        build_ospfv3_bfd_dry_run,
-        build_ospfv3_bfd_payload,
-        execute_ospfv3_bfd,
-    )
-
-    op_id = getattr(args, "op_id")
-    session_file = resolve_session_file(getattr(args, "session_file", None))
-    payload = build_ospfv3_bfd_payload(
-        op_id,
-        {
-            "id": _single_arg(args, "id"),
-            "enable": getattr(args, "enable"),
-            "router_id": getattr(args, "router_id"),
-            "redistribute": getattr(args, "redistribute"),
-            "interface": getattr(args, "interface"),
-            "area": getattr(args, "area"),
-            "cost": getattr(args, "cost"),
-            "priority": getattr(args, "priority"),
-            "hello_interval": getattr(args, "hello_interval"),
-            "retransmit_interval": getattr(args, "retransmit_interval"),
-            "dead_interval": getattr(args, "dead_interval"),
-            "transmit_delay": getattr(args, "transmit_delay"),
-            "type_network": getattr(args, "type_network"),
-        },
-    )
-    if not getattr(args, "execute"):
-        return build_ospfv3_bfd_dry_run(
-            op_id=op_id,
-            base_url=getattr(args, "base_url"),
-            session_file=session_file,
-            auth_header=getattr(args, "auth_header"),
-            payload=payload,
-            page=int(getattr(args, "page")),
-            size=int(getattr(args, "size")),
-            verify_tls=bool(getattr(args, "verify_tls")),
-            timeout=float(getattr(args, "timeout")),
-        )
-    return execute_ospfv3_bfd(
-        op_id=op_id,
-        base_url=getattr(args, "base_url"),
-        session_file=session_file,
-        auth_header=getattr(args, "auth_header"),
-        payload=payload,
-        page=int(getattr(args, "page")),
-        size=int(getattr(args, "size")),
-        verify_tls=bool(getattr(args, "verify_tls")),
-        timeout=float(getattr(args, "timeout")),
-    )
-
-
-def _run_interface(args: argparse.Namespace) -> dict[str, Any]:
+def _run_interface_legacy(args: argparse.Namespace) -> dict[str, Any]:
     from atomic_ops.runner.interface import (
         build_interface_batch_delete_payload,
         build_interface_dry_run,
@@ -669,6 +560,117 @@ def _run_interface(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _run_ospfv2_legacy(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.ospfv2 import build_ospfv2_dry_run, build_ospfv2_payload, execute_ospfv2
+
+    op_id = getattr(args, "op_id")
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    payload = build_ospfv2_payload(
+        op_id,
+        {
+            "id": _single_arg(args, "id"),
+            "enable": getattr(args, "enable"),
+            "router_id": getattr(args, "router_id"),
+            "originate": getattr(args, "originate"),
+            "always": getattr(args, "always"),
+            "redistribute": getattr(args, "redistribute"),
+            "network": getattr(args, "network"),
+            "area": getattr(args, "area"),
+            "interface": getattr(args, "interface"),
+            "cost": getattr(args, "cost"),
+            "priority": getattr(args, "priority"),
+            "hello_interval": getattr(args, "hello_interval"),
+            "retransmit_interval": getattr(args, "retransmit_interval"),
+            "dead_interval": getattr(args, "dead_interval"),
+            "transmit_delay": getattr(args, "transmit_delay"),
+            "type_network": getattr(args, "type_network"),
+            "int_auth_mode": getattr(args, "int_auth_mode"),
+            "bfd_enable": getattr(args, "bfd_enable"),
+            "detect_multiplier": getattr(args, "detect_multiplier"),
+            "min_rx_interval": getattr(args, "min_rx_interval"),
+            "min_tx_interval": getattr(args, "min_tx_interval"),
+        },
+    )
+    if not getattr(args, "execute"):
+        return build_ospfv2_dry_run(
+            op_id=op_id,
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            payload=payload,
+            page=int(getattr(args, "page")),
+            size=int(getattr(args, "size")),
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout")),
+        )
+    return execute_ospfv2(
+        op_id=op_id,
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        payload=payload,
+        page=int(getattr(args, "page")),
+        size=int(getattr(args, "size")),
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout")),
+    )
+
+
+def _run_ospfv3_bfd_legacy(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.ospfv3_bfd import (
+        build_ospfv3_bfd_dry_run,
+        build_ospfv3_bfd_payload,
+        execute_ospfv3_bfd,
+    )
+
+    op_id = getattr(args, "op_id")
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    payload = build_ospfv3_bfd_payload(
+        op_id,
+        {
+            "id": _single_arg(args, "id"),
+            "enable": getattr(args, "enable"),
+            "router_id": getattr(args, "router_id"),
+            "redistribute": getattr(args, "redistribute"),
+            "interface": getattr(args, "interface"),
+            "area": getattr(args, "area"),
+            "cost": getattr(args, "cost"),
+            "priority": getattr(args, "priority"),
+            "hello_interval": getattr(args, "hello_interval"),
+            "retransmit_interval": getattr(args, "retransmit_interval"),
+            "dead_interval": getattr(args, "dead_interval"),
+            "transmit_delay": getattr(args, "transmit_delay"),
+            "type_network": getattr(args, "type_network"),
+        },
+    )
+    if not getattr(args, "execute"):
+        return build_ospfv3_bfd_dry_run(
+            op_id=op_id,
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            payload=payload,
+            page=int(getattr(args, "page")),
+            size=int(getattr(args, "size")),
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout")),
+        )
+    return execute_ospfv3_bfd(
+        op_id=op_id,
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        payload=payload,
+        page=int(getattr(args, "page")),
+        size=int(getattr(args, "size")),
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout")),
+    )
+
+
+# ── 辅助函数 ──────────────────────────────────────────────
+
+
 def _require_arg(args: argparse.Namespace, name: str) -> None:
     value = getattr(args, name)
     if isinstance(value, list):
@@ -732,7 +734,6 @@ def _write_output(payload: dict[str, Any], output_format: str) -> None:
 
 def _to_run_envelope(payload: dict[str, Any]) -> dict[str, Any]:
     """Wrap runner-specific payloads in the stable operation return envelope."""
-
     data = dict(payload)
     op_id = data.pop("op_id", None)
     status = data.pop("status", None)

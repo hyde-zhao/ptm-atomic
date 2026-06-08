@@ -3,7 +3,7 @@ description: Template for validating references to shipped NGFW atomic operation
 preconditions:
   - The local atomic operation cache is synced to a commit containing the referenced op_id values.
   - The consuming test runner maps fw_lab_primary to a lab firewall without storing credentials in this file.
-  - This template is for reference validation only; atomic-ops validate does not connect to devices.
+  - This template is for reference validation only; ptm-atomic validate does not connect to devices.
 steps:
   - step: verify_ngfw_health_reference
     op_id: fw_verify_ngfw_health
@@ -41,5 +41,5 @@ tight_sequence:
 postconditions:
   - The template remains free of real addresses, credentials, tokens, cookies, and device session data.
   - Validation reports all referenced op_id values as present in the local cache when synced to the matching repository commit.
-  - Any real device execution or configuration push uses only explicit atomic-ops run allowlist commands outside this reference-validation template.
+  - Any real device execution or configuration push uses only explicit ptm-atomic run allowlist commands outside this reference-validation template.
   - Rollback and credential handling stay outside this test-case YAML.

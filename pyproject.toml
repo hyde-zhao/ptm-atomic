@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "atomic-ops"
+name = "ptm-atomic"
 version = "0.1.0"
-description = "CLI for syncing and consuming atomic operation specifications."
+description = "PTM Atomic — CLI for syncing and executing atomic operation specifications against network devices."
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml",
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-atomic-ops = "atomic_ops.cli:main"
+ptm-atomic = "atomic_ops.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

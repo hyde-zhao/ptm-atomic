@@ -88,7 +88,7 @@ target.
 
 Firewall v1.1 atoms remain contract documents. Their verbs describe the eventual
 operation contract for an external orchestrator; they do not imply that the
-current `atomic-ops` CLI can connect to a firewall or execute the operation.
+current `ptm-atomic` CLI can connect to a firewall or execute the operation.
 
 ### Firewall v1.1 Near Misses
 
@@ -104,7 +104,7 @@ current `atomic-ops` CLI can connect to a firewall or execute the operation.
 
 ## CLI Command Verb Boundary
 
-The `atomic-ops` CLI is primarily a local catalog and validation interface.
+The `ptm-atomic` CLI is primarily a local catalog and validation interface.
 The only real-device execution entry is the allowlisted `run` command, which is
 dry-run by default and requires explicit `--execute` for live device requests.
 

@@ -74,7 +74,7 @@ profile operation's `atom_ref` points back to the atom file. Adapter profiles
 must remain shape-only: they may describe method, relative endpoint path,
 payload placeholders, response status codes, and non-sensitive result refs, but
 must not contain runtime endpoint inventory, credential values, session material,
-production samples, or `.input/capacity` dependencies. `atomic-ops run` may
+production samples, or `.input/capacity` dependencies. `ptm-atomic run` may
 execute explicitly allowlisted adapter-backed operations, while runtime endpoint
 and session material must still come from CLI arguments and the local session
 file rather than from the adapter profile.
@@ -127,7 +127,7 @@ contract keys that may appear under `returns.data`.
 `session_ref` and `state_ref` are references held by an external orchestrator.
 They are not CLI cache entries and must not include raw authentication material.
 
-`atomic-ops run` uses the same fixed envelope for successful stdout and adds
+`ptm-atomic run` uses the same fixed envelope for successful stdout and adds
 `op_id` as a CLI result identifier. Runner-specific details such as dry-run
 request plans, session summaries, status codes, and device response payloads
 must appear under `data`; consumers must not expect `request`, `session`, or

@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document defines the static multi-device batch configuration contract for `atomic-ops`.
+This document defines the static multi-device batch configuration contract for `ptm-atomic`.
 It documents atom YAML inputs, outputs, package scope, and safety boundaries for the ten NGFW
 capacity domains. It does not define or provide a batch executor, device connection, inventory
 reader, request payload, response payload, runtime log, or automatic recovery mechanism.

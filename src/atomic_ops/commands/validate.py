@@ -1,4 +1,4 @@
-"""Implementation for the atomic-ops validate command."""
+"""Implementation for the ptm-atomic validate command."""
 
 from __future__ import annotations
 
@@ -183,7 +183,7 @@ def _write_missing_error(
             "cache": repo.metadata_summary(),
         },
         retryable=False,
-        suggestion="Run atomic-ops sync, check op_id spelling, and use the suggested operation ids when applicable.",
+        suggestion="Run ptm-atomic sync, check op_id spelling, and use the suggested operation ids when applicable.",
     )
     return write_error(error, output_format)
 
@@ -191,9 +191,9 @@ def _write_missing_error(
 def _write_read_error(exc: ReadError, output_format: str) -> int:
     suggestion = "Rerun the command after fixing the local cache."
     if exc.error_code == ERROR_REPO_NOT_SYNCED:
-        suggestion = "Run atomic-ops sync before validating operation references."
+        suggestion = "Run ptm-atomic sync before validating operation references."
     elif exc.error_code == ERROR_PACKAGE_NOT_FOUND:
-        suggestion = "Run atomic-ops packages and choose one of the listed package names."
+        suggestion = "Run ptm-atomic packages and choose one of the listed package names."
 
     error = CliError(
         error_code=exc.error_code,

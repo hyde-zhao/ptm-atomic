@@ -1,4 +1,4 @@
-"""Metadata and cache helpers for atomic-ops sync."""
+"""Metadata and cache helpers for ptm-atomic sync."""
 
 from __future__ import annotations
 
@@ -105,9 +105,9 @@ def resolve_cache_root() -> Path:
     if sys.platform.startswith("win"):
         local_app_data = os.environ.get("LOCALAPPDATA")
         if not local_app_data:
-            raise MetadataError("LOCALAPPDATA is not set; cannot resolve atomic-ops cache root")
-        return Path(local_app_data).expanduser() / "atomic-ops" / "repo"
-    return Path.home() / ".cache" / "atomic-ops" / "repo"
+            raise MetadataError("LOCALAPPDATA is not set; cannot resolve ptm-atomic cache root")
+        return Path(local_app_data).expanduser() / "ptm-atomic" / "repo"
+    return Path.home() / ".cache" / "ptm-atomic" / "repo"
 
 
 def metadata_path(cache_root: Path) -> Path:

@@ -1,4 +1,4 @@
-"""System git adapter for atomic-ops sync."""
+"""System git adapter for ptm-atomic sync."""
 
 from __future__ import annotations
 
@@ -237,7 +237,7 @@ def sparse_fallback_warning(version: GitVersion) -> dict[str, str]:
     return {
         "warning_code": WARNING_SPARSE_FALLBACK,
         "message": (
-            f"git {version.raw} is older than 2.25; atomic-ops will use a full checkout "
+            f"git {version.raw} is older than 2.25; ptm-atomic will use a full checkout "
             "instead of sparse-checkout"
         ),
     }

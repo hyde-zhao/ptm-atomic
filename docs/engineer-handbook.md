@@ -1,10 +1,10 @@
 # 工程师手册
 
-本文面向维护 `atomic-ops` 的工程师，说明当前交付面、贡献流程、CLI 执行边界、静态检查和发布前验证。当前 CLI 子命令包括 `sync`、`list`、`show`、`adapter`、`run`、`packages`、`validate`；除 `run` 白名单 op 外，其余命令只读。
+本文面向维护 `ptm-atomic` 的工程师，说明当前交付面、贡献流程、CLI 执行边界、静态检查和发布前验证。当前 CLI 子命令包括 `sync`、`list`、`show`、`adapter`、`run`、`packages`、`validate`；`run` 按操作族分为 `auth`、`object`、`policy-route`、`interface`、`ospf`、`ospfv3` 六个嵌套子命令族。除 `run` 白名单 op 外，其余命令只读。
 
 ## 1. 维护边界
 
-`atomic-ops` 仓库的用户可见交付面是：
+`ptm-atomic` 仓库的用户可见交付面是：
 
 ```text
 atoms/
@@ -18,7 +18,7 @@ pyproject.toml
 uv.lock
 ```
 
-维护文档时不要把其他内部目录描述为用户安装或交付目录。CLI 本体由 `uv tool install .` 或 `uv run atomic-ops ...` 使用；操作库数据由 `atomic-ops sync` 写入本地缓存。
+维护文档时不要把其他内部目录描述为用户安装或交付目录。CLI 本体由 `uv tool install .` 或 `uv run ptm-atomic ...` 使用；操作库数据由 `ptm-atomic sync` 写入本地缓存。
 
 ### 生成过程产物与源代码卫生
 
@@ -27,7 +27,7 @@ uv.lock
 | 路径 / 模式 | 处理规则 |
 |---|---|
 | `.input/` | 本地输入和临时资料目录；不得把内容写入文档示例或发布包。 |
-| `process/` | Meta Flow 工作流内部过程文档；不作为 `atomic-ops` 交付文档发布。 |
+| `process/` | Meta Flow 工作流内部过程文档；不作为 `ptm-atomic` 交付文档发布。 |
 | `checkpoints/` | Meta Flow 人工检查点草稿；不作为产品文档发布。 |
 | `AGENTS.md` | 本地生成的 agent 规则文件；当前 `.gitignore` 忽略它。 |
 | `.agents/`、`.codex/`、`.claude/` | 本地 agent 或 IDE runtime 配置；不得作为消费者安装步骤。 |
@@ -40,7 +40,7 @@ uv.lock
 工程师本机需要 Python 3.11+、`uv` 和 `git`。Python 依赖以 `pyproject.toml` 为声明来源，以 `uv.lock` 为锁定结果。
 
 ```bash
-uv run atomic-ops --help
+uv run ptm-atomic --help
 uv run --python 3.11 python scripts/layout_check.py
 ```
 
@@ -52,29 +52,29 @@ CLI 与操作库缓存是两条生命周期：
 
 | 对象 | 管理命令 | 影响 |
 |---|---|---|
-| CLI 本体 | `uv tool install .`、`uv tool upgrade atomic-ops` | 安装或升级 `atomic-ops` 命令和 Python 依赖。 |
-| 操作库缓存 | `atomic-ops sync --repo <atomic-ops-git-repository-url>` | 同步 `atoms/`、`schemas/`、`packages/`、`docs/`、`adapters/` 到本地缓存。 |
+| CLI 本体 | `uv tool install .`、`uv tool upgrade ptm-atomic` | 安装或升级 `ptm-atomic` 命令和 Python 依赖。 |
+| 操作库缓存 | `ptm-atomic sync --repo <ptm-atomic-git-repository-url>` | 同步 `atoms/`、`schemas/`、`packages/`、`docs/`、`adapters/` 到本地缓存。 |
 
 同步后只读命令从缓存读取：
 
 ```bash
-atomic-ops packages
-atomic-ops list --package ngfw_capacity_config
-atomic-ops show fw_config_interface
-atomic-ops adapter fw_config_object
-atomic-ops adapter fw_config_policy_route
-atomic-ops adapter fw_config_ospfv2_global
-atomic-ops adapter fw_config_ospfv3_global
-atomic-ops adapter fw_config_bfd_global
-atomic-ops run fw_config_object --base-url https://<device-management-ip> --object-name srcObj --ipaddr 192.168.0.0 --mask 16
-atomic-ops run fw_config_policy_route --base-url https://<device-management-ip> --source-network srcObj --dst-network dstObj --next-hop-ip 1.1.1.1 --in-interface GE0_12
-atomic-ops run fw_config_policy_route --base-url https://<device-management-ip> --source-network any --dst-network any --in-interface GE0_2.106 --outgoing-interface tunnel2 --weight 123
-atomic-ops run fw_verify_ospfv2_neighbor --base-url https://<device-management-ip> --page 1 --size 40
-atomic-ops run fw_verify_bfd_session --base-url https://<device-management-ip> --page 1 --size 40
-atomic-ops validate --package ngfw_installation
+ptm-atomic packages
+ptm-atomic list --package ngfw_capacity_config
+ptm-atomic show fw_config_interface
+ptm-atomic adapter fw_config_object
+ptm-atomic adapter fw_config_policy_route
+ptm-atomic adapter fw_config_ospfv2_global
+ptm-atomic adapter fw_config_ospfv3_global
+ptm-atomic adapter fw_config_bfd_global
+ptm-atomic run object config --base-url https://<device-management-ip> --object-name srcObj --ipaddr 192.168.0.0 --mask 16
+ptm-atomic run policy-route config --base-url https://<device-management-ip> --source-network srcObj --dst-network dstObj --next-hop-ip 1.1.1.1 --in-interface GE0_12
+ptm-atomic run policy-route config --base-url https://<device-management-ip> --source-network any --dst-network any --in-interface GE0_2.106 --outgoing-interface tunnel2 --weight 123
+ptm-atomic run ospf verify neighbor --base-url https://<device-management-ip> --page 1 --size 40
+ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-ip> --page 1 --size 40
+ptm-atomic validate --package ngfw_installation
 ```
 
-`run` 命令默认 dry-run，只有 Web 登录、地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 白名单 op 在显式 `--execute` 后会连接设备。其他命令不连接设备、不执行 atom、不推送配置、不保存凭据、不执行自动回滚。
+`run` 命令按操作族分为嵌套子命令（`auth`、`object`、`policy-route`、`interface`、`ospf`、`ospfv3`），默认 dry-run。只有 Web 登录、地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 白名单 op 在显式 `--execute` 后会连接设备。其他命令不连接设备、不执行 atom、不推送配置、不保存凭据、不执行自动回滚。
 
 `list`、`show`、`adapter`、`packages` 和 `validate` 都读取 synced cache，不读取当前工作树中尚未同步的修改。若 `sync` 失败但缓存完整，命令可能带 `STALE` 警告继续使用旧缓存；此时缓存 smoke test 不能证明当前工作树 manifest 已发布或已同步。
 
@@ -249,7 +249,7 @@ packages/ngfw_verification.yaml
 推荐从 `docs/test-case-template.yaml` 开始。模板使用逻辑设备名，不写真实地址或凭据。
 
 ```bash
-atomic-ops validate docs/test-case-template.yaml
+ptm-atomic validate docs/test-case-template.yaml
 ```
 
 ## 9. 发布前自检
@@ -257,7 +257,7 @@ atomic-ops validate docs/test-case-template.yaml
 每次修改 atom、package、schema、CLI 或文档后，先运行工作树检查：
 
 ```bash
-uv run atomic-ops --help
+uv run ptm-atomic --help
 uv run --python 3.11 python scripts/validate_schema.py atoms
 uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/layout_check.py
@@ -271,14 +271,14 @@ uv run --python 3.11 python scripts/check_package_refs.py
 缓存消费者 smoke test 单独运行：
 
 ```bash
-atomic-ops packages
-atomic-ops adapter fw_config_object
-atomic-ops adapter fw_config_policy_route
-atomic-ops validate --package ngfw_installation
-atomic-ops validate --package networking
+ptm-atomic packages
+ptm-atomic adapter fw_config_object
+ptm-atomic adapter fw_config_policy_route
+ptm-atomic validate --package ngfw_installation
+ptm-atomic validate --package networking
 ```
 
-`atomic-ops packages`、`atomic-ops adapter <op_id>` 与 `atomic-ops validate --package ...` 是 synced-cache smoke tests。如果本地 CLI 缓存尚未同步到包含新 package 或 adapter profile 的提交，`validate --package` 可能返回 `PACKAGE_NOT_FOUND`，`adapter` 可能返回 `REPO_NOT_SYNCED`；如果缓存处于 `STALE`，它也可能落后于当前仓库。先运行 `atomic-ops packages` 和代表性 `adapter` 查询查看当前缓存事实，再同步到目标提交。
+`ptm-atomic packages`、`ptm-atomic adapter <op_id>` 与 `ptm-atomic validate --package ...` 是 synced-cache smoke tests。如果本地 CLI 缓存尚未同步到包含新 package 或 adapter profile 的提交，`validate --package` 可能返回 `PACKAGE_NOT_FOUND`，`adapter` 可能返回 `REPO_NOT_SYNCED`；如果缓存处于 `STALE`，它也可能落后于当前仓库。先运行 `ptm-atomic packages` 和代表性 `adapter` 查询查看当前缓存事实，再同步到目标提交。
 
 ## 10. 安全门禁
 
@@ -310,10 +310,10 @@ CLI 顶层错误码见 `docs/error-codes.md`：
 | 错误码 | 退出码 | 处理 |
 |---|---:|---|
 | `GIT_AUTH_FAILED` | 21 | 检查 git 原生认证。 |
-| `GIT_NETWORK_ERROR` | 22 | 网络恢复后重跑 `atomic-ops sync`。 |
+| `GIT_NETWORK_ERROR` | 22 | 网络恢复后重跑 `ptm-atomic sync`。 |
 | `OP_NOT_FOUND` | 23 | 同步缓存后检查 `op_id`。 |
-| `REPO_NOT_SYNCED` | 24 | 执行 `atomic-ops sync --repo <atomic-ops-git-repository-url>`。 |
-| `PACKAGE_NOT_FOUND` | 25 | 用 `atomic-ops packages` 查看可用 package。 |
+| `REPO_NOT_SYNCED` | 24 | 执行 `ptm-atomic sync --repo <ptm-atomic-git-repository-url>`。 |
+| `PACKAGE_NOT_FOUND` | 25 | 用 `ptm-atomic packages` 查看可用 package。 |
 
 脚本错误码包括 schema 校验、布局检查和安全门禁错误码。发布报告应记录命令、退出码和关键输出。
 
