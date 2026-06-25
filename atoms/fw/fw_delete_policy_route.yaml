@@ -32,9 +32,12 @@ inputs:
     id: 15
     is_ip6: false
   idempotency_key: "<idempotency-key>"
+side_effect: destructive
 returns:
   status: success
   data:
+    policy_route_id: 15
+    pre_snapshot_ref: "<policy-route-pre-delete-snapshot-ref>"
     config_result:
       status: succeeded
       config_domain: policy_route
@@ -46,6 +49,26 @@ returns:
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: false
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - policy_route_id
+    - full_config
+  notes: Recreate the policy-route object from the full pre-delete snapshot.
+pre_snapshot:
+  op_id: fw_verify_policy_route
+  capture_fields:
+    - policy_route_id
+    - full_config
+rollback_apply:
+  op_id: fw_config_policy_route
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_policy_route
+  expected_state: exists
+dry_run_supported: true
+risk_level: high
 timeout_ms: 30000
 error_types:
   - NONE

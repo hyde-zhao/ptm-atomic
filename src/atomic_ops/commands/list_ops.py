@@ -101,11 +101,23 @@ def _write_success(payload: dict[str, Any], output_format: str) -> None:
 
 
 def _operation_table(operations: list[dict[str, Any]]) -> str:
-    headers = ("op_id", "device_type", "idempotent", "since_version", "tags", "aliases", "description")
+    headers = (
+        "op_id",
+        "device_type",
+        "side_effect",
+        "rollback",
+        "idempotent",
+        "since_version",
+        "tags",
+        "aliases",
+        "description",
+    )
     rows = [
         (
             str(item.get("op_id") or ""),
             str(item.get("device_type") or ""),
+            str(item.get("side_effect") or ""),
+            _rollback_label(item.get("rollback_strategy")),
             str(item.get("idempotent")).lower(),
             str(item.get("since_version") or ""),
             ", ".join(item.get("tags") or []),
@@ -127,3 +139,11 @@ def _operation_table(operations: list[dict[str, Any]]) -> str:
         for row in rows
     )
     return "\n".join(lines)
+
+
+def _rollback_label(strategy: Any) -> str:
+    if not isinstance(strategy, dict):
+        return ""
+    strategy_type = str(strategy.get("type") or "")
+    op_id = str(strategy.get("op_id") or "")
+    return f"{strategy_type}:{op_id}" if op_id else strategy_type

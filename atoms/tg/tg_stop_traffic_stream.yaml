@@ -1,4 +1,4 @@
-schema_version: "1.0.0"
+schema_version: "1.1"
 op_id: tg_stop_traffic_stream
 device_type: tg
 description: Stop one Ixia-C traffic stream or all active traffic streams.
@@ -22,10 +22,22 @@ parameters:
 returns:
   status: success
   data:
+    stream_id: "<stream-id>"
     stopped: ""
   error_type: RESOURCE_NOT_FOUND
   diag_snapshot_ref: ""
 idempotent: true
+side_effect: traffic_runtime
+rollback_strategy:
+  type: manual_required
+  snapshot_required: false
+  required_inputs: []
+  notes: Stopping traffic is a cleanup action; ptm-atomic cannot automatically restore the previous runtime stream state.
+post_verify:
+  op_id: tg_capture_traffic_result
+  expected_state: stopped
+dry_run_supported: true
+risk_level: medium
 timeout_ms: 30000
 error_types:
   - INVALID_PARAM

@@ -36,9 +36,12 @@ inputs:
       mode: Route
       ip_addresses: []
   idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
 returns:
   status: success
   data:
+    interface: GE0_19
+    pre_snapshot_ref: "<interface-pre-snapshot-ref>"
     config_result:
       status: succeeded
       config_domain: interface
@@ -49,6 +52,28 @@ returns:
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - interface
+    - full_config
+  notes: Restore the original interface definition; disable/enable changes must return to the pre-operation admin status.
+pre_snapshot:
+  op_id: fw_verify_interface
+  capture_fields:
+    - interface
+    - admin_status
+    - link_config
+    - full_config
+rollback_apply:
+  op_id: fw_update_interface
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_interface
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
 timeout_ms: 30000
 error_types:
   - NONE

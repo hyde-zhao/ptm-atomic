@@ -15,15 +15,22 @@ parameters:
 inputs:
   session_ref: "<session-ref>"
   query_domain: interface
+side_effect: observation
 returns:
   status: success
   data:
     observed_state_ref: "<interface-state-ref>"
+    interface: "<interface>"
+    admin_status: enabled
+    link_config: "<interface-link-config-ref>"
+    full_config: "<interface-full-config-ref>"
     state_status: valid
     expires_at: null
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+dry_run_supported: true
+risk_level: low
 timeout_ms: 30000
 error_types:
   - NONE

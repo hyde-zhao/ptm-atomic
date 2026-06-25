@@ -1,4 +1,4 @@
-schema_version: "1.0.0"
+schema_version: "1.1"
 op_id: tg_capture_traffic_result
 device_type: tg
 description: Capture Ixia-C traffic stream counters for one stream or all streams.
@@ -26,6 +26,9 @@ returns:
   error_type: RESOURCE_NOT_FOUND
   diag_snapshot_ref: ""
 idempotent: true
+side_effect: observation
+dry_run_supported: true
+risk_level: low
 timeout_ms: 30000
 error_types:
   - INVALID_PARAM

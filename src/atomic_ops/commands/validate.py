@@ -13,9 +13,11 @@ from atomic_ops.repository import (
     ERROR_OP_NOT_FOUND,
     ERROR_PACKAGE_NOT_FOUND,
     ERROR_REPO_NOT_SYNCED,
+    SUPPORTED_DEVICES,
     ReadError,
     Repository,
 )
+from atomic_ops.rollback import validate_rollback_contract
 from atomic_ops.suggestions import suggest_op_ids
 
 
@@ -41,6 +43,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default="table",
         help="Output format.",
     )
+    parser.add_argument(
+        "--check",
+        choices=("refs", "rollback"),
+        default="refs",
+        help="Validation check to run. refs validates operation references; rollback validates rollback metadata.",
+    )
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="With --check rollback, optionally filter by device type: fw, tg, mock, or sw.",
+    )
     parser.set_defaults(validate_parser=parser)
 
 
@@ -51,6 +64,8 @@ def run(args: argparse.Namespace) -> int:
     try:
         repo = Repository.from_default_cache()
         _write_stale_warning(repo, output_format)
+        if getattr(args, "check", "refs") == "rollback":
+            return _run_rollback_check(repo, args, output_format)
         if getattr(args, "package", None):
             return _run_package(repo, str(args.package), output_format)
         return _run_test_case(repo, Path(str(args.test_case)), output_format)
@@ -92,6 +107,64 @@ def _run_test_case(repo: Repository, test_case_path: Path, output_format: str) -
     )
     _write_report(report, output_format)
     return 0
+
+
+def _run_rollback_check(repo: Repository, args: argparse.Namespace, output_format: str) -> int:
+    package_name = getattr(args, "package", None)
+    device = getattr(args, "device", None)
+    device_filter = device if device in SUPPORTED_DEVICES else None
+    if device and device_filter is None:
+        report = _report(
+            mode="rollback",
+            cache=repo.metadata_summary(),
+            checked_count=0,
+            missing_count=0,
+            findings=[
+                _finding(
+                    "UNKNOWN_DEVICE",
+                    "validate.device",
+                    f"unknown device filter: {device}",
+                    severity="error",
+                )
+            ],
+            package=package_name,
+        )
+        _write_report(report, output_format)
+        return 1
+
+    if package_name:
+        operations, missing_count = repo.list_package_operations(package_name, device=device_filter)
+    else:
+        operations = repo.list_operations(device=device_filter)
+        missing_count = 0
+
+    known_ops = {operation.op_id for operation in repo.list_operations()}
+    findings: list[dict[str, Any]] = []
+    for operation in operations:
+        document = repo.read_operation(operation.op_id)
+        findings.extend(
+            finding.to_dict()
+            for finding in validate_rollback_contract(
+                operation.op_id,
+                document.data,
+                known_ops.__contains__,
+            )
+        )
+
+    error_count = sum(1 for finding in findings if finding.get("severity", "error") == "error")
+    report = _report(
+        mode="rollback",
+        cache=repo.metadata_summary(),
+        checked_count=len(operations),
+        missing_count=missing_count,
+        findings=findings,
+        package=package_name,
+    )
+    report["status"] = "failed" if error_count or missing_count else "passed"
+    report["error_count"] = error_count
+    report["warning_count"] = len(findings) - error_count
+    _write_report(report, output_format)
+    return 1 if error_count or missing_count else 0
 
 
 def _read_test_case_refs(test_case_path: Path) -> tuple[list[str], list[dict[str, Any]]]:
@@ -266,6 +339,10 @@ def _report_table(report: dict[str, Any]) -> str:
         lines.append(f"package={safe_report['package']}")
     if safe_report.get("test_case"):
         lines.append(f"test_case={safe_report['test_case']}")
+    if "error_count" in safe_report:
+        lines.append(f"error_count={safe_report['error_count']}")
+    if "warning_count" in safe_report:
+        lines.append(f"warning_count={safe_report['warning_count']}")
 
     findings = safe_report.get("findings") or []
     if findings:
@@ -273,6 +350,7 @@ def _report_table(report: dict[str, Any]) -> str:
         for finding in findings:
             lines.append(
                 "  "
+                f"severity={finding.get('severity', 'error')} "
                 f"finding_type={finding.get('finding_type')} "
                 f"location={finding.get('location')} "
                 f"message={finding.get('message')}"
@@ -282,17 +360,24 @@ def _report_table(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _finding(finding_type: str, location: str, message: str) -> dict[str, Any]:
+def _finding(finding_type: str, location: str, message: str, *, severity: str = "error") -> dict[str, Any]:
     return {
         "finding_type": finding_type,
         "location": redact(location),
         "message": redact(message),
+        "severity": severity,
     }
 
 
 def _validate_mode_args(args: argparse.Namespace) -> None:
     test_case = getattr(args, "test_case", None)
     package_name = getattr(args, "package", None)
+    check = getattr(args, "check", "refs")
+    if check == "rollback":
+        if test_case:
+            parser = getattr(args, "validate_parser")
+            parser.error("validate --check rollback does not accept a test_case path")
+        return
     if bool(test_case) == bool(package_name):
         parser = getattr(args, "validate_parser")
         parser.error("validate requires exactly one of test_case or --package")

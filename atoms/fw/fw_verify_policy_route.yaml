@@ -26,15 +26,23 @@ inputs:
   page: 1
   size: 40
   is_ip6: false
+side_effect: observation
 returns:
   status: success
   data:
     verification_summary_ref: "<policy-route-verification-summary-ref>"
     verification_status: passed
+    existence: true
+    policy_route_id: "<policy-route-id>"
+    full_config: "<policy-route-full-config-ref>"
+    hitcount: 0
+    next_hop_status: reachable
     manual_handling_ref: "<manual-handling-ref>"
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+dry_run_supported: true
+risk_level: low
 timeout_ms: 30000
 error_types:
   - NONE

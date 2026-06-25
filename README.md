@@ -125,7 +125,16 @@ ptm-atomic show fw_verify_ngfw_health
 ptm-atomic adapter fw_config_policy_route
 ptm-atomic validate docs/test-case-template.yaml
 ptm-atomic validate --package ngfw_installation
+ptm-atomic validate --check rollback --format json
+ptm-atomic rollback check --op fw_config_policy_route --format json
 ```
+
+`list --format json` 和 `show <op_id> --format json` 会暴露
+`side_effect`、`rollback_strategy`、`pre_snapshot`、`rollback_apply`、
+`post_verify`、`dry_run_supported` 和 `risk_level` 等回滚元数据。ptm-te
+可在真实执行前调用 `ptm-atomic rollback check --op <op_id> --format json`
+或 `ptm-atomic rollback check --plan <plan.yaml> --format json` 批量判断
+rollback readiness。
 
 ### 执行操作（新格式）
 
@@ -133,20 +142,20 @@ ptm-atomic validate --package ngfw_installation
 
 ```bash
 # 认证
-ptm-atomic run auth login --base-url https://<device-management-ip> --username admin
+ptm-atomic run --base-url https://<device-management-ip> auth login --username admin
 
 # 地址对象
-ptm-atomic run object config --base-url https://<device-management-ip> --object-name srcObj --ipaddr 192.168.0.0 --mask 16
+ptm-atomic run --base-url https://<device-management-ip> object config --object-name srcObj --ipaddr 192.168.0.0 --mask 16
 
 # 策略路由
-ptm-atomic run policy-route config --base-url https://<device-management-ip> --source-network srcObj --dst-network dstObj --next-hop-ip 18.18.2.2 --in-interface GE0_12
+ptm-atomic run --base-url https://<device-management-ip> policy-route config --source-network srcObj --dst-network dstObj --next-hop-ip 18.18.2.2 --in-interface GE0_12
 
 # OSPFv2
-ptm-atomic run ospf config global --base-url https://<device-management-ip> --enable --router-id <DUT_IP> --originate --always
+ptm-atomic run --base-url https://<device-management-ip> ospf config global --enable --router-id <DUT_IP> --originate --always
 
 # OSPFv3 + BFD
-ptm-atomic run ospfv3 config global --base-url https://<device-management-ip> --enable --router-id <DUT_IP>
-ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-ip> --page 1 --size 40
+ptm-atomic run --base-url https://<device-management-ip> ospfv3 config global --enable --router-id <DUT_IP>
+ptm-atomic run --base-url https://<device-management-ip> ospfv3 bfd verify-session --page 1 --size 40
 ```
 
 旧格式 `ptm-atomic run <op_id>` 仍然兼容，但会显示 deprecation warning。迁移指引：`ptm-atomic run --help` 查看所有可用操作族。
@@ -163,6 +172,8 @@ ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-i
 | `ptm-atomic packages` | 列出 package 清单 | 读取本地缓存。 |
 | `ptm-atomic validate <test_case.yaml>` | 校验测试用例中的 `op_id` 引用 | 读取本地缓存和指定 YAML。 |
 | `ptm-atomic validate --package <package_id>` | 校验 package 清单中的 `op_id` 引用 | 读取本地缓存。 |
+| `ptm-atomic validate --check rollback` | 校验 atom 回滚契约完整性 | 读取本地缓存；发现缺 `side_effect`、状态变更缺 rollback、引用 op 不存在、snapshot 契约缺失等问题。 |
+| `ptm-atomic rollback check --op <op_id>` | 查询单个或计划级 rollback readiness | 读取本地缓存；`status=pass` 才允许进入真实执行审批，`blocked` 需要补能力或人工风险接受。 |
 
 除 `ptm-atomic run` 的白名单 runner 外，其他 CLI 命令仍是只读缓存查询或校验。`run` 默认 dry-run，不发设备请求；登录真实执行需要 `--execute --password-env <ENV>`，地址对象、策略路由、OSPFv2、OSPFv3 和 BFD 真实执行需要已有 session 文件和 `--execute`。CLI 不接受明文密码参数，不打印完整会话值，不把运行时材料写入仓库。
 

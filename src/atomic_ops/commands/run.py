@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any
 
+import yaml
+
 from atomic_ops.commands import CommandGroup, CommandSpec
 from atomic_ops.errors import CliError, write_error, write_warning
+from atomic_ops.repository import Repository
+from atomic_ops.rollback import run_rollback_context
 from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.session import DEFAULT_SESSION_FILE
 
@@ -739,6 +744,7 @@ def _to_run_envelope(payload: dict[str, Any]) -> dict[str, Any]:
     status = data.pop("status", None)
     error_type = data.pop("error_type", "NONE")
     diag_snapshot_ref = data.pop("diag_snapshot_ref", "")
+    metadata = data.pop("metadata", {})
 
     envelope: dict[str, Any] = {
         "status": status or "success",
@@ -748,7 +754,22 @@ def _to_run_envelope(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if op_id is not None:
         envelope["op_id"] = op_id
+        rollback_context = _load_rollback_context(str(op_id), data)
+        if rollback_context is not None:
+            metadata = dict(metadata) if isinstance(metadata, dict) else {}
+            metadata["rollback_context"] = rollback_context
+    if metadata:
+        envelope["metadata"] = metadata
     return envelope
+
+
+def _load_rollback_context(op_id: str, result_data: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        repo = Repository.from_default_cache()
+        document = repo.read_operation(op_id)
+    except Exception:
+        return None
+    return run_rollback_context(op_id, document.data, result_data)
 
 
 def _redact_runner_output(value: Any) -> Any:

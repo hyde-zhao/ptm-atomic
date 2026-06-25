@@ -1,4 +1,4 @@
-schema_version: "1.0.0"
+schema_version: "1.1"
 op_id: tg_verify_traffic_loss
 device_type: tg
 description: Verify Ixia-C traffic loss against a maximum allowed loss ratio.
@@ -33,6 +33,9 @@ returns:
   error_type: STATE_MISMATCH
   diag_snapshot_ref: ""
 idempotent: true
+side_effect: observation
+dry_run_supported: true
+risk_level: low
 timeout_ms: 30000
 error_types:
   - INVALID_PARAM

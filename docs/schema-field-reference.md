@@ -29,6 +29,13 @@ change set.
 | `inputs` | `object` | No | v1.1 only | Optional contract-only input envelope for external orchestration references. | `{state_ref: "<state-ref>"}` |
 | `returns` | `object` | Yes | v1.0/v1.1 | Fixed response envelope consumed by validators and later CLI readers. | `{status: success, data: {}, error_type: VALIDATION_ERROR, diag_snapshot_ref: ""}` |
 | `idempotent` | `boolean` | Yes | v1.0/v1.1 | Must be explicitly set. | `true` |
+| `side_effect` | `enum` | Rollback check | v1.1 | Environment side-effect class: `none`, `observation`, `traffic_runtime`, `state_mutation`, `destructive`, or `irreversible`. `ptm-atomic validate --check rollback` treats missing values as a blocking metadata defect. | `"state_mutation"` |
+| `rollback_strategy` | `object` | Conditional | v1.1 | Required by rollback validation when `side_effect` is `traffic_runtime`, `state_mutation`, `destructive`, or `irreversible`. | `{type: inverse_op, op_id: fw_delete_policy_route, snapshot_required: false, required_inputs: [policy_route_id]}` |
+| `pre_snapshot` | `object` | Conditional | v1.1 | Snapshot capture contract used by `restore_snapshot` and audit-only irreversible operations. | `{op_id: fw_verify_policy_route, capture_fields: [policy_route_id, full_config]}` |
+| `rollback_apply` | `object` | Conditional | v1.1 | Restore or compensating apply contract. Required for `restore_snapshot`. | `{op_id: fw_update_policy_route, input_from: pre_snapshot.full_config}` |
+| `post_verify` | `object` | Recommended | v1.1 | Verification op and expected state after rollback or cleanup. Missing values are reported as rollback warnings for state-changing operations. | `{op_id: fw_verify_policy_route, expected_state: absent}` |
+| `dry_run_supported` | `boolean` | No | v1.1 | Whether this operation can produce a non-mutating plan before live execution. | `true` |
+| `risk_level` | `enum` | No | v1.1 | Compatibility shortcut for consumers that do not read `risk.level`; allowed values are `low`, `medium`, and `high`. | `"high"` |
 | `timeout_ms` | `integer` | Yes | v1.0/v1.1 | Expected timeout upper bound in milliseconds; must be greater than `0`. | `30000` |
 | `error_types` | `array[string]` | Yes | v1.0/v1.1 | Possible error categories. Items must match uppercase underscore naming. | `["VALIDATION_ERROR", "CONFIG_APPLY_FAILED"]` |
 | `risk` | `object` | Conditional | v1.1 only | Risk level and categories used by static gate checks. Required for high-risk firewall install, init, login, config, and config batch atoms. | `{level: high, categories: [configuration]}` |
@@ -187,6 +194,51 @@ of an approval system.
 Verification failure handling is limited to error category, diagnostic reference,
 and manual handling signal. The schema and docs do not define automatic rollback
 or revert behavior.
+
+### Rollback Contract
+
+Rollback metadata is intentionally separate from the existing `verification`
+contract. `verification` describes how to prove the forward operation result;
+rollback metadata describes whether ptm-te may safely place the operation on a
+rollback stack before live execution.
+
+`side_effect` values:
+
+| Value | Meaning | Default ptm-te posture |
+|---|---|---|
+| `none` | No environment state change. | No rollback required. |
+| `observation` | Read-only observation such as query, log capture, or counter read. | No rollback required. |
+| `traffic_runtime` | Runtime activity that can usually be stopped or cleaned up. | Requires rollback strategy before live execution. |
+| `state_mutation` | Configuration or environment state changes. | Requires rollback strategy before live execution. |
+| `destructive` | Delete, clear, reset, or removal actions. | Requires explicit recoverability or irreversibility declaration. |
+| `irreversible` | Cannot be automatically restored. | Blocked unless a human accepts risk. |
+
+`rollback_strategy.type` values:
+
+| Value | Required fields | Semantics |
+|---|---|---|
+| `inverse_op` | `op_id`, `required_inputs` | A concrete inverse operation can be called with inputs from op input, result, or snapshot. |
+| `restore_snapshot` | `snapshot_required: true`, `pre_snapshot`, `rollback_apply` | ptm-te must capture old state before the operation and reapply the full old state on rollback. |
+| `compensating_op` | `op_id`, `required_inputs`, `notes` recommended | A compensating action restores an equivalent state but may not be byte-identical. |
+| `manual_required` | `notes` recommended | Live execution requires human confirmation because automatic rollback is not safe enough. |
+| `irreversible` | `notes` | Automatic rollback is impossible; ptm-te should block by default. |
+
+`ptm-atomic validate --check rollback` enforces the static contract:
+
+- Every operation must declare `side_effect`.
+- State-changing operations must declare `rollback_strategy`.
+- `inverse_op` and `compensating_op` references must point to existing op ids.
+- `restore_snapshot` must declare `pre_snapshot` and `rollback_apply`.
+- `rollback_strategy.required_inputs` must be available from parameters,
+  `returns.data`, `inputs.params`, or `pre_snapshot.capture_fields`.
+- `irreversible` strategies must explain the risk in `notes`.
+- `post_verify` is recommended and reported as a warning when omitted.
+
+`ptm-atomic rollback check --op <op_id> --format json` returns a ptm-te oriented
+readiness result. `status: pass` means the operation is safe to enter the normal
+human approval and live execution path. `status: blocked` means ptm-te should
+not live-run it without either missing atomic capability or explicit risk
+acceptance.
 
 ### `batch`
 

@@ -16,6 +16,7 @@ from atomic_ops.metadata import (
     redact_sensitive,
     resolve_cache_root,
 )
+from atomic_ops.rollback import rollback_summary
 
 
 ERROR_OP_NOT_FOUND = "OP_NOT_FOUND"
@@ -71,6 +72,12 @@ class OperationSummary:
     tags: list[str]
     parameters_summary: list[dict[str, Any]]
     aliases: list[str]
+    side_effect: str | None
+    rollback_strategy: dict[str, Any] | None
+    pre_snapshot: dict[str, Any] | None
+    post_verify: dict[str, Any] | None
+    dry_run_supported: bool | None
+    risk_level: str | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -358,6 +365,7 @@ class Repository:
                 f"operation path, op_id, and device_type are inconsistent: {path}",
                 cache_root=self.cache_root,
             )
+        rollback = rollback_summary(data)
         return OperationSummary(
             op_id=op_id,
             description=_string_field(data, "description"),
@@ -367,6 +375,12 @@ class Repository:
             tags=_tags_field(data, "tags"),
             parameters_summary=_parameters_summary(data.get("parameters")),
             aliases=_tags_field(data, "aliases"),
+            side_effect=rollback["side_effect"],
+            rollback_strategy=rollback["rollback_strategy"],
+            pre_snapshot=rollback["pre_snapshot"],
+            post_verify=rollback["post_verify"],
+            dry_run_supported=rollback["dry_run_supported"],
+            risk_level=rollback["risk_level"],
         )
 
     def _package_manifest_from_data(self, path: Path, data: Any) -> PackageManifest:

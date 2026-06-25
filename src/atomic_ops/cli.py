@@ -10,6 +10,7 @@ from atomic_ops import __version__
 from atomic_ops.commands import adapter as adapter_command
 from atomic_ops.commands import list_ops as list_command
 from atomic_ops.commands import packages as packages_command
+from atomic_ops.commands import rollback as rollback_command
 from atomic_ops.commands import run as run_command
 from atomic_ops.commands import show as show_command
 from atomic_ops.commands import sync as sync_command
@@ -65,6 +66,12 @@ ROOT_COMMANDS: tuple[CommandSpec | CommandGroup, ...] = (
         description="List available package manifests.",
         handler=packages_command.run,
         add_args=packages_command.add_arguments,
+    ),
+    CommandGroup(
+        name="rollback",
+        help="Inspect rollback readiness.",
+        description="Inspect rollback readiness for operations and plans.",
+        children=rollback_command.build_subtree(),
     ),
     # run 是嵌套命令组，由 run_command 提供子结构
     CommandGroup(
@@ -156,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(
         title="commands",
-        metavar="{sync,list,show,adapter,run,validate,packages}",
+        metavar="{sync,list,show,adapter,run,validate,packages,rollback}",
         dest="command",
     )
     subparsers.required = True

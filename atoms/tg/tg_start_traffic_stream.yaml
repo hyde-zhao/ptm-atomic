@@ -1,4 +1,4 @@
-schema_version: "1.0.0"
+schema_version: "1.1"
 op_id: tg_start_traffic_stream
 device_type: tg
 description: Start an Ixia-C traffic stream from a topology-defined TX link to RX link.
@@ -74,6 +74,7 @@ parameters:
 returns:
   status: success
   data:
+    stream_id: "<stream-id>"
     flow_name: ""
     tx_link: ""
     rx_link: ""
@@ -86,6 +87,23 @@ returns:
   error_type: INVALID_PARAM
   diag_snapshot_ref: ""
 idempotent: false
+side_effect: traffic_runtime
+rollback_strategy:
+  type: inverse_op
+  op_id: tg_stop_traffic_stream
+  snapshot_required: false
+  required_inputs:
+    - stream_id
+    - topology
+    - tx
+    - rx
+    - name
+  notes: Stop must preserve the runtime handle in detailed logs when cleanup fails.
+post_verify:
+  op_id: tg_capture_traffic_result
+  expected_state: stopped
+dry_run_supported: true
+risk_level: medium
 timeout_ms: 60000
 error_types:
   - INVALID_PARAM

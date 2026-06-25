@@ -6,11 +6,13 @@ import json
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
 from atomic_ops.cli import main as cli_main
 from atomic_ops.commands.run import _to_run_envelope
+from atomic_ops.rollback import readiness_report, validate_rollback_contract
 from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.interface import (
     build_interface_batch_delete_payload,
@@ -567,6 +569,34 @@ class RunCommandEnvelopeTests(unittest.TestCase):
         self.assertEqual(envelope["diag_snapshot_ref"], "")
         self.assertEqual(envelope["data"], {"execute_required": True, "request": {"method": "POST"}})
 
+    def test_wraps_rollback_context_when_contract_exists(self) -> None:
+        fake_repo = SimpleNamespace(
+            read_operation=lambda op_id: SimpleNamespace(
+                data={
+                    "side_effect": "state_mutation",
+                    "rollback_strategy": {
+                        "type": "inverse_op",
+                        "op_id": "fw_delete_policy_route",
+                        "snapshot_required": False,
+                        "required_inputs": ["policy_route_id"],
+                    },
+                }
+            )
+        )
+        with patch("atomic_ops.commands.run.Repository.from_default_cache", return_value=fake_repo):
+            envelope = _to_run_envelope(
+                {
+                    "op_id": "fw_config_policy_route",
+                    "status": "success",
+                    "policy_route_id": "pbr-001",
+                }
+            )
+
+        rollback_context = envelope["metadata"]["rollback_context"]
+        self.assertEqual(rollback_context["strategy"], "inverse_op")
+        self.assertEqual(rollback_context["op_id"], "fw_delete_policy_route")
+        self.assertEqual(rollback_context["inputs"], {"policy_route_id": "pbr-001"})
+
     def test_cli_dry_run_json_uses_fixed_envelope(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -575,11 +605,12 @@ class RunCommandEnvelopeTests(unittest.TestCase):
             exit_code = cli_main(
                 [
                     "run",
-                    "fw_config_object",
                     "--format",
                     "json",
                     "--base-url",
                     "https://192.0.2.1",
+                    "object",
+                    "config",
                     "--object-name",
                     "srcObj",
                     "--ipaddr",
@@ -608,11 +639,12 @@ class RunCommandEnvelopeTests(unittest.TestCase):
             exit_code = cli_main(
                 [
                     "run",
-                    "fw_config_interface",
                     "--format",
                     "json",
                     "--base-url",
                     "https://192.0.2.1",
+                    "interface",
+                    "create",
                     "--interface-kind",
                     "bvi",
                     "--id",
@@ -628,6 +660,127 @@ class RunCommandEnvelopeTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["op_id"], "fw_config_interface")
         self.assertEqual(payload["data"]["request"]["method"], "POST")
+
+
+class RollbackContractTests(unittest.TestCase):
+    def test_readiness_passes_inverse_policy_route_contract(self) -> None:
+        data = {
+            "side_effect": "state_mutation",
+            "parameters": {},
+            "returns": {"data": {"policy_route_id": "<id>"}},
+            "rollback_strategy": {
+                "type": "inverse_op",
+                "op_id": "fw_delete_policy_route",
+                "snapshot_required": False,
+                "required_inputs": ["policy_route_id"],
+            },
+            "post_verify": {"op_id": "fw_verify_policy_route", "expected_state": "absent"},
+        }
+
+        report = readiness_report(
+            "fw_config_policy_route",
+            data,
+            {"fw_delete_policy_route", "fw_verify_policy_route"}.__contains__,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["rollback_strategy"], "inverse_op")
+        self.assertEqual(report["missing"], [])
+
+    def test_validate_blocks_restore_snapshot_without_snapshot(self) -> None:
+        data = {
+            "side_effect": "state_mutation",
+            "rollback_strategy": {
+                "type": "restore_snapshot",
+                "snapshot_required": True,
+                "required_inputs": [],
+            },
+        }
+
+        findings = validate_rollback_contract("fw_update_policy_route", data, set().__contains__)
+
+        self.assertIn("ROLLBACK_PRE_SNAPSHOT_MISSING", {finding.finding_type for finding in findings})
+        self.assertIn("ROLLBACK_APPLY_MISSING", {finding.finding_type for finding in findings})
+
+    def test_cli_validate_rollback_uses_repo_contracts(self) -> None:
+        fake_repo = _FakeRepo(
+            {
+                "fw_config_policy_route": {
+                    "side_effect": "state_mutation",
+                    "returns": {"data": {"policy_route_id": "<id>"}},
+                    "rollback_strategy": {
+                        "type": "inverse_op",
+                        "op_id": "fw_delete_policy_route",
+                        "snapshot_required": False,
+                        "required_inputs": ["policy_route_id"],
+                    },
+                    "post_verify": {"op_id": "fw_verify_policy_route", "expected_state": "absent"},
+                },
+                "fw_delete_policy_route": {"side_effect": "observation"},
+                "fw_verify_policy_route": {"side_effect": "observation"},
+            }
+        )
+        stdout = io.StringIO()
+
+        with patch("atomic_ops.commands.validate.Repository.from_default_cache", return_value=fake_repo):
+            with contextlib.redirect_stdout(stdout):
+                exit_code = cli_main(["validate", "--check", "rollback", "--format", "json"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "passed")
+        self.assertEqual(payload["error_count"], 0)
+
+    def test_cli_rollback_check_blocks_irreversible_contract(self) -> None:
+        fake_repo = _FakeRepo(
+            {
+                "fw_clear_policy_route_hitcount": {
+                    "side_effect": "destructive",
+                    "rollback_strategy": {
+                        "type": "irreversible",
+                        "snapshot_required": False,
+                        "required_inputs": [],
+                        "notes": "hitcount cannot be restored after clear",
+                    },
+                    "post_verify": {"op_id": "fw_verify_policy_route", "expected_state": "hitcount_zero"},
+                },
+                "fw_verify_policy_route": {"side_effect": "observation"},
+            }
+        )
+        stdout = io.StringIO()
+
+        with patch("atomic_ops.commands.rollback.Repository.from_default_cache", return_value=fake_repo):
+            with contextlib.redirect_stdout(stdout):
+                exit_code = cli_main(
+                    [
+                        "rollback",
+                        "check",
+                        "--op",
+                        "fw_clear_policy_route_hitcount",
+                        "--format",
+                        "json",
+                    ]
+                )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["rollback_strategy"], "irreversible")
+
+
+class _FakeRepo:
+    def __init__(self, documents: dict[str, dict[str, object]]) -> None:
+        self.documents = documents
+        self.is_stale = False
+
+    def metadata_summary(self) -> dict[str, object]:
+        return {"last_sync_status": "SYNCED"}
+
+    def list_operations(self, device: str | None = None) -> list[object]:
+        return [SimpleNamespace(op_id=op_id) for op_id in sorted(self.documents)]
+
+    def read_operation(self, op_id: str) -> object:
+        return SimpleNamespace(data=self.documents[op_id])
         self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/intf"))
         self.assertEqual(payload["data"]["request"]["payload"]["val"]["type"], 14)
         self.assertEqual(payload["data"]["request"]["payload"]["val"]["bvi"]["instance"], 109)
