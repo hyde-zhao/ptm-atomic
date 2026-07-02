@@ -27,6 +27,28 @@ operations:
   - fw_delete_iptun
   - fw_delete_batch_iptun
   - fw_verify_iptun
+  - fw_config_export_file
+  - fw_config_import_file
+  - fw_config_hasync
+  - fw_verify_hasynclist
+  - fw_config_haconfig
+  - fw_config_hainterface
+  - fw_verify_hainterface
+  - fw_delete_hainterface
+  - fw_delete_batch_hainterface
+  - fw_config_havrrp
+  - fw_update_havrrp
+  - fw_verify_havrrp
+  - fw_delete_havrrp
+  - fw_delete_batch_havrrp
+  - fw_config_haiplink
+  - fw_verify_haiplink
+  - fw_delete_haiplink
+  - fw_delete_batch_haiplink
+  - fw_config_halinkgroup
+  - fw_verify_halinkgroup
+  - fw_delete_halinkgroup
+  - fw_delete_batch_halinkgroup
   - fw_config_ospfv2_global
   - fw_config_ospfv2_redistribution
   - fw_config_ospfv2_network

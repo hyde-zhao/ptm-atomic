@@ -61,6 +61,24 @@ ptm-atomic run iptun config --base-url https://10.0.0.1 --id tunnel3 --tunnel-ty
 ptm-atomic run iptun delete --base-url https://10.0.0.1 --id tunnel6
 ptm-atomic run iptun verify --base-url https://10.0.0.1
 
+# 配置导入导出 + 重启（异步工作流，runner 内建轮询）
+ptm-atomic run export-file config --base-url https://10.0.0.1 --moduletype systemconfig --output-path /tmp/systemconfig.tgz
+ptm-atomic run import-file config --base-url https://10.0.0.1 --moduletype systemconfig --input-path /tmp/systemconfig.tgz --operationtype override
+ptm-atomic run reboot config --base-url https://10.0.0.1
+
+# HA 高可用（hasync/haconfig/hasynclist + hainterface + havrrp + haiplink/halinkgroup）
+ptm-atomic run ha hasync-config --base-url https://10.0.0.1 --module all
+ptm-atomic run ha haconfig-config --base-url https://10.0.0.1 --enable --role BACKUP --mode MB --hb-interface HA --local-addr 1.1.1.2 --remote-addr 1.1.1.1
+ptm-atomic run ha hasynclist-verify --base-url https://10.0.0.1
+ptm-atomic run ha hainterface-config --base-url https://10.0.0.1 --track-intf GE0_1
+ptm-atomic run ha hainterface-delete --base-url https://10.0.0.1 --id 1
+ptm-atomic run ha havrrp-config --base-url https://10.0.0.1 --interface GE0_9 --vr-id 1 --vr-role MASTER --vip 3.3.3.3/24
+ptm-atomic run ha havrrp-update --base-url https://10.0.0.1 --id GE0_9_1 --interface GE0_9 --vr-id 1 --vr-role MASTER --vip 6.6.6.5/24
+ptm-atomic run haiplink config --base-url https://10.0.0.1 --name iplink1 --destination 3.3.3.3 --interface any
+ptm-atomic run haiplink delete --base-url https://10.0.0.1 --id iplink1
+ptm-atomic run halinkgroup config --base-url https://10.0.0.1 --name iplinkgroup --link-name iplink1
+ptm-atomic run halinkgroup delete --base-url https://10.0.0.1 --id iplinkgroup
+
 # OSPFv2（四级：族/动作/目标）
 ptm-atomic run ospf config global --base-url https://10.0.0.1 --enable --router-id 10.1.1.1
 ptm-atomic run ospf verify neighbor --base-url https://10.0.0.1 --page 1 --size 40
@@ -98,7 +116,7 @@ uv run --with pyyaml --with jsonschema --python 3.11 python scripts/validate_sch
   - `sync.py`、`list_ops.py`、`show.py`、`packages.py`、`validate.py`、`adapter.py` — 顶层子命令
   - `run.py` — run 入口：共享参数注册 + 子命令树构建 + 旧格式兼容
   - `run_auth.py`、`run_object.py` — 简单操作族（二级嵌套）
-  - `run_policy_route.py`、`run_interface.py`、`run_iplink.py`、`run_iptun.py`、`run_operation_log.py` — 中等复杂度操作族（三级嵌套）
+  - `run_policy_route.py`、`run_interface.py`、`run_iplink.py`、`run_iptun.py`、`run_operation_log.py`、`run_config_transfer.py`、`run_reboot.py`、`run_ha.py` — 中等复杂度操作族（三级嵌套）
   - `run_ospf.py`、`run_ospfv3.py` — 高复杂度操作族（四级嵌套）
 - `repository.py` — 本地缓存的只读访问层，`Repository` 类封装所有 atom/package 读取逻辑
 - `git_ops.py` — 系统 git 适配器，`GitClient` 处理 clone、sparse checkout、fetch、pull
@@ -106,7 +124,7 @@ uv run --with pyyaml --with jsonschema --python 3.11 python scripts/validate_sch
 - `errors.py` — CLI 错误对象与公共输出辅助（`CliError`、`write_error`、`write_warning`、`write_stale_warning`、`write_read_error`、`details_text`）
 - `suggestions.py` — op_id 模糊匹配建议（Levenshtein 距离）
 - `aliases_lookup.py` — 业务关键词到 op_id 的反向查找（匹配 aliases/tags/description）
-- `runner/` — 操作族 runner 实现（`ngfw_login.py`、`object.py`、`policy_route.py`、`interface.py`、`ospfv2.py`、`ospfv3_bfd.py`、`iplink.py`、`iptun.py`）
+- `runner/` — 操作族 runner 实现（`ngfw_login.py`、`object.py`、`policy_route.py`、`interface.py`、`ospfv2.py`、`ospfv3_bfd.py`、`iplink.py`、`iptun.py`、`config_transfer.py`、`reboot.py`、`polling.py`、`ha.py`、`ha_iplink.py`）
 
 ### 数据目录
 

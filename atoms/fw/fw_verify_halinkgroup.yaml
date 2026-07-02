@@ -1,0 +1,68 @@
+schema_version: "1.1"
+op_id: fw_verify_halinkgroup
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_halinkgroup
+description: Query NGFW HA linkgroup entries with pagination through GET /api/v1/halinkgroup.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be halinkgroup for this operation.
+  page:
+    type: int
+    required: true
+    description: Query page number.
+  size:
+    type: int
+    required: true
+    description: Query page size.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: halinkgroup
+  page: 1
+  size: 100
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<halinkgroup-state-ref>"
+    full_config_ref: "<halinkgroup-full-config-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: halinkgroup_query_returns_requested_page
+      input_ref: "<halinkgroup-query-result-ref>"
+      expected_result: the device applies page and size filters to the HA linkgroup query.
+  summary_ref: "<halinkgroup-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - HA linkgroup query result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - ha
+  - verification
+aliases:
+  - ha-linkgroup
+  - ha-link-group
+since_version: "1.6.0"

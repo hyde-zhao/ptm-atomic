@@ -1,0 +1,113 @@
+schema_version: "1.1"
+op_id: fw_config_export_file
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_export_file
+description: Export an NGFW configuration file through the async /api/v1/downloadfilehandle workflow.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be config_file for this operation.
+  moduletype:
+    type: string
+    required: true
+    description: NGFW export module type, e.g. systemconfig. Open string; other module types are passed through unchanged.
+  filetype:
+    type: string
+    required: true
+    description: Export archive type, e.g. tgz.
+  output_path:
+    type: string
+    required: true
+    description: Local filesystem path where the downloaded file is written.
+  data_id:
+    type: list
+    required: false
+    description: Optional list of data id values included in the export request.
+  poll_timeout_ms:
+    type: int
+    required: false
+    description: Upper bound for the download task polling loop in milliseconds.
+  poll_interval_ms:
+    type: int
+    required: false
+    description: Sleep between download task polling attempts in milliseconds.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: config_file
+  moduletype: systemconfig
+  filetype: tgz
+  output_path: /tmp/systemconfig.tgz
+  data_id: []
+  poll_timeout_ms: 60000
+  poll_interval_ms: 2000
+  idempotency_key: "<idempotency-key>"
+side_effect: observation
+returns:
+  status: success
+  data:
+    moduletype: systemconfig
+    download_task_id: 1
+    file_ref: /tmp/systemconfig.tgz
+    file_size: 0
+    sha256: "<sha256-digest>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: high
+timeout_ms: 120000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Exported configuration files may contain sensitive policy and object data and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this configuration export is used.
+  - The runner writes the binary response directly to output_path and never parses file contents.
+postconditions:
+  - The exported file is available at output_path with a sha256 digest for integrity checks.
+tags:
+  - firewall
+  - capacity
+  - config_file
+  - configuration
+aliases:
+  - export-config
+  - backup-config
+  - systemconfig-export
+  - download-config
+since_version: "1.6.0"

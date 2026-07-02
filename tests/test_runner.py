@@ -52,6 +52,31 @@ from atomic_ops.runner.policy_route import (
     build_policy_route_priority_payload,
 )
 from atomic_ops.runner.session import read_session_file, write_session_file
+from atomic_ops.runner.config_transfer import (
+    build_export_payload,
+    build_import_handle_payload,
+    execute_export_file,
+    execute_import_file,
+)
+from atomic_ops.runner.reboot import execute_reboot
+from atomic_ops.runner.polling import poll_until
+from atomic_ops.runner.ha import (
+    build_hasync_payload,
+    build_haconfig_payload,
+    build_hainterface_payload,
+    build_havrrp_payload,
+    build_havrrp_update_payload,
+    build_hainterface_batch_delete_payload,
+    build_havrrp_batch_delete_payload,
+    execute_ha,
+)
+from atomic_ops.runner.ha_iplink import (
+    build_haiplink_payload,
+    build_halinkgroup_payload,
+    build_haiplink_batch_delete_payload,
+    build_halinkgroup_batch_delete_payload,
+    execute_ha_iplink,
+)
 
 
 class InterfacePayloadTests(unittest.TestCase):
@@ -1654,6 +1679,454 @@ class ValidateAliasTests(unittest.TestCase):
         security_suggestions = [s["op_id"] for s in refs["fw_config_security_policy"]["alias_suggestions"]]
         self.assertIn("fw_config_interface", pppoe_suggestions)
         self.assertIn("fw_config_acl_policy", security_suggestions)
+
+
+class ConfigTransferPayloadTests(unittest.TestCase):
+    def test_build_export_payload(self) -> None:
+        payload = build_export_payload(moduletype="systemconfig", filetype="tgz", data_id=["a", "b"])
+        self.assertEqual(payload["val"]["moduletype"], "systemconfig")
+        self.assertEqual(payload["val"]["filetype"], "tgz")
+        self.assertEqual(payload["val"]["dataId"], ["a", "b"])
+
+    def test_build_import_handle_payload(self) -> None:
+        payload = build_import_handle_payload(
+            moduletype="systemconfig", filetype="tgz", operationtype="override", chunkornot=False,
+        )
+        self.assertEqual(payload["val"]["operationtype"], "override")
+        self.assertFalse(payload["val"]["chunkornot"])
+
+    def test_rejects_empty_moduletype(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_export_payload(moduletype="", filetype="tgz")
+
+
+class PollingTests(unittest.TestCase):
+    def test_poll_until_returns_when_done(self) -> None:
+        responses = iter([{"vals": []}, {"vals": [{"filename": "systemconfig/systemconfig.tgz"}]}])
+        result = poll_until(lambda: next(responses), timeout_ms=1000, interval_ms=0, is_done=lambda r: bool(r.get("vals")))
+        self.assertEqual(result["vals"][0]["filename"], "systemconfig/systemconfig.tgz")
+
+    def test_poll_until_times_out(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            poll_until(lambda: {"vals": []}, timeout_ms=50, interval_ms=5, is_done=lambda r: bool(r.get("vals")))
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+
+class ExportFileExecuteTests(unittest.TestCase):
+    def test_execute_export_file_downloads_and_writes_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            out_path = Path(temp_dir) / "systemconfig.tgz"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+
+            def json_side_effect(method, url, **kwargs):
+                # POST 发起返回 taskid；GET 轮询返回 filename
+                if method == "POST":
+                    return (200, {"msg": "success", "vals": [{"downloadtaskid": 1}]}, "{}")
+                return (200, {"msg": "success", "vals": [{"filename": "systemconfig/systemconfig.tgz"}]}, "{}")
+
+            with patch("atomic_ops.runner.config_transfer.request_json", side_effect=json_side_effect) as json_mock, \
+                 patch("atomic_ops.runner.config_transfer.request_bytes", return_value=(200, b"fake-tgz-bytes")) as bytes_mock:
+                result = execute_export_file(
+                    base_url="https://192.0.2.1", session_file=session_file, auth_header="Authorization",
+                    moduletype="systemconfig", filetype="tgz", output_path=str(out_path),
+                    data_id=[], poll_timeout_ms=2000, poll_interval_ms=0,
+                    verify_tls=False, timeout=10,
+                )
+                self.assertEqual(result["op_id"], "fw_config_export_file")
+                self.assertEqual(result["status"], "success")
+                self.assertEqual(result["moduletype"], "systemconfig")
+                self.assertEqual(result["download_task_id"], 1)
+                self.assertEqual(result["file_size"], len(b"fake-tgz-bytes"))
+                self.assertEqual(out_path.read_bytes(), b"fake-tgz-bytes")
+                self.assertEqual(len(json_mock.call_args_list), 2)
+                self.assertEqual(bytes_mock.call_args_list[0].args[0], "GET")
+                self.assertIn("downloadfile?id=systemconfig", bytes_mock.call_args_list[0].args[1])
+
+    def test_execute_export_file_times_out_when_filename_never_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            out_path = Path(temp_dir) / "out.tgz"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+
+            def json_side_effect(method, url, **kwargs):
+                # POST 发起返回 taskid；GET 轮询永远返回空 vals（filename 未就绪）
+                if url.endswith("/downloadfilehandle"):
+                    return (200, {"msg": "success", "vals": [{"downloadtaskid": 1}]}, "{}")
+                return (200, {"msg": "success", "vals": []}, "{}")
+
+            with patch("atomic_ops.runner.config_transfer.request_json", side_effect=json_side_effect):
+                with self.assertRaises(RunnerError) as context:
+                    execute_export_file(
+                        base_url="https://192.0.2.1", session_file=session_file, auth_header="Authorization",
+                        moduletype="systemconfig", filetype="tgz", output_path=str(out_path),
+                        data_id=[], poll_timeout_ms=50, poll_interval_ms=5,
+                        verify_tls=False, timeout=10,
+                    )
+            self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+
+class ImportFileExecuteTests(unittest.TestCase):
+    def test_execute_import_file_runs_full_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            in_path = Path(temp_dir) / "systemconfig.tgz"
+            in_path.write_bytes(b"fake-tgz-bytes")
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+
+            def json_side_effect(method, url, **kwargs):
+                if url.endswith("/uploadfilehandle") and method == "POST":
+                    return (200, {"msg": "success", "vals": [{"uploadtaskid": 1}]}, "{}")
+                if url.endswith("/uploadfilehandle"):  # GET 轮询
+                    return (200, {"msg": "success"}, "{}")
+                if url.endswith("/importfile"):  # 确认
+                    return (200, {"msg": "success", "vals": [{"havefile": True}]}, "{}")
+                return (200, {"msg": "success"}, "{}")
+
+            with patch("atomic_ops.runner.config_transfer.request_multipart", return_value=(200, {"msg": "success"}, "{}")) as mp_mock, \
+                 patch("atomic_ops.runner.config_transfer.request_json", side_effect=json_side_effect):
+                result = execute_import_file(
+                    base_url="https://192.0.2.1", session_file=session_file, auth_header="Authorization",
+                    moduletype="systemconfig", filetype="tgz", operationtype="override",
+                    input_path=str(in_path), chunkornot=False,
+                    poll_timeout_ms=2000, poll_interval_ms=0,
+                    verify_tls=False, timeout=10,
+                )
+
+        self.assertEqual(result["op_id"], "fw_config_import_file")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["upload_task_id"], 1)
+        self.assertTrue(result["import_confirmed"])
+        self.assertTrue(result["havefile"])
+        # multipart 上传字段
+        _args, kwargs = mp_mock.call_args
+        self.assertEqual(kwargs["fields"]["file_name"], "systemconfig.tgz")
+        self.assertEqual(kwargs["fields"]["chunkornot"], "no")
+        self.assertIn("filename", kwargs["files"])
+
+    def test_execute_import_file_rejects_missing_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with self.assertRaises(RunnerError) as context:
+                execute_import_file(
+                    base_url="https://192.0.2.1", session_file=session_file, auth_header="Authorization",
+                    moduletype="systemconfig", filetype="tgz", operationtype="override",
+                    input_path=str(Path(temp_dir) / "missing.tgz"), chunkornot=False,
+                    poll_timeout_ms=2000, poll_interval_ms=0, verify_tls=False, timeout=10,
+                )
+            self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+
+class RebootExecuteTests(unittest.TestCase):
+    def test_execute_reboot_success_invalidates_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.reboot.request_json", return_value=(200, {"msg": "success"}, "{}")):
+                result = execute_reboot(
+                    base_url="https://192.0.2.1", session_file=session_file, auth_header="Authorization",
+                    expected_unavailable_seconds=300, verify_tls=False, timeout=10,
+                )
+
+        self.assertEqual(result["op_id"], "fw_config_reboot")
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["reboot_initiated"])
+        self.assertTrue(result["session_invalidated"])
+        self.assertEqual(result["expected_unavailable_seconds"], 300)
+
+    def test_execute_reboot_treats_disconnect_as_initiated(self) -> None:
+        from atomic_ops.runner.errors import RunnerError as _RunnerError
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            # 模拟 reboot 已触发但设备在响应前断连
+            with patch("atomic_ops.runner.reboot.request_json", side_effect=_RunnerError("RUNNER_DEVICE_UNREACHABLE", "disconnected", {}, retryable=True)):
+                result = execute_reboot(
+                    base_url="https://192.0.2.1", session_file=session_file, auth_header="Authorization",
+                    expected_unavailable_seconds=300, verify_tls=False, timeout=10,
+                )
+
+        self.assertTrue(result["reboot_initiated"])
+        self.assertTrue(result["session_invalidated"])
+        self.assertEqual(result["response"]["disconnected_before_response"], True)
+
+
+class ConfigTransferCliDryRunTests(unittest.TestCase):
+    def test_cli_export_file_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "export-file", "config", "--moduletype", "systemconfig", "--output-path", "/tmp/sc.tgz"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_export_file")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["moduletype"], "systemconfig")
+
+    def test_cli_import_file_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "import-file", "config", "--moduletype", "systemconfig", "--input-path", "/tmp/sc.tgz"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_import_file")
+        self.assertEqual(payload["data"]["handle_request"]["payload"]["val"]["operationtype"], "override")
+
+
+class RebootCliDryRunTests(unittest.TestCase):
+    def test_cli_reboot_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1", "reboot", "config"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_reboot")
+        self.assertEqual(payload["data"]["expected_unavailable_seconds"], 300)
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+
+
+class HaPayloadTests(unittest.TestCase):
+    def test_build_hasync_payload(self) -> None:
+        payload = build_hasync_payload(module="all")
+        self.assertEqual(payload["id"], 0)
+        self.assertEqual(payload["val"]["module"], "all")
+
+    def test_build_haconfig_payload(self) -> None:
+        payload = build_haconfig_payload(
+            enable=True, role="BACKUP", mode="MB", hb_interface="HA",
+            local_addr="1.1.1.2", remote_addr="1.1.1.1",
+        )
+        self.assertEqual(payload["id"], "haconfig")
+        self.assertEqual(payload["val"]["role"], "BACKUP")
+        self.assertEqual(payload["val"]["hb"]["interface"], "HA")
+        self.assertEqual(payload["val"]["hb"]["localAddr"], "1.1.1.2")
+
+    def test_build_hainterface_payload(self) -> None:
+        payload = build_hainterface_payload(track_intf="GE0_1")
+        self.assertEqual(payload["val"]["trackIntf"], "GE0_1")
+
+    def test_build_havrrp_payload(self) -> None:
+        payload = build_havrrp_payload(
+            interface="GE0_9", vr_id=1, vr_role="MASTER", vips=["3.3.3.3/24"],
+        )
+        self.assertEqual(payload["val"]["vrId"], 1)
+        self.assertEqual(payload["val"]["vrRole"], "MASTER")
+        self.assertEqual(payload["val"]["vips"], ["3.3.3.3/24"])
+        self.assertTrue(payload["val"]["enable"])
+
+    def test_build_havrrp_update_payload(self) -> None:
+        payload = build_havrrp_update_payload(
+            entry_id="GE0_9_1", interface="GE0_9", vr_id=1, vr_role="MASTER", vips=["6.6.6.5/24"],
+        )
+        self.assertEqual(payload["id"], "GE0_9_1")
+        self.assertNotIn("enable", payload["val"])
+        self.assertNotIn("useVirtualMac", payload["val"])
+
+    def test_build_hainterface_batch_delete_payload(self) -> None:
+        payload = build_hainterface_batch_delete_payload(entry_ids=["1", "2"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/hainterface")
+        self.assertEqual(payload["batch"][0]["body"]["id"], ["1"])
+
+    def test_build_havrrp_batch_delete_payload(self) -> None:
+        payload = build_havrrp_batch_delete_payload(entry_ids=["GE0_9_1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/havrrp")
+
+
+class HaIplinkPayloadTests(unittest.TestCase):
+    def test_build_haiplink_payload(self) -> None:
+        payload = build_haiplink_payload(
+            name="iplink1", destination="3.3.3.3", interface="any",
+        )
+        self.assertEqual(payload["val"]["name"], "iplink1")
+        self.assertEqual(payload["val"]["destination"], "3.3.3.3")
+        self.assertEqual(payload["val"]["detectType"], 0)
+
+    def test_build_halinkgroup_payload(self) -> None:
+        payload = build_halinkgroup_payload(name="iplinkgroup", link_name=["iplink1"])
+        self.assertEqual(payload["val"]["name"], "iplinkgroup")
+        self.assertEqual(payload["val"]["link_name"], ["iplink1"])
+        self.assertFalse(payload["val"]["mode_strict"])
+
+    def test_haiplink_batch_delete_has_is_group_undefined(self) -> None:
+        payload = build_haiplink_batch_delete_payload(entry_ids=["iplink1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/ha/iplink")
+        self.assertEqual(payload["batch"][0]["body"]["isGroup"], ["undefined"])
+
+    def test_halinkgroup_batch_delete_has_is_group_true(self) -> None:
+        payload = build_halinkgroup_batch_delete_payload(entry_ids=["iplinkgroup"])
+        self.assertEqual(payload["batch"][0]["body"]["isGroup"], ["true"])
+
+    def test_halinkgroup_batch_delete_rejects_empty(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_halinkgroup_batch_delete_payload(entry_ids=[])
+
+
+class HaExecuteTests(unittest.TestCase):
+    def test_execute_hasync_put_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.ha.request_json", return_value=(200, {"msg": "success"}, "{}")) as request:
+                result = execute_ha(
+                    op_id="fw_config_hasync", base_url="https://192.0.2.1", session_file=session_file,
+                    auth_header="Authorization", payload=build_hasync_payload(module="all"),
+                    verify_tls=False, timeout=10,
+                )
+            args, kwargs = request.call_args
+            self.assertEqual(args[0], "PUT")
+            self.assertTrue(args[1].endswith("/api/v1/hasync"))
+        self.assertEqual(result["op_id"], "fw_config_hasync")
+        self.assertEqual(result["status"], "success")
+
+    def test_execute_hasynclist_get_returns_menu_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.ha.request_json", return_value=(200, {"menuList": [{"name": "INTERFACE"}]}, "{}")):
+                result = execute_ha(
+                    op_id="fw_verify_hasynclist", base_url="https://192.0.2.1", session_file=session_file,
+                    auth_header="Authorization", payload=None, verify_tls=False, timeout=10,
+                )
+        self.assertEqual(result["response"]["menuList"][0]["name"], "INTERFACE")
+
+    def test_execute_hainterface_delete_uses_query_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.ha.request_json", return_value=(200, {"msg": "success"}, "{}")) as request:
+                execute_ha(
+                    op_id="fw_delete_hainterface", base_url="https://192.0.2.1", session_file=session_file,
+                    auth_header="Authorization", payload={"id": "1"}, verify_tls=False, timeout=10,
+                )
+            args, kwargs = request.call_args
+            self.assertEqual(args[0], "DELETE")
+            self.assertIn("id=1", args[1])
+
+
+class HaIplinkExecuteTests(unittest.TestCase):
+    def test_execute_halinkgroup_delete_carries_is_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.ha_iplink.request_json", return_value=(200, {"msg": "success"}, "{}")) as request:
+                execute_ha_iplink(
+                    op_id="fw_delete_halinkgroup", base_url="https://192.0.2.1", session_file=session_file,
+                    auth_header="Authorization", payload={"id": "iplinkgroup"},
+                    page=1, size=100, verify_tls=False, timeout=10,
+                )
+            args, kwargs = request.call_args
+            self.assertEqual(args[0], "DELETE")
+            self.assertIn("id=iplinkgroup", args[1])
+            self.assertIn("isGroup=true", args[1])
+
+    def test_execute_haiplink_delete_has_no_is_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.ha_iplink.request_json", return_value=(200, {"msg": "success"}, "{}")) as request:
+                execute_ha_iplink(
+                    op_id="fw_delete_haiplink", base_url="https://192.0.2.1", session_file=session_file,
+                    auth_header="Authorization", payload={"id": "iplink1"},
+                    page=1, size=100, verify_tls=False, timeout=10,
+                )
+            args, kwargs = request.call_args
+            self.assertNotIn("isGroup", args[1])
+
+    def test_execute_haiplink_verify_uses_pagination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.ha_iplink.request_json", return_value=(200, {"count": 0, "vals": []}, "{}")) as request:
+                execute_ha_iplink(
+                    op_id="fw_verify_haiplink", base_url="https://192.0.2.1", session_file=session_file,
+                    auth_header="Authorization", payload=None,
+                    page=2, size=50, verify_tls=False, timeout=10,
+                )
+            args, kwargs = request.call_args
+            self.assertIn("page=2", args[1])
+            self.assertIn("size=50", args[1])
+
+
+class HaCliDryRunTests(unittest.TestCase):
+    def test_cli_hasync_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ha", "hasync-config", "--module", "all"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_hasync")
+        self.assertEqual(payload["data"]["request"]["method"], "PUT")
+
+    def test_cli_havrrp_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ha", "havrrp-config", "--interface", "GE0_9", "--vr-id", "1",
+                 "--vr-role", "MASTER", "--vip", "3.3.3.3/24"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_havrrp")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["vrId"], 1)
+
+    def test_cli_halinkgroup_delete_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "halinkgroup", "delete", "--id", "iplinkgroup"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_halinkgroup")
+        self.assertIn("isGroup=true", payload["data"]["request"]["url"])
 
 
 if __name__ == "__main__":

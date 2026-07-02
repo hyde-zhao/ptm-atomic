@@ -212,6 +212,9 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_iplink as run_iplink
     from atomic_ops.commands import run_iptun as run_iptun
     from atomic_ops.commands import run_operation_log as run_operation_log
+    from atomic_ops.commands import run_config_transfer as run_config_transfer
+    from atomic_ops.commands import run_reboot as run_reboot
+    from atomic_ops.commands import run_ha as run_ha
 
     return (
         CommandGroup(
@@ -253,6 +256,9 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_iplink.build_subtree(),
         *run_iptun.build_subtree(),
         *run_operation_log.build_subtree(),
+        *run_config_transfer.build_subtree(),
+        *run_reboot.build_subtree(),
+        *run_ha.build_subtree(),
     )
 
 

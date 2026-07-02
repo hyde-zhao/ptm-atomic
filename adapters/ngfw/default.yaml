@@ -1567,3 +1567,581 @@ operations:
         - Batch body contains only DELETE /api/v1/iptun items with body.id as a non-empty list.
         - Batch IP tunnel deletion is independent from single tunnel DELETE /api/v1/iptun.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_export_file:
+    atom_ref: atoms/fw/fw_config_export_file.yaml
+    intent: Build a configuration export workflow that starts a download task, polls it, and downloads the file.
+    request:
+      method: POST
+      path: /api/v1/downloadfilehandle
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          dataId: "{{ params.data_id }}"
+          moduletype: "{{ params.moduletype }}"
+          filetype: "{{ params.filetype }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <export-file-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner polls GET /api/v1/downloadfilehandle?id=<downloadtaskid> until vals[0].filename is ready.
+        - The file is then downloaded from GET /api/v1/downloadfile?id=<urlencoded filename> as a binary stream.
+        - moduletype is an open string; systemconfig is one value and other module types pass through unchanged.
+        - The exported file may contain sensitive configuration; the runner writes bytes to output_path and never parses contents.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_import_file:
+    atom_ref: atoms/fw/fw_config_import_file.yaml
+    intent: Build a configuration import workflow that uploads a file, starts an import task, polls it, and confirms.
+    request:
+      method: POST
+      path: /api/v1/uploadfile
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        filename: "{{ params.input_path }}"
+        file_name: "{{ params.file_name }}"
+        chunkornot: "no"
+        filetype: "{{ params.filetype }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <import-file-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Step 1 uploads the file as multipart form-data to /api/v1/uploadfile.
+        - Step 2 POSTs /api/v1/uploadfilehandle with val.moduletype, val.filetype, val.operationtype, val.chunkornot and returns uploadtaskid.
+        - Step 3 polls GET /api/v1/uploadfilehandle?id=<uploadtaskid> until msg equals success.
+        - Step 4 GETs /api/v1/importfile to confirm vals[0].havefile is true.
+        - moduletype is an open string; other module types pass through unchanged.
+        - A reboot via fw_config_reboot is required after import for the configuration to take effect.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_reboot:
+    atom_ref: atoms/fw/fw_config_reboot.yaml
+    intent: Build a device reboot request that invalidates the current session.
+    request:
+      method: GET
+      path: /api/v1/reboot
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <reboot-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - A 2xx response means the reboot has been initiated; the device tears down the session and becomes unreachable.
+        - The runner never issues follow-up requests after a successful reboot to avoid mistaking the expected disconnect for a failure.
+        - A fresh fw_login_web_management session is required before any further run command.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_hasync:
+    atom_ref: atoms/fw/fw_config_hasync.yaml
+    intent: Build an HA configuration synchronization request.
+    request:
+      method: PUT
+      path: /api/v1/hasync
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: 0
+        val:
+          module: "{{ params.module }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <hasync-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT single-step operation; module is an open string with the only supported value all.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_hasynclist:
+    atom_ref: atoms/fw/fw_verify_hasynclist.yaml
+    intent: Build an HA sync status list query request.
+    request:
+      method: GET
+      path: /api/v1/hasynclist
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <hasynclist-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET has no pagination and returns the full HA sync status in menuList.
+        - GET requests send no JSON body.
+  fw_config_haconfig:
+    atom_ref: atoms/fw/fw_config_haconfig.yaml
+    intent: Build an HA configuration request with mode, role, heartbeat, and sync options.
+    request:
+      method: PUT
+      path: /api/v1/haconfig
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: haconfig
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <haconfig-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT single-step operation; val.hb is the nested heartbeat object.
+        - mode and role are open strings.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_hainterface:
+    atom_ref: atoms/fw/fw_config_hainterface.yaml
+    intent: Build an HA monitored interface create request.
+    request:
+      method: POST
+      path: /api/v1/hainterface
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          trackIntf: "{{ params.track_intf }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <hainterface-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST carries no id; val.trackIntf identifies the monitored interface.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_hainterface:
+    atom_ref: atoms/fw/fw_verify_hainterface.yaml
+    intent: Build an HA monitored interface query request.
+    request:
+      method: GET
+      path: /api/v1/hainterface
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <hainterface-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET has no pagination and returns all monitored interfaces in vals with numeric id.
+        - GET requests send no JSON body.
+  fw_delete_hainterface:
+    atom_ref: atoms/fw/fw_delete_hainterface.yaml
+    intent: Build an HA monitored interface delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/hainterface
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <hainterface-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the numeric HA monitored interface id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_hainterface:
+    atom_ref: atoms/fw/fw_delete_batch_hainterface.yaml
+    intent: Build a batch HA monitored interface delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <hainterface-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/hainterface items with body.id as a non-empty list.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_havrrp:
+    atom_ref: atoms/fw/fw_config_havrrp.yaml
+    intent: Build an HA VRRP create request.
+    request:
+      method: POST
+      path: /api/v1/havrrp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <havrrp-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST carries no id; val.vrRole is a string (MASTER or BACKUP) and val.vips is a non-empty CIDR list.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_havrrp:
+    atom_ref: atoms/fw/fw_update_havrrp.yaml
+    intent: Build an HA VRRP update request.
+    request:
+      method: PUT
+      path: /api/v1/havrrp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <havrrp-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT updates an existing HA VRRP entry identified by id; id follows the {interface}_{vrId} or {interface}_{vrId}ipv6 convention and is provided by the caller.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_havrrp:
+    atom_ref: atoms/fw/fw_verify_havrrp.yaml
+    intent: Build an HA VRRP query request.
+    request:
+      method: GET
+      path: /api/v1/havrrp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <havrrp-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET has no pagination and returns all HA VRRP entries in vals; vrRole is a numeric code in the response.
+        - GET requests send no JSON body.
+  fw_delete_havrrp:
+    atom_ref: atoms/fw/fw_delete_havrrp.yaml
+    intent: Build an HA VRRP delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/havrrp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <havrrp-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_havrrp:
+    atom_ref: atoms/fw/fw_delete_batch_havrrp.yaml
+    intent: Build a batch HA VRRP delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <havrrp-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/havrrp items with body.id as a non-empty list.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_haiplink:
+    atom_ref: atoms/fw/fw_config_haiplink.yaml
+    intent: Build an HA iplink monitor create request.
+    request:
+      method: POST
+      path: /api/v1/haiplink
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <haiplink-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT is not supported by the device; use fw_config_haiplink only for creation.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_haiplink:
+    atom_ref: atoms/fw/fw_verify_haiplink.yaml
+    intent: Build a paginated HA iplink monitor query request.
+    request:
+      method: GET
+      path: /api/v1/haiplink
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <haiplink-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page and size; GET requests send no JSON body.
+  fw_delete_haiplink:
+    atom_ref: atoms/fw/fw_delete_haiplink.yaml
+    intent: Build an HA iplink monitor delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/ha/iplink
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <haiplink-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses the /api/v1/ha/iplink path with id as a query value and sends no JSON body.
+        - id is the HA iplink val.name to delete.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_haiplink:
+    atom_ref: atoms/fw/fw_delete_batch_haiplink.yaml
+    intent: Build a batch HA iplink monitor delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <haiplink-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains DELETE /api/v1/ha/iplink items with body.isGroup set to undefined.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_halinkgroup:
+    atom_ref: atoms/fw/fw_config_halinkgroup.yaml
+    intent: Build an HA linkgroup create request.
+    request:
+      method: POST
+      path: /api/v1/halinkgroup
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <halinkgroup-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT is not supported by the device; use fw_config_halinkgroup only for creation.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_halinkgroup:
+    atom_ref: atoms/fw/fw_verify_halinkgroup.yaml
+    intent: Build a paginated HA linkgroup query request.
+    request:
+      method: GET
+      path: /api/v1/halinkgroup
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <halinkgroup-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page and size; GET requests send no JSON body.
+  fw_delete_halinkgroup:
+    atom_ref: atoms/fw/fw_delete_halinkgroup.yaml
+    intent: Build an HA linkgroup delete request by name with isGroup=true.
+    request:
+      method: DELETE
+      path: /api/v1/ha/iplink
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <halinkgroup-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses the /api/v1/ha/iplink path with id and isGroup=true as query values.
+        - id is the HA linkgroup val.name to delete.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_halinkgroup:
+    atom_ref: atoms/fw/fw_delete_batch_halinkgroup.yaml
+    intent: Build a batch HA linkgroup delete request with isGroup=true.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <halinkgroup-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains DELETE /api/v1/ha/iplink items with body.isGroup set to true.
+        - ptm-atomic run can execute this request only when --execute is explicit.

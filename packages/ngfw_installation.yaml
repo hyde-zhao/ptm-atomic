@@ -10,3 +10,4 @@ operations:
   - fw_login_web_management
   - fw_check_login_state
   - fw_verify_ngfw_health
+  - fw_config_reboot

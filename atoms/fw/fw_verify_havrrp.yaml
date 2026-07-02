@@ -1,0 +1,59 @@
+schema_version: "1.1"
+op_id: fw_verify_havrrp
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_havrrp
+description: Query NGFW HA VRRP entries through GET /api/v1/havrrp.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be havrrp for this operation.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: havrrp
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<havrrp-state-ref>"
+    full_config_ref: "<havrrp-full-config-ref>"
+    vals_ref: "<havrrp-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: havrrp_query_returns_vals
+      input_ref: "<havrrp-query-result-ref>"
+      expected_result: the device returns all HA VRRP entries in vals with id, interface, vrId, vips, and vrRole.
+  summary_ref: "<havrrp-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - HA VRRP query result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - ha
+  - verification
+aliases:
+  - ha-vrrp
+  - vrrp
+since_version: "1.6.0"

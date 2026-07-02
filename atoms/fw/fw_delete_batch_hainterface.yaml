@@ -1,0 +1,76 @@
+schema_version: "1.1"
+op_id: fw_delete_batch_hainterface
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_batch_hainterface
+description: Delete multiple NGFW HA monitored interface entries through /api/v1/batch.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be hainterface for this operation.
+  params:
+    type: json
+    required: true
+    description: Batch delete request with DELETE /api/v1/hainterface items.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: hainterface
+  params:
+    batch:
+      - method: DELETE
+        resource: /api/v1/hainterface
+        body:
+          id:
+            - "1"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: hainterface
+      applied_ref: "<hainterface-batch-delete-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+timeout_ms: 60000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - BATCH_PARTIAL_FAILED
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+    - batch_configuration
+gate:
+  required: true
+  reason: Batch HA monitored interface deletion can remove multiple failover entries and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+    - concurrency_review
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - Batch body contains only DELETE /api/v1/hainterface items.
+postconditions:
+  - Batch HA monitored interface deletion result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - ha
+  - batch_configuration
+aliases:
+  - ha-interface
+  - ha-monitored-interface
+since_version: "1.6.0"

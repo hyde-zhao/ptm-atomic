@@ -129,6 +129,32 @@ It performs a case-insensitive substring match across `op_id`, `aliases`,
 `tags`, and `description` to help designers locate the folded atom from a
 business term. It does not add a new top-level CLI command family.
 
+### Asynchronous Workflow Atoms
+
+Some NGFW endpoints are multi-step asynchronous workflows: a POST starts a
+background task and returns a task id, a GET must be polled until the task
+produces a result, and a final GET downloads or confirms the artifact.
+Configuration export/import is the canonical example.
+
+These workflows are implemented as a **single atom** whose runner drives the
+whole sequence internally (start → poll → download/confirm). They are not
+split into one atom per HTTP step, because the `tight_sequence` in test-case
+YAML only carries `op_id`, `wait_ms`, and `on_error` — it has no data flow
+between steps, so a task id returned by step 1 cannot be passed to step 2.
+Folding the workflow into one atom preserves atomicity and lets the runner
+own the polling loop (`runner/polling.py` `poll_until`).
+
+| Workflow | Atom | Steps folded into the runner |
+|---|---|---|
+| Export config | `fw_config_export_file` | POST download task → poll for filename → GET binary download |
+| Import config | `fw_config_import_file` | POST multipart upload → POST import task → poll → GET confirm |
+| Reboot | `fw_config_reboot` | GET reboot (terminal; no follow-up request) |
+
+A reboot is intentionally a separate atom rather than the last step of
+import: it is a destructive, session-invalidating action that deserves its
+own `gate` and `manual_required` rollback, and the caller may want to inspect
+the imported state before triggering it.
+
 ## CLI Command Verb Boundary
 
 The `ptm-atomic` CLI is primarily a local catalog and validation interface.

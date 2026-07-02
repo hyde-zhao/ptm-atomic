@@ -1,0 +1,112 @@
+schema_version: "1.1"
+op_id: fw_update_havrrp
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_havrrp
+description: Update an NGFW HA VRRP entry through PUT /api/v1/havrrp.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be havrrp for this operation.
+  params:
+    type: json
+    required: true
+    description: Complete /api/v1/havrrp payload for VRRP update with id and val identifying the target.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: havrrp
+  params:
+    id: GE0_9_1
+    val:
+      interface: GE0_9
+      ipAddr: 0.0.0.0
+      vrId: 1
+      vrRole: MASTER
+      vips:
+        - 6.6.6.5/24
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    havrrp_id: GE0_9_1
+    pre_snapshot_ref: "<havrrp-pre-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: havrrp
+      applied_ref: "<havrrp-update-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - havrrp_id
+    - full_config
+  notes: Restore the original HA VRRP definition from the pre-update snapshot.
+pre_snapshot:
+  op_id: fw_verify_havrrp
+  capture_fields:
+    - havrrp_id
+    - full_config
+rollback_apply:
+  op_id: fw_update_havrrp
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_havrrp
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: HA VRRP updates can affect virtual IP ownership and failover and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - The VRRP id is provided by the caller and follows the {interface}_{vrId} or {interface}_{vrId}ipv6 convention.
+postconditions:
+  - HA VRRP update result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - ha
+  - configuration
+aliases:
+  - ha-vrrp
+  - vrrp
+since_version: "1.6.0"
