@@ -1,0 +1,69 @@
+schema_version: "1.1"
+op_id: fw_verify_iplink_group
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_iplink_group
+description: Query NGFW iplink-group entries with pagination and optional key filter.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: true
+    description: Query page number.
+  size:
+    type: int
+    required: true
+    description: Query page size.
+  key:
+    type: string
+    required: false
+    description: Optional name filter for fuzzy linkgroup search.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: linkgroup
+  page: 1
+  size: 40
+  key: ""
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<linkgroup-state-ref>"
+    full_config_ref: "<linkgroup-full-config-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: linkgroup_query_returns_requested_page
+      input_ref: "<linkgroup-query-result-ref>"
+      expected_result: page, size, and key filters are applied by the device query.
+  summary_ref: "<linkgroup-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - Iplink-group query result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - linkgroup
+  - verification
+aliases:
+  - iplink-group
+  - link-group
+since_version: "1.4.0"

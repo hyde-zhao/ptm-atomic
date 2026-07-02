@@ -53,6 +53,13 @@ ptm-atomic run policy-route delete --base-url https://10.0.0.1 --id 1
 # 接口（三级：族/动作）
 ptm-atomic run interface create --base-url https://10.0.0.1 --kind physical --id 1
 ptm-atomic run interface delete-batch --base-url https://10.0.0.1 --id GE0_1 --id GE0_2
+ptm-atomic run interface update --base-url https://10.0.0.1 --interface-kind tunnel --id tunnel1 --tunnel-type 4over6 --src-addr 2001::1 --dst-addr 2001::2 --ip-address 3.3.3.3/24
+
+# IP 隧道（三级：族/动作）
+ptm-atomic run iptun config --base-url https://10.0.0.1 --id tunnel1 --tunnel-type 4over6 --src-addr 2001::1 --dst-addr 2001::2 --ip-address 13.0.0.1/24
+ptm-atomic run iptun config --base-url https://10.0.0.1 --id tunnel3 --tunnel-type gre --src-addr 7.7.7.1 --dst-addr 7.7.7.2 --ip-address 6.6.6.6/24
+ptm-atomic run iptun delete --base-url https://10.0.0.1 --id tunnel6
+ptm-atomic run iptun verify --base-url https://10.0.0.1
 
 # OSPFv2（四级：族/动作/目标）
 ptm-atomic run ospf config global --base-url https://10.0.0.1 --enable --router-id 10.1.1.1
@@ -91,14 +98,15 @@ uv run --with pyyaml --with jsonschema --python 3.11 python scripts/validate_sch
   - `sync.py`、`list_ops.py`、`show.py`、`packages.py`、`validate.py`、`adapter.py` — 顶层子命令
   - `run.py` — run 入口：共享参数注册 + 子命令树构建 + 旧格式兼容
   - `run_auth.py`、`run_object.py` — 简单操作族（二级嵌套）
-  - `run_policy_route.py`、`run_interface.py` — 中等复杂度操作族（三级嵌套）
+  - `run_policy_route.py`、`run_interface.py`、`run_iplink.py`、`run_iptun.py`、`run_operation_log.py` — 中等复杂度操作族（三级嵌套）
   - `run_ospf.py`、`run_ospfv3.py` — 高复杂度操作族（四级嵌套）
 - `repository.py` — 本地缓存的只读访问层，`Repository` 类封装所有 atom/package 读取逻辑
 - `git_ops.py` — 系统 git 适配器，`GitClient` 处理 clone、sparse checkout、fetch、pull
 - `metadata.py` — 缓存元数据管理（`_metadata.json` 读写、缓存路径解析、敏感信息脱敏）
 - `errors.py` — CLI 错误对象与公共输出辅助（`CliError`、`write_error`、`write_warning`、`write_stale_warning`、`write_read_error`、`details_text`）
 - `suggestions.py` — op_id 模糊匹配建议（Levenshtein 距离）
-- `runner/` — 操作族 runner 实现（`ngfw_login.py`、`object.py`、`policy_route.py`、`interface.py`、`ospfv2.py`、`ospfv3_bfd.py`）
+- `aliases_lookup.py` — 业务关键词到 op_id 的反向查找（匹配 aliases/tags/description）
+- `runner/` — 操作族 runner 实现（`ngfw_login.py`、`object.py`、`policy_route.py`、`interface.py`、`ospfv2.py`、`ospfv3_bfd.py`、`iplink.py`、`iptun.py`）
 
 ### 数据目录
 

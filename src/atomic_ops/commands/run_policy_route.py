@@ -25,6 +25,8 @@ def build_subtree() -> tuple[CommandSpec, ...]:
         CommandSpec(name="update", help="Update an existing policy route.", description="Update an existing policy route.", handler=_run_update, add_args=_add_common_args),
         CommandSpec(name="delete", help="Delete a policy route.", description="Delete a policy route by id.", handler=_run_delete, add_args=_add_delete_args),
         CommandSpec(name="verify", help="Verify a policy route.", description="Verify a policy route.", handler=_run_verify, add_args=_add_verify_args),
+        CommandSpec(name="reset-hitcount", help="Reset a policy-route hit count.", description="Reset a policy-route hit count to zero by id.", handler=_run_reset_hitcount, add_args=_add_delete_args),
+        CommandSpec(name="verify-hitcount", help="Verify a policy-route hit count.", description="Query a policy-route hit count.", handler=_run_verify_hitcount, add_args=_add_verify_args),
         CommandSpec(name="priority", help="Update policy route priority.", description="Update policy route priority ordering.", handler=_run_priority, add_args=_add_priority_args),
     )
 
@@ -87,6 +89,15 @@ def _run_verify(args: argparse.Namespace) -> int:
     return _run_policy_route(args, "fw_verify_policy_route")
 
 
+def _run_reset_hitcount(args: argparse.Namespace) -> int:
+    _require_arg(args, "id")
+    return _run_policy_route(args, "fw_reset_policy_route_hitcount")
+
+
+def _run_verify_hitcount(args: argparse.Namespace) -> int:
+    return _run_policy_route(args, "fw_verify_policy_route_hitcount")
+
+
 def _run_priority(args: argparse.Namespace) -> int:
     return _run_policy_route(args, "fw_update_policy_route_priority")
 
@@ -130,6 +141,8 @@ def _run_policy_route(args: argparse.Namespace, op_id: str) -> int:
                 config_source=int(getattr(args, "config_source", 0)),
             )
         elif op_id == "fw_delete_policy_route":
+            payload = build_policy_route_delete_payload(entry_id=_single_arg(args, "id"))
+        elif op_id == "fw_reset_policy_route_hitcount":
             payload = build_policy_route_delete_payload(entry_id=_single_arg(args, "id"))
         elif op_id == "fw_update_policy_route_priority":
             payload = build_policy_route_priority_payload(

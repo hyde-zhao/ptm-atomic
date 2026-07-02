@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from atomic_ops.aliases_lookup import extract_alias_keywords, find_ops_by_alias
 from atomic_ops.errors import CliError, redact, write_error, write_json_stdout, write_warning
 from atomic_ops.repository import (
     ERROR_OP_NOT_FOUND,
@@ -237,15 +238,26 @@ def _write_missing_error(
     mode: str,
     output_format: str,
 ) -> int:
-    candidates = [operation.op_id for operation in repo.list_operations()]
-    missing_with_suggestions = [
-        {
-            "index": item["index"],
-            "op_id": item["op_id"],
-            "suggestions": suggest_op_ids(str(item["op_id"]), candidates),
-        }
-        for item in missing
-    ]
+    operations = repo.list_operations()
+    candidates = [operation.op_id for operation in operations]
+    missing_with_suggestions: list[dict[str, Any]] = []
+    for item in missing:
+        op_id = str(item["op_id"])
+        alias_suggestions: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for keyword in extract_alias_keywords(op_id):
+            for match in find_ops_by_alias(keyword, operations):
+                if match["op_id"] != op_id and match["op_id"] not in seen:
+                    seen.add(match["op_id"])
+                    alias_suggestions.append(match)
+        missing_with_suggestions.append(
+            {
+                "index": item["index"],
+                "op_id": op_id,
+                "suggestions": suggest_op_ids(op_id, candidates),
+                "alias_suggestions": alias_suggestions,
+            }
+        )
     error = CliError(
         error_code=ERROR_OP_NOT_FOUND,
         message="One or more referenced operation ids do not exist in the local cache.",
@@ -256,7 +268,7 @@ def _write_missing_error(
             "cache": repo.metadata_summary(),
         },
         retryable=False,
-        suggestion="Run ptm-atomic sync, check op_id spelling, and use the suggested operation ids when applicable.",
+        suggestion="Run ptm-atomic sync, check op_id spelling, use the suggested operation ids, or run `ptm-atomic list --query <keyword>` to discover operations by business term.",
     )
     return write_error(error, output_format)
 

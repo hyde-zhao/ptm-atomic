@@ -15,6 +15,18 @@ operations:
   - fw_update_policy_route
   - fw_delete_policy_route
   - fw_update_policy_route_priority
+  - fw_reset_policy_route_hitcount
+  - fw_config_iplink
+  - fw_update_iplink
+  - fw_delete_iplink
+  - fw_config_iplink_group
+  - fw_update_iplink_group
+  - fw_delete_iplink_group
+  - fw_config_iptun
+  - fw_update_iptun
+  - fw_delete_iptun
+  - fw_delete_batch_iptun
+  - fw_verify_iptun
   - fw_config_ospfv2_global
   - fw_config_ospfv2_redistribution
   - fw_config_ospfv2_network

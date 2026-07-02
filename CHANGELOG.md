@@ -29,6 +29,13 @@ The two streams are intentionally separate. A schema or operation-library change
 - Add OSPFv2 atom specs, adapter profile mappings, and allowlisted runner support for global config, redistribution, network, interface, neighbor, and log endpoints.
 - Add OSPFv3 and BFD atom specs, adapter profile mappings, and allowlisted runner support for config, query, delete, session, and log endpoints.
 - Add release guidance for repository checks using `uv run ptm-atomic --help`, `uv run ptm-atomic packages`, `uv run --python 3.11 python scripts/validate_schema.py atoms`, `uv run --python 3.11 python scripts/layout_check.py`, and `uv run --python 3.11 python scripts/security_gate_check.py`.
+- Add `fw_reset_policy_route_hitcount` and `fw_verify_policy_route_hitcount` atom specs, adapter profile mappings, and allowlisted runner support for clearing and querying policy-route hit counts over IPv4 and IPv6.
+- Add iplink, iplink-group, batch-delete, and operation-log atom specs, adapter profile mappings, and allowlisted runner support: `fw_config_iplink`, `fw_update_iplink`, `fw_delete_iplink`, `fw_verify_iplink`, `fw_config_iplink_group`, `fw_update_iplink_group`, `fw_delete_iplink_group`, `fw_verify_iplink_group`, `fw_delete_batch_iplink`, `fw_delete_batch_iplink_group`, and `fw_capture_operation_log`.
+- Add IP tunnel atom specs, adapter profile mappings, and allowlisted runner support: `fw_config_iptun`, `fw_update_iptun`, `fw_verify_iptun`, `fw_delete_iptun`, and `fw_delete_batch_iptun` over `/api/v1/iptun`, covering 4over6 (type 15), 6over4 (type 16), and gre (type 11) tunnels with IPv-version endpoint validation.
+- Extend `fw_update_interface` and `fw_verify_interface` to support `interface-kind tunnel` for tunnel interface configuration over `/api/v1/intf` (PUT and GET only); creating an IP tunnel brings up the associated tunnel interface, which is configured through the interface runner.
+- Add business-semantic aliases to `fw_config_interface`, `fw_update_interface`, `fw_verify_interface` (`pppoe`, `dhcp`, `southbound-interface`, `tunnel`, `ipip`, `gre`, `4over6`, `6over4`) and `fw_config_acl_policy`, `fw_verify_acl_policy` (`security-policy`, `ipv4-security-policy`, `control-policy`) so consumers can discover folded operations by business term.
+- Add `ptm-atomic list --query <keyword>` for case-insensitive discovery of operations by `op_id`, `aliases`, `tags`, or `description`.
+- Extend `ptm-atomic validate` `OP_NOT_FOUND` output with `alias_suggestions` that map a missing business op_id (e.g. `fw_config_pppoe`) to the folded operation via aliases.
 
 ### Changed
 

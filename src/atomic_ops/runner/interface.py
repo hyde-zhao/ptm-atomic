@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import json
-from ipaddress import ip_interface
+from ipaddress import AddressValueError, IPv4Address, IPv6Address, ip_address, ip_interface
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -25,13 +25,17 @@ INTERFACE_ENDPOINTS = {
     "fw_delete_batch_interface": ("POST", "/api/v1/batch"),
 }
 NO_BODY_OPS = {"fw_verify_interface", "fw_delete_interface"}
-INTERFACE_KINDS = {"bvi", "sub", "physical", "bond"}
+INTERFACE_KINDS = {"bvi", "sub", "physical", "bond", "tunnel"}
 INTERFACE_MODES = {"Route", "Switch", "Pair", "Monitor"}
-ROUTE_ONLY_KINDS = {"bvi", "sub"}
+ROUTE_ONLY_KINDS = {"bvi", "sub", "tunnel"}
 PHYSICAL_ID_RE = re.compile(r"^GE\d+_\d+$")
 SUB_ID_RE = re.compile(r"^(?P<parent>GE\d+_\d+)\.(?P<sub_id>\d+)$")
 BVI_ID_RE = re.compile(r"^bvi(?P<instance>\d+)$")
 BOND_ID_RE = re.compile(r"^bond(?P<bond_id>\d+)$")
+TUNNEL_ID_RE = re.compile(r"^tunnel[\w-]*$")
+TUNNEL_TYPE_CODES = {"4over6": 15, "6over4": 16, "gre": 11}
+TUNNEL_TYPE_BY_CODE = {15: "4over6", 16: "6over4", 11: "gre"}
+TUNNEL_TYPE_CODES_SET = set(TUNNEL_TYPE_CODES.values())
 
 
 def load_json_payload(*, payload_file: str | None, payload_json: str | None) -> dict[str, Any] | None:
@@ -87,6 +91,13 @@ def build_interface_payload(
     link_type: int | None = None,
     pvid: int = 1,
     allow_pass: str | None = None,
+    tunnel_type: str | None = None,
+    src_addr: str | None = None,
+    dst_addr: str | None = None,
+    gre_tunnel_type: int = 1,
+    gre_key: int = 0,
+    gre_check_sum: bool = False,
+    gre_keepalive_enable: bool = False,
 ) -> dict[str, Any]:
     interface_kind = _validate_interface_kind(interface_kind)
     mode = _validate_mode(interface_kind, mode)
@@ -118,6 +129,12 @@ def build_interface_payload(
         _apply_physical(val, entry_id)
     elif interface_kind == "bond":
         _apply_bond(val, entry_id, bond_id, bond_members or [], bond_mode, bond_lb)
+    elif interface_kind == "tunnel":
+        _apply_tunnel(
+            val, entry_id, tunnel_type, src_addr, dst_addr,
+            gre_tunnel_type=gre_tunnel_type, gre_key=gre_key,
+            gre_check_sum=gre_check_sum, gre_keepalive_enable=gre_keepalive_enable,
+        )
 
     _apply_mode_fields(val, interface_kind, mode, pvid=pvid, allow_pass=allow_pass, link_type=link_type)
     payload = {"id": entry_id, "val": val}
@@ -160,18 +177,21 @@ def validate_interface_payload(payload: dict[str, Any], *, op_id: str) -> dict[s
 
     kind = _kind_from_payload(entry_id, val)
     mode = _validate_mode(kind, str(val.get("mode") or ""))
-    expected_type = {"bvi": 14, "sub": 1, "physical": 3, "bond": 10}[kind]
-    if val.get("type") != expected_type:
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Interface payload type does not match the interface id style.",
-            {"field": "type", "interface_kind": kind, "expected": expected_type, "actual": val.get("type")},
-        )
+    if kind == "tunnel":
+        _validate_tunnel_val(val)
+    else:
+        expected_type = {"bvi": 14, "sub": 1, "physical": 3, "bond": 10}[kind]
+        if val.get("type") != expected_type:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Interface payload type does not match the interface id style.",
+                {"field": "type", "interface_kind": kind, "expected": expected_type, "actual": val.get("type")},
+            )
     _validate_ip_addresses(list(val.get("ip_addresses") or []))
-    if op_id == "fw_config_interface" and kind == "physical":
+    if op_id == "fw_config_interface" and kind in {"physical", "tunnel"}:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
-            "Physical interfaces support PUT and GET only.",
+            "Physical and tunnel interfaces support PUT and GET only.",
             {"interface_kind": kind, "op_id": op_id},
         )
     if mode != "Route" and kind in ROUTE_ONLY_KINDS:
@@ -437,6 +457,103 @@ def _apply_bond(
     )
 
 
+def _apply_tunnel(
+    val: dict[str, Any],
+    entry_id: str,
+    tunnel_type: str | None,
+    src_addr: str | None,
+    dst_addr: str | None,
+    *,
+    gre_tunnel_type: int,
+    gre_key: int,
+    gre_check_sum: bool,
+    gre_keepalive_enable: bool,
+) -> None:
+    if not TUNNEL_ID_RE.match(entry_id):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Tunnel interface id must use a tunnel-prefixed style.",
+            {"id": entry_id},
+        )
+    if tunnel_type not in TUNNEL_TYPE_CODES:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "IP tunnel type is unsupported.",
+            {"tunnel_type": tunnel_type, "allowed": sorted(TUNNEL_TYPE_CODES)},
+        )
+    _validate_tunnel_endpoints(tunnel_type, src_addr or "", dst_addr or "")
+    val["type"] = TUNNEL_TYPE_CODES[tunnel_type]
+    if tunnel_type == "gre":
+        val["gre"] = {
+            "tunnel_type": _validate_non_negative_int("gre_tunnel_type", gre_tunnel_type),
+            "src_addr": src_addr,
+            "dst_addr": dst_addr,
+            "key": _validate_non_negative_int("gre_key", gre_key),
+            "check_sum": bool(gre_check_sum),
+            "keepalive_enable": bool(gre_keepalive_enable),
+        }
+    else:
+        val["ipip"] = {"src_addr": src_addr, "dst_addr": dst_addr}
+
+
+def _validate_tunnel_val(val: dict[str, Any]) -> None:
+    type_code = val.get("type")
+    if type_code not in TUNNEL_TYPE_CODES_SET:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Tunnel interface val.type must be 15 (4over6), 16 (6over4), or 11 (gre).",
+            {"field": "type", "actual": type_code},
+        )
+    ipip = val.get("ipip")
+    gre = val.get("gre")
+    if type_code == 11:
+        if not isinstance(gre, dict) or ipip is not None:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "GRE tunnel interface (type 11) requires a gre subobject and must not carry ipip.",
+                {"field": "gre"},
+            )
+        _validate_tunnel_endpoints("gre", str(gre.get("src_addr") or ""), str(gre.get("dst_addr") or ""))
+    else:
+        if not isinstance(ipip, dict) or gre is not None:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "IP-in-IP tunnel interface (type 15/16) requires an ipip subobject and must not carry gre.",
+                {"field": "ipip"},
+            )
+        tunnel_type = TUNNEL_TYPE_BY_CODE[type_code]
+        _validate_tunnel_endpoints(tunnel_type, str(ipip.get("src_addr") or ""), str(ipip.get("dst_addr") or ""))
+
+
+def _validate_tunnel_endpoints(tunnel_type: str, src_addr: str, dst_addr: str) -> None:
+    _validate_non_empty("src_addr", src_addr)
+    _validate_non_empty("dst_addr", dst_addr)
+    try:
+        src_ip = ip_address(src_addr)
+        dst_ip = ip_address(dst_addr)
+    except AddressValueError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Tunnel endpoint address is invalid.",
+            {"src_addr": src_addr, "dst_addr": dst_addr},
+        ) from exc
+    if tunnel_type == "4over6":
+        if not (isinstance(src_ip, IPv6Address) and isinstance(dst_ip, IPv6Address)):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "4over6 tunnel endpoints must be IPv6 addresses.",
+                {"src_addr": src_addr, "dst_addr": dst_addr},
+            )
+    elif tunnel_type == "6over4":
+        if not (isinstance(src_ip, IPv4Address) and isinstance(dst_ip, IPv4Address)):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "6over4 tunnel endpoints must be IPv4 addresses.",
+                {"src_addr": src_addr, "dst_addr": dst_addr},
+            )
+    # gre 不限制 IP 版本，仅校验地址合法。
+
+
 def _apply_mode_fields(
     val: dict[str, Any],
     interface_kind: str,
@@ -491,6 +608,15 @@ def _validate_batch_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _kind_from_payload(entry_id: str, val: dict[str, Any]) -> str:
+    type_code = val.get("type")
+    if type_code in TUNNEL_TYPE_CODES_SET:
+        if not TUNNEL_ID_RE.match(entry_id):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Tunnel interface id must use a tunnel-prefixed style.",
+                {"id": entry_id, "type": type_code},
+            )
+        return "tunnel"
     if BVI_ID_RE.match(entry_id) and "bvi" in val:
         return "bvi"
     if SUB_ID_RE.match(entry_id) and "sub" in val:
@@ -512,6 +638,12 @@ def _validate_deletable_interface_id(entry_id: str) -> None:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "Physical interfaces cannot be deleted.",
+            {"id": entry_id},
+        )
+    if TUNNEL_ID_RE.match(entry_id):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Tunnel interfaces cannot be deleted; delete the IP tunnel via fw_delete_iptun instead.",
             {"id": entry_id},
         )
     if not (BVI_ID_RE.match(entry_id) or SUB_ID_RE.match(entry_id) or BOND_ID_RE.match(entry_id)):

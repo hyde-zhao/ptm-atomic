@@ -20,10 +20,17 @@ POLICY_ROUTE_ENDPOINTS = {
     "fw_update_policy_route": ("PUT", "/api/v1/policyroute"),
     "fw_delete_policy_route": ("DELETE", "/api/v1/policyroute"),
     "fw_verify_policy_route": ("GET", "/api/v1/policyroute"),
+    "fw_reset_policy_route_hitcount": ("DELETE", "/api/v1/policyroutehitcount"),
+    "fw_verify_policy_route_hitcount": ("GET", "/api/v1/policyroute"),
     "fw_update_policy_route_priority": ("POST", "/api/v1/pridpriconf"),
 }
-GET_OPS = {"fw_verify_policy_route"}
-NO_BODY_OPS = {"fw_verify_policy_route", "fw_delete_policy_route"}
+GET_OPS = {"fw_verify_policy_route", "fw_verify_policy_route_hitcount"}
+NO_BODY_OPS = {
+    "fw_verify_policy_route",
+    "fw_delete_policy_route",
+    "fw_reset_policy_route_hitcount",
+    "fw_verify_policy_route_hitcount",
+}
 TARGET_SITES = {"before", "after", "first", "last"}
 ROUTE_TYPES = {"ipv4", "ipv6"}
 
@@ -246,7 +253,7 @@ def _request_url(
     url = f"{normalize_base_url(base_url)}{path}"
     if op_id in GET_OPS:
         url = f"{url}?{urlencode({'page': page, 'size': size, 'is_ip6': str(_route_type_to_is_ip6(route_type)).lower()})}"
-    if op_id == "fw_delete_policy_route":
+    if op_id in {"fw_delete_policy_route", "fw_reset_policy_route_hitcount"}:
         entry_id = str((payload or {}).get("id") or "")
         _validate_positive_int("id", entry_id)
         url = f"{url}?{urlencode({'id': entry_id, 'is_ip6': str(_route_type_to_is_ip6(route_type)).lower()})}"

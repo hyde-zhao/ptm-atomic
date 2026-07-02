@@ -1,0 +1,68 @@
+schema_version: "1.1"
+op_id: fw_verify_iptun
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_iptun
+description: Query NGFW IP tunnel entries through /api/v1/iptun.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be iptun for this operation.
+  params:
+    type: json
+    required: true
+    description: IP tunnel query envelope; GET sends no JSON body and returns all tunnel entries in vals.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: iptun
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<iptun-state-ref>"
+    full_config_ref: "<iptun-full-config-ref>"
+    vals_ref: "<iptun-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: iptun_query_returns_tunnel_list
+      input_ref: "<iptun-query-result-ref>"
+      expected_result: the device returns the full IP tunnel list in vals with type and ipip or gre endpoint fields.
+  summary_ref: "<iptun-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - IP tunnel query result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - iptun
+  - verification
+aliases:
+  - ip-tunnel
+  - ipip
+  - gre
+  - 4over6
+  - 6over4
+  - tunnel
+since_version: "1.5.0"

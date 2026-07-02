@@ -90,4 +90,11 @@ aliases:
   - bond
   - bvi
   - vlan-interface
+  - pppoe
+  - pppoe-client
+  - dhcp
+  - dhcp-client
+  - southbound-interface
+  - sub-interface
+  - routed-interface
 since_version: "1.3.0"

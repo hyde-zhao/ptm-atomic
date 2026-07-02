@@ -102,6 +102,33 @@ current `ptm-atomic` CLI can connect to a firewall or execute the operation.
 | `fw_rollback_acl_policy` | Invalid for this baseline | Automatic rollback is out of scope; verification failures produce diagnostics and manual handling signals. |
 | `fw_configure_nat` | Invalid | Use `fw_config_nat`; `configure` is reserved as a forbidden CLI/action wording in this baseline. |
 
+### Capability Folding and Business Aliases
+
+Variants of the same NGFW API resource are folded into a single atom and
+exposed through `aliases` rather than proliferating one atom per business
+term. This keeps the operation library aligned with API resource boundaries
+while letting consumers (such as m-analyzer) discover an operation by the
+natural-language term a test designer is likely to use.
+
+| Business term | Folded into | Reason |
+|---|---|---|
+| `fw_config_pppoe` | `fw_config_interface` (alias `pppoe`) | PPPoE is an IP address acquisition mode of `/api/v1/intf`, not a separate resource. |
+| `fw_config_southbound_interface` | `fw_config_interface` (alias `southbound-interface`, `sub-interface`) | A southbound interface is a subinterface variant of `/api/v1/intf`. |
+| `fw_config_security_policy` | `fw_config_acl_policy` (alias `security-policy`, `ipv4-security-policy`) | ACL policy is the IPv4 security policy object on the firewall. |
+
+The `aliases` field is the discovery surface for these synonyms. New firewall
+v1.1 atoms that only differ by a payload variant of an existing API resource
+must extend the existing atom's `aliases` instead of introducing a new
+`op_id`. Tunnel interfaces follow the same rule: creating an IP tunnel uses
+`fw_config_iptun`, and configuring the associated tunnel interface uses
+`fw_update_interface` with `interface-kind tunnel` (an alias of
+`fw_update_interface`).
+
+The `list --query <keyword>` flag is an allowed `list` family query parameter.
+It performs a case-insensitive substring match across `op_id`, `aliases`,
+`tags`, and `description` to help designers locate the folded atom from a
+business term. It does not add a new top-level CLI command family.
+
 ## CLI Command Verb Boundary
 
 The `ptm-atomic` CLI is primarily a local catalog and validation interface.

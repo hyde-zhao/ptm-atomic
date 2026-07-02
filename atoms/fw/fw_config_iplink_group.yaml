@@ -1,0 +1,93 @@
+schema_version: "1.1"
+op_id: fw_config_iplink_group
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_iplink_group
+description: Create an NGFW iplink group through /api/v1/linkgroup.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be linkgroup for this operation.
+  params:
+    type: json
+    required: true
+    description: Complete /api/v1/linkgroup payload with val.name, description, mode_strict and link_name list.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: linkgroup
+  params:
+    val:
+      name: test-group
+      description: ""
+      mode_strict: true
+      link_name:
+        - test
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    linkgroup_name: test-group
+    config_result:
+      status: succeeded
+      config_domain: linkgroup
+      applied_ref: "<linkgroup-create-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Iplink-group creation can change link-detection aggregation and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk linkgroup configuration is used.
+  - Referenced link_name entries should exist as iplink entries before grouping.
+postconditions:
+  - Iplink-group creation result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - linkgroup
+  - configuration
+aliases:
+  - iplink-group
+  - link-group
+since_version: "1.4.0"

@@ -15,3 +15,5 @@ operations:
   - fw_config_batch_black_white_list
   - fw_config_batch_ssl_vpn
   - fw_config_batch_dynamic_routing
+  - fw_delete_batch_iplink
+  - fw_delete_batch_iplink_group

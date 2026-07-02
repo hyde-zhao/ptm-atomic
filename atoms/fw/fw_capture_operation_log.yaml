@@ -1,0 +1,71 @@
+schema_version: "1.1"
+op_id: fw_capture_operation_log
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_capture_operation_log
+description: Capture NGFW operation-log entries with pagination and time window.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: true
+    description: Query page number for the operation-log capture.
+  size:
+    type: int
+    required: true
+    description: Query page size for the operation-log capture.
+  timetype:
+    type: string
+    required: true
+    description: Time window preset; one of 1h, 24h, 7d, 1m, or custom.
+  starttime:
+    type: int
+    required: false
+    description: Unix-second start timestamp; required when timetype is custom.
+  endtime:
+    type: int
+    required: false
+    description: Unix-second end timestamp; required when timetype is custom.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: operation_log
+  page: 1
+  size: 10
+  timetype: 1h
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_log_ref: "<operation-log-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - When timetype is custom, both starttime and endtime must be provided as Unix-second timestamps.
+postconditions:
+  - Operation-log entries and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - monitor
+  - operation_log
+  - diagnostics
+aliases:
+  - op-log
+  - audit-log
+  - operation-log
+since_version: "1.4.0"

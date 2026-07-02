@@ -209,6 +209,9 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_interface as run_interface
     from atomic_ops.commands import run_ospf as run_ospf
     from atomic_ops.commands import run_ospfv3 as run_ospfv3
+    from atomic_ops.commands import run_iplink as run_iplink
+    from atomic_ops.commands import run_iptun as run_iptun
+    from atomic_ops.commands import run_operation_log as run_operation_log
 
     return (
         CommandGroup(
@@ -247,6 +250,9 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             description="OSPFv3 and BFD config, delete, verify operations.",
             children=run_ospfv3.build_subtree(),
         ),
+        *run_iplink.build_subtree(),
+        *run_iptun.build_subtree(),
+        *run_operation_log.build_subtree(),
     )
 
 

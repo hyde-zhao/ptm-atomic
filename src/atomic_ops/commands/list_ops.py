@@ -29,6 +29,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Filter operations by package manifest name.",
     )
     parser.add_argument(
+        "--query",
+        default=None,
+        help="Filter operations by a keyword matched against op_id, aliases, tags, or description (case-insensitive).",
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "table"),
         default="table",
@@ -65,6 +70,7 @@ def run(args: argparse.Namespace) -> int:
             return 0
 
         package_name = getattr(args, "package", None)
+        query = getattr(args, "query", None)
         if package_name:
             operations, missing_count = repo.list_package_operations(
                 package_name,
@@ -73,12 +79,15 @@ def run(args: argparse.Namespace) -> int:
         else:
             operations = repo.list_operations(device=device_filter)
             missing_count = 0
+        if query:
+            operations = [operation for operation in operations if _matches_query(operation, query)]
 
         payload = {
             "cache": repo.metadata_summary(),
             "filters": {
                 "device": device_filter,
                 "package": package_name,
+                "query": query,
             },
             "missing_count": missing_count,
             "operations": [operation.to_dict() for operation in operations],
@@ -87,6 +96,22 @@ def run(args: argparse.Namespace) -> int:
         return 0
     except ReadError as exc:
         return write_read_error(exc, output_format, "list")
+
+
+def _matches_query(operation: Any, query: str) -> bool:
+    """Return True when the keyword matches op_id, aliases, tags, or description."""
+    needle = query.lower()
+    if needle in str(operation.op_id or "").lower():
+        return True
+    if needle in str(operation.description or "").lower():
+        return True
+    for alias in operation.aliases or []:
+        if needle in str(alias).lower():
+            return True
+    for tag in operation.tags or []:
+        if needle in str(tag).lower():
+            return True
+    return False
 
 
 def _write_success(payload: dict[str, Any], output_format: str) -> None:

@@ -1,0 +1,73 @@
+schema_version: "1.1"
+op_id: fw_verify_policy_route_hitcount
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_policy_route_hitcount
+description: Query NGFW policy-route hit count by id and address family.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: true
+    description: Query page number.
+  size:
+    type: int
+    required: true
+    description: Query page size.
+  is_ip6:
+    type: bool
+    required: true
+    description: false queries IPv4 policy-route hit counts and true queries IPv6 policy-route hit counts.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: policy_route
+  page: 1
+  size: 40
+  is_ip6: false
+side_effect: observation
+returns:
+  status: success
+  data:
+    verification_summary_ref: "<policy-route-hitcount-summary-ref>"
+    observed_state_ref: "<policy-route-hitcount-state-ref>"
+    hitcount: 0
+    policy_route_id: "<policy-route-id>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: policy_route_hitcount_returned_for_requested_address_family
+      input_ref: "<policy-route-hitcount-query-result-ref>"
+      expected_result: page, size, and is_ip6 filters are applied and the hitcount field is read from the response.
+  summary_ref: "<policy-route-hitcount-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - Policy-route hit-count query result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - policy_route
+  - verification
+  - statistics
+aliases:
+  - ipv6-route
+  - ipv6
+  - pbr
+  - hitcount
+since_version: "1.2.0"

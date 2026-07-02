@@ -13,11 +13,18 @@ from unittest.mock import patch
 from atomic_ops.cli import main as cli_main
 from atomic_ops.commands.run import _to_run_envelope
 from atomic_ops.rollback import readiness_report, validate_rollback_contract
+from atomic_ops.aliases_lookup import extract_alias_keywords, find_ops_by_alias
 from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.interface import (
     build_interface_batch_delete_payload,
     build_interface_payload,
     execute_interface,
+    validate_interface_payload,
+)
+from atomic_ops.runner.iptun import (
+    build_iptun_batch_delete_payload,
+    build_iptun_payload,
+    validate_iptun_payload,
 )
 from atomic_ops.runner.ngfw_login import login
 from atomic_ops.runner.object import build_address_object_payload
@@ -1389,6 +1396,264 @@ class Ospfv3BfdExecuteTests(unittest.TestCase):
         self.assertEqual(args[0], "PUT")
         self.assertTrue(args[1].endswith("/api/v1/bfdconfig"))
         self.assertEqual(kwargs["json_payload"], {"id": "0", "val": {"enable": True}})
+
+
+class IptunPayloadTests(unittest.TestCase):
+    def test_build_4over6_payload(self) -> None:
+        payload = build_iptun_payload(
+            tunnel_type="4over6", entry_id="tunnel1",
+            src_addr="2001::1", dst_addr="2001::2", ip_addresses=["13.0.0.1/24"],
+        )
+        self.assertEqual(payload["id"], "tunnel1")
+        self.assertEqual(payload["val"]["type"], 15)
+        self.assertEqual(payload["val"]["ipip"], {"src_addr": "2001::1", "dst_addr": "2001::2"})
+        self.assertNotIn("gre", payload["val"])
+
+    def test_build_gre_payload(self) -> None:
+        payload = build_iptun_payload(
+            tunnel_type="gre", entry_id="tunnel3",
+            src_addr="7.7.7.1", dst_addr="7.7.7.2", ip_addresses=["6.6.6.6/24"], gre_key=0,
+        )
+        self.assertEqual(payload["val"]["type"], 11)
+        self.assertEqual(payload["val"]["gre"]["tunnel_type"], 1)
+        self.assertEqual(payload["val"]["gre"]["key"], 0)
+        self.assertNotIn("ipip", payload["val"])
+
+    def test_rejects_4over6_with_ipv4_endpoints(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_iptun_payload(
+                tunnel_type="4over6", entry_id="tunnel1",
+                src_addr="1.1.1.1", dst_addr="2.2.2.2", ip_addresses=["13.0.0.1/24"],
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_rejects_gre_payload_with_ipip_subobject(self) -> None:
+        with self.assertRaises(RunnerError):
+            validate_iptun_payload(
+                {"id": "tunnel3", "val": {"name": "tunnel3", "type": 11, "ipip": {"src_addr": "1.1.1.1", "dst_addr": "2.2.2.2"}}},
+                op_id="fw_config_iptun",
+            )
+
+    def test_build_batch_delete_payload(self) -> None:
+        payload = build_iptun_batch_delete_payload(entry_ids=["tunnel1", "tunnel2"])
+        self.assertEqual(len(payload["batch"]), 2)
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/iptun")
+        self.assertEqual(payload["batch"][0]["body"], {"id": ["tunnel1"]})
+
+    def test_rejects_batch_delete_with_wrong_resource(self) -> None:
+        with self.assertRaises(RunnerError):
+            validate_iptun_payload(
+                {"batch": [{"method": "DELETE", "resource": "/api/v1/intf", "body": {"id": ["tunnel1"]}}]},
+                op_id="fw_delete_batch_iptun",
+            )
+
+
+class InterfaceTunnelPayloadTests(unittest.TestCase):
+    def test_build_tunnel_4over6_payload(self) -> None:
+        payload = build_interface_payload(
+            interface_kind="tunnel", entry_id="tunnel1",
+            tunnel_type="4over6", src_addr="2001::1", dst_addr="2001::2",
+            ip_addresses=["3.3.3.3/24"],
+        )
+        self.assertEqual(payload["val"]["type"], 15)
+        self.assertEqual(payload["val"]["mode"], "Route")
+        self.assertEqual(payload["val"]["ipip"]["src_addr"], "2001::1")
+        self.assertIn("ipv4_address_mode_config", payload["val"])
+
+    def test_rejects_tunnel_create_via_post(self) -> None:
+        payload = build_interface_payload(
+            interface_kind="tunnel", entry_id="tunnel1",
+            tunnel_type="4over6", src_addr="2001::1", dst_addr="2001::2",
+        )
+        with self.assertRaises(RunnerError) as context:
+            validate_interface_payload(payload, op_id="fw_config_interface")
+        self.assertIn("PUT and GET only", context.exception.message)
+
+    def test_rejects_tunnel_non_route_mode(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_interface_payload(
+                interface_kind="tunnel", entry_id="tunnel1", mode="Switch",
+                tunnel_type="gre", src_addr="1.1.1.1", dst_addr="2.2.2.2",
+            )
+
+
+class AliasLookupTests(unittest.TestCase):
+    def test_extract_keywords(self) -> None:
+        self.assertEqual(extract_alias_keywords("fw_config_pppoe"), ["pppoe"])
+        self.assertEqual(extract_alias_keywords("fw_config_security_policy"), ["security-policy"])
+        self.assertEqual(extract_alias_keywords("fw_config_southbound_interface"), ["southbound-interface"])
+        self.assertEqual(extract_alias_keywords("fw_config_batch_acl_policy"), ["acl-policy"])
+        self.assertEqual(extract_alias_keywords("fw_delete_batch_iptun"), ["iptun"])
+
+    def test_find_ops_by_alias_matches_aliases(self) -> None:
+        operations = [
+            SimpleNamespace(op_id="fw_config_interface", aliases=["pppoe", "subinterface"], tags=["interface"], description="Create interface."),
+            SimpleNamespace(op_id="fw_config_acl_policy", aliases=["security-policy"], tags=["acl"], description="ACL policy."),
+        ]
+        matches = find_ops_by_alias("pppoe", operations)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["op_id"], "fw_config_interface")
+        self.assertEqual(matches[0]["matched_field"], "aliases")
+        self.assertIn("pppoe", matches[0]["matched_aliases"])
+
+    def test_find_ops_by_alias_matches_description(self) -> None:
+        operations = [
+            SimpleNamespace(op_id="fw_config_iptun", aliases=[], tags=["iptun"], description="Create an IP tunnel."),
+        ]
+        matches = find_ops_by_alias("tunnel", operations)
+        self.assertEqual(matches[0]["op_id"], "fw_config_iptun")
+        self.assertEqual(matches[0]["matched_field"], "description")
+
+
+class IptunCliDryRunTests(unittest.TestCase):
+    def test_cli_iptun_config_4over6_dry_run(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "iptun", "config", "--id", "tunnel1", "--tunnel-type", "4over6",
+                 "--src-addr", "2001::1", "--dst-addr", "2001::2", "--ip-address", "13.0.0.1/24"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_iptun")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["type"], 15)
+
+    def test_cli_iptun_verify_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", "https://192.0.2.1", "iptun", "verify"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_iptun")
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+
+    def test_cli_iptun_delete_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", "https://192.0.2.1", "iptun", "delete", "--id", "tunnel6"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/iptun?id=tunnel6"))
+
+
+class InterfaceTunnelCliTests(unittest.TestCase):
+    def test_cli_interface_update_tunnel_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "interface", "update", "--interface-kind", "tunnel", "--id", "tunnel1",
+                 "--tunnel-type", "4over6", "--src-addr", "2001::1", "--dst-addr", "2001::2",
+                 "--ip-address", "3.3.3.3/24"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_update_interface")
+        self.assertEqual(payload["data"]["request"]["method"], "PUT")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["type"], 15)
+
+    def test_cli_interface_create_tunnel_rejected(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1", "--verify-tls",
+                 "interface", "create", "--interface-kind", "tunnel", "--id", "tunnel1",
+                 "--tunnel-type", "4over6", "--src-addr", "2001::1", "--dst-addr", "2001::2",
+                 "--ip-address", "3.3.3.3/24"]
+            )
+        self.assertNotEqual(exit_code, 0)
+        payload = json.loads(stderr.getvalue())
+        self.assertEqual(payload["error_code"], "RUNNER_VALIDATION_FAILED")
+        self.assertIn("PUT and GET only", payload["message"])
+
+    def test_cli_interface_delete_tunnel_rejected(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1", "--verify-tls",
+                 "interface", "delete", "--id", "tunnel1"]
+            )
+        self.assertNotEqual(exit_code, 0)
+        payload = json.loads(stderr.getvalue())
+        self.assertEqual(payload["error_code"], "RUNNER_VALIDATION_FAILED")
+
+
+class _FakeAliasOp:
+    def __init__(self, op_id, aliases, tags, description):
+        self.op_id = op_id
+        self.aliases = aliases
+        self.tags = tags
+        self.description = description
+
+    def to_dict(self):
+        return {"op_id": self.op_id, "aliases": self.aliases, "tags": self.tags, "description": self.description}
+
+
+class _FakeAliasRepo:
+    def __init__(self, operations):
+        self.operations = operations
+        self.is_stale = False
+
+    def metadata_summary(self):
+        return {"last_sync_status": "SYNCED"}
+
+    def list_operations(self, device=None):
+        return self.operations
+
+    def read_operation(self, op_id):
+        from atomic_ops.repository import ERROR_OP_NOT_FOUND, ReadError
+        raise ReadError(ERROR_OP_NOT_FOUND, f"Operation not found: {op_id}", {"op_id": op_id})
+
+
+class ListQueryTests(unittest.TestCase):
+    def test_list_query_filters_by_alias(self) -> None:
+        operations = [
+            _FakeAliasOp("fw_config_interface", ["pppoe", "subinterface"], ["interface"], "Create interface."),
+            _FakeAliasOp("fw_config_acl_policy", ["security-policy"], ["acl"], "ACL policy."),
+        ]
+        fake_repo = _FakeAliasRepo(operations)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), patch(
+            "atomic_ops.commands.list_ops.Repository.from_default_cache", return_value=fake_repo
+        ):
+            exit_code = cli_main(["list", "--query", "pppoe", "--format", "json"])
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        op_ids = [op["op_id"] for op in payload["operations"]]
+        self.assertEqual(op_ids, ["fw_config_interface"])
+
+
+class ValidateAliasTests(unittest.TestCase):
+    def test_validate_reports_alias_suggestions_for_missing_op(self) -> None:
+        operations = [
+            _FakeAliasOp("fw_config_interface", ["pppoe", "subinterface"], ["interface"], "Create interface."),
+            _FakeAliasOp("fw_config_acl_policy", ["security-policy"], ["acl"], "ACL policy."),
+        ]
+        fake_repo = _FakeAliasRepo(operations)
+        with tempfile.TemporaryDirectory() as tmp:
+            case_path = Path(tmp) / "case.yaml"
+            case_path.write_text(
+                "test_case_id: tc\n"
+                "steps:\n  - step: s\n    op_id: fw_config_pppoe\n    device: fw\n"
+                "tight_sequence:\n  enabled: true\n  steps:\n"
+                "    - step: s2\n      op_id: fw_config_security_policy\n      device: fw\n",
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), patch(
+                "atomic_ops.commands.validate.Repository.from_default_cache", return_value=fake_repo
+            ):
+                exit_code = cli_main(["validate", str(case_path), "--format", "json"])
+        self.assertNotEqual(exit_code, 0)
+        data = json.loads(stderr.getvalue())
+        refs = {ref["op_id"]: ref for ref in data["details"]["missing_refs"]}
+        pppoe_suggestions = [s["op_id"] for s in refs["fw_config_pppoe"]["alias_suggestions"]]
+        security_suggestions = [s["op_id"] for s in refs["fw_config_security_policy"]["alias_suggestions"]]
+        self.assertIn("fw_config_interface", pppoe_suggestions)
+        self.assertIn("fw_config_acl_policy", security_suggestions)
 
 
 if __name__ == "__main__":

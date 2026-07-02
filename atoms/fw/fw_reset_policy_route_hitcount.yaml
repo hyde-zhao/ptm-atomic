@@ -1,0 +1,94 @@
+schema_version: "1.1"
+op_id: fw_reset_policy_route_hitcount
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_reset_policy_route_hitcount
+description: Reset an NGFW policy-route hit count to zero by id and address family.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be policy_route for this operation.
+  params:
+    type: json
+    required: true
+    description: Policy-route hit-count reset selector with id and is_ip6 query values; DELETE sends no JSON body.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: policy_route
+  params:
+    id: 16
+    is_ip6: false
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    policy_route_id: 16
+    hitcount: 0
+    config_result:
+      status: succeeded
+      config_domain: policy_route
+      applied_ref: "<policy-route-hitcount-reset-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: irreversible
+  snapshot_required: false
+  required_inputs: []
+  notes: Hit-count values cannot be restored after reset; the counter re-accumulates from zero.
+post_verify:
+  op_id: fw_verify_policy_route_hitcount
+  expected_state: hitcount_zero
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: low
+  categories:
+    - capacity_domain
+    - statistics
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - DELETE must use id and is_ip6 as query values and must not send a JSON body.
+  - is_ip6=false resets an IPv4 policy-route hit count; is_ip6=true resets an IPv6 policy-route hit count.
+postconditions:
+  - The policy-route hit count is reset to zero and the result reference is available to the caller.
+  - A follow-up fw_verify_policy_route_hitcount query can confirm the hit count is zero.
+tags:
+  - firewall
+  - capacity
+  - policy_route
+  - statistics
+aliases:
+  - ipv6-route
+  - ipv6
+  - pbr
+  - hitcount
+  - policy-based-routing
+since_version: "1.2.0"

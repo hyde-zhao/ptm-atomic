@@ -9,6 +9,9 @@ operations:
   - fw_verify_object
   - fw_verify_acl_policy
   - fw_verify_policy_route
+  - fw_verify_policy_route_hitcount
+  - fw_verify_iplink
+  - fw_verify_iplink_group
   - fw_verify_ospfv2_global
   - fw_verify_ospfv2_redistribution
   - fw_verify_ospfv2_network
@@ -30,3 +33,4 @@ operations:
   - fw_verify_black_white_list
   - fw_verify_ssl_vpn
   - fw_verify_dynamic_routing
+  - fw_capture_operation_log

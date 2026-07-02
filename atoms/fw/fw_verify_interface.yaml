@@ -54,4 +54,10 @@ aliases:
   - bond
   - bvi
   - vlan-interface
+  - tunnel
+  - ip-tunnel
+  - ipip
+  - gre
+  - 4over6
+  - 6over4
 since_version: "1.3.0"

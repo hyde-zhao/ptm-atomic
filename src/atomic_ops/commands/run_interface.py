@@ -31,7 +31,7 @@ def build_subtree() -> tuple[CommandSpec, ...]:
 
 def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", required=True, action="append", help="Entry id. May be repeated for batch operations.")
-    parser.add_argument("--interface-kind", choices=("bvi", "sub", "physical", "bond"), required=True, help="NGFW interface kind.")
+    parser.add_argument("--interface-kind", choices=("bvi", "sub", "physical", "bond", "tunnel"), required=True, help="NGFW interface kind. Tunnel interfaces support PUT and GET only.")
     parser.add_argument("--mode", choices=("Route", "Switch", "Pair", "Monitor"), default="Route", help="NGFW interface mode.")
     parser.add_argument("--name", help="Interface val.name. Defaults to --id.")
     parser.add_argument("--desc", default="", help="Interface description.")
@@ -49,6 +49,13 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--link-type", type=int, help="Interface linkType field.")
     parser.add_argument("--pvid", type=int, default=1, help="Switch/Pair/Monitor mode PVID.")
     parser.add_argument("--allow-pass", help="Switch/Pair/Monitor mode allowPass field.")
+    parser.add_argument("--tunnel-type", choices=("4over6", "6over4", "gre"), help="IP tunnel variant (tunnel kind only). 4over6 maps to type 15, 6over4 to type 16, gre to type 11.")
+    parser.add_argument("--src-addr", help="Tunnel source endpoint address (tunnel kind only).")
+    parser.add_argument("--dst-addr", help="Tunnel destination endpoint address (tunnel kind only).")
+    parser.add_argument("--gre-tunnel-type", type=int, default=1, help="GRE tunnel_type field (gre only).")
+    parser.add_argument("--gre-key", type=int, default=0, help="GRE key field (gre only).")
+    parser.add_argument("--gre-check-sum", action="store_true", default=False, help="Enable GRE checksum (gre only).")
+    parser.add_argument("--gre-keepalive-enable", action="store_true", default=False, help="Enable GRE keepalive (gre only).")
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
 
@@ -139,6 +146,13 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                     link_type=getattr(args, "link_type"),
                     pvid=int(getattr(args, "pvid", 1)),
                     allow_pass=getattr(args, "allow_pass"),
+                    tunnel_type=getattr(args, "tunnel_type"),
+                    src_addr=getattr(args, "src_addr"),
+                    dst_addr=getattr(args, "dst_addr"),
+                    gre_tunnel_type=int(getattr(args, "gre_tunnel_type", 1)),
+                    gre_key=int(getattr(args, "gre_key", 0)),
+                    gre_check_sum=bool(getattr(args, "gre_check_sum", False)),
+                    gre_keepalive_enable=bool(getattr(args, "gre_keepalive_enable", False)),
                 )
             payload = validate_interface_payload(payload, op_id=op_id)
 

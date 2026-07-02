@@ -316,6 +316,57 @@ operations:
         - Query values are page, size, and is_ip6.
         - GET requests send no JSON body.
         - is_ip6=false queries IPv4 policy routes; is_ip6=true queries IPv6 policy routes.
+  fw_reset_policy_route_hitcount:
+    atom_ref: atoms/fw/fw_reset_policy_route_hitcount.yaml
+    intent: Build a policy-route hit-count reset request by id and address family.
+    request:
+      method: DELETE
+      path: /api/v1/policyroutehitcount
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <policy-route-hitcount-reset-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id and is_ip6 as query values and sends no JSON body.
+        - is_ip6=false resets an IPv4 policy-route hit count; is_ip6=true resets an IPv6 policy-route hit count.
+        - Reset is irreversible; historical hit-count values cannot be restored.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_policy_route_hitcount:
+    atom_ref: atoms/fw/fw_verify_policy_route_hitcount.yaml
+    intent: Build a policy-route hit-count query request for IPv4 or IPv6 routes.
+    request:
+      method: GET
+      path: /api/v1/policyroute
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <policy-route-hitcount-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page, size, and is_ip6; the hitcount field is read from the response.
+        - GET requests send no JSON body.
+        - is_ip6=false queries IPv4 policy-route hit counts; is_ip6=true queries IPv6 policy-route hit counts.
+        - Reuses the /api/v1/policyroute query endpoint; differs from fw_verify_policy_route by focusing on the hitcount field.
   fw_update_policy_route_priority:
     atom_ref: atoms/fw/fw_update_policy_route_priority.yaml
     intent: Build a policy-route priority move request for IPv4 or IPv6 routes.
@@ -1073,3 +1124,446 @@ operations:
       runner_required: true
       notes:
         - Pagination is supplied by runner input as page and size query values.
+  fw_config_iplink:
+    atom_ref: atoms/fw/fw_config_iplink.yaml
+    intent: Build an iplink create request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/iplink
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          port: "{{ params.port }}"
+          destination: "{{ params.destination }}"
+          detectType: "{{ params.detect_type }}"
+          interface: "{{ params.interface }}"
+          interval: "{{ params.interval }}"
+          retry: "{{ params.retry }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <iplink-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Adapter profiles describe endpoint and payload shape without runtime values.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_iplink:
+    atom_ref: atoms/fw/fw_update_iplink.yaml
+    intent: Build an iplink update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/iplink
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          port: "{{ params.port }}"
+          destination: "{{ params.destination }}"
+          detectType: "{{ params.detect_type }}"
+          interface: "{{ params.interface }}"
+          interval: "{{ params.interval }}"
+          retry: "{{ params.retry }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <iplink-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT updates an existing iplink entry identified by val.name on /api/v1/iplink.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_iplink:
+    atom_ref: atoms/fw/fw_delete_iplink.yaml
+    intent: Build an iplink delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/iplink
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <iplink-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the iplink val.name to delete.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_iplink:
+    atom_ref: atoms/fw/fw_verify_iplink.yaml
+    intent: Build a paginated iplink query request.
+    request:
+      method: GET
+      path: /api/v1/iplink
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <iplink-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page, size, and optional key.
+        - GET requests send no JSON body.
+        - key performs a fuzzy name search when provided.
+  fw_config_iplink_group:
+    atom_ref: atoms/fw/fw_config_iplink_group.yaml
+    intent: Build an iplink-group create request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/linkgroup
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          description: "{{ params.description }}"
+          mode_strict: "{{ params.mode_strict }}"
+          link_name: "{{ params.link_name }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <linkgroup-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Adapter profiles describe endpoint and payload shape without runtime values.
+        - link_name is a list of iplink val.name entries to aggregate.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_iplink_group:
+    atom_ref: atoms/fw/fw_update_iplink_group.yaml
+    intent: Build an iplink-group update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/linkgroup
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          description: "{{ params.description }}"
+          mode_strict: "{{ params.mode_strict }}"
+          link_name: "{{ params.link_name }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <linkgroup-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT updates an existing linkgroup entry identified by val.name on /api/v1/linkgroup.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_iplink_group:
+    atom_ref: atoms/fw/fw_delete_iplink_group.yaml
+    intent: Build an iplink-group delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/linkgroup
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <linkgroup-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the linkgroup val.name to delete.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_iplink_group:
+    atom_ref: atoms/fw/fw_verify_iplink_group.yaml
+    intent: Build a paginated iplink-group query request.
+    request:
+      method: GET
+      path: /api/v1/linkgroup
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <linkgroup-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page, size, and optional key.
+        - GET requests send no JSON body.
+        - key performs a fuzzy name search when provided.
+  fw_delete_batch_iplink:
+    atom_ref: atoms/fw/fw_delete_batch_iplink.yaml
+    intent: Build a batch request that deletes multiple iplink entries.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/iplink
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <iplink-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch iplink deletion is independent from single iplink DELETE /api/v1/iplink.
+        - Each batch item must be DELETE /api/v1/iplink with body.id as a non-empty list.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_iplink_group:
+    atom_ref: atoms/fw/fw_delete_batch_iplink_group.yaml
+    intent: Build a batch request that deletes multiple iplink-group entries.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/linkgroup
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <linkgroup-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch linkgroup deletion is independent from single linkgroup DELETE /api/v1/linkgroup.
+        - Each batch item must be DELETE /api/v1/linkgroup with body.id as a non-empty list.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_capture_operation_log:
+    atom_ref: atoms/fw/fw_capture_operation_log.yaml
+    intent: Build a paginated operation-log query request with a time window.
+    request:
+      method: GET
+      path: /api/v1/monitor/operationlog
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <operation-log-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page, size, and timetype.
+        - timetype is one of 1h, 24h, 7d, 1m, or custom.
+        - When timetype is custom, starttime and endtime are required as Unix-second query values.
+        - GET requests send no JSON body.
+  fw_config_iptun:
+    atom_ref: atoms/fw/fw_config_iptun.yaml
+    intent: Build an IP tunnel create request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/iptun
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <iptun-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - val.type is 15 for 4over6, 16 for 6over4, and 11 for gre tunnels.
+        - 4over6 and 6over4 tunnels carry an ipip subobject; gre tunnels carry a gre subobject.
+        - 4over6 endpoints are IPv6; 6over4 endpoints are IPv4.
+        - Creating an IP tunnel also brings up a tunnel interface on /api/v1/intf; configure it with fw_update_interface using interface-kind tunnel.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_iptun:
+    atom_ref: atoms/fw/fw_update_iptun.yaml
+    intent: Build an IP tunnel update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/iptun
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <iptun-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT updates an existing IP tunnel identified by id and val.name on /api/v1/iptun.
+        - val.type and the ipip or gre subobject must stay consistent with the tunnel variant.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_iptun:
+    atom_ref: atoms/fw/fw_delete_iptun.yaml
+    intent: Build an IP tunnel delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/iptun
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <iptun-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the IP tunnel val.name to delete; deleting the tunnel also removes its tunnel interface.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_iptun:
+    atom_ref: atoms/fw/fw_verify_iptun.yaml
+    intent: Build an IP tunnel query request.
+    request:
+      method: GET
+      path: /api/v1/iptun
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <iptun-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET returns all IP tunnel entries in vals; this endpoint has no pagination.
+        - GET requests send no JSON body.
+        - Each val entry carries type and an ipip or gre endpoint subobject.
+  fw_delete_batch_iptun:
+    atom_ref: atoms/fw/fw_delete_batch_iptun.yaml
+    intent: Build a batch IP tunnel delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <iptun-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/iptun items with body.id as a non-empty list.
+        - Batch IP tunnel deletion is independent from single tunnel DELETE /api/v1/iptun.
+        - ptm-atomic run can execute this request only when --execute is explicit.

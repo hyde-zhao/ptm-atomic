@@ -60,4 +60,8 @@ aliases:
   - access-list
   - access-control-list
   - firewall-policy
+  - security-policy
+  - ipv4-policy
+  - ipv4-security-policy
+  - control-policy
 since_version: "1.1.0"

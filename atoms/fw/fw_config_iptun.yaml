@@ -1,0 +1,103 @@
+schema_version: "1.1"
+op_id: fw_config_iptun
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_iptun
+description: Create an NGFW IP tunnel entry through /api/v1/iptun.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be iptun for this operation.
+  params:
+    type: json
+    required: true
+    description: Complete /api/v1/iptun payload with id, val.name, val.type, val.ip_addresses, and ipip or gre tunnel endpoint fields.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: iptun
+  params:
+    id: tunnel1
+    val:
+      name: tunnel1
+      type: 15
+      enabled: true
+      level: 100
+      ip_addresses:
+        - 13.0.0.1/24
+      ipip:
+        src_addr: 2001::1
+        dst_addr: 2001::2
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    iptun_name: tunnel1
+    config_result:
+      status: succeeded
+      config_domain: iptun
+      applied_ref: "<iptun-create-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: IP tunnel creation can change traffic reachability and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk IP tunnel configuration is used.
+  - Creating an IP tunnel also brings up the associated tunnel interface; configure it with fw_update_interface using interface-kind tunnel.
+postconditions:
+  - IP tunnel creation result and diagnostic references are available to the caller.
+  - A tunnel interface is created alongside the IP tunnel and can be configured through fw_update_interface.
+tags:
+  - firewall
+  - capacity
+  - iptun
+  - configuration
+aliases:
+  - ip-tunnel
+  - ipip
+  - gre
+  - 4over6
+  - 6over4
+  - tunnel
+since_version: "1.5.0"
