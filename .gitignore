@@ -3,10 +3,16 @@
 .env.*
 !.env.example
 
-# Local Agent / IDE runtime configuration
+# Claude Code / Codex runtime (root copies are locally generated, not shared)
 .claude/
 .codex/
 .agents/
+AGENTS.md
+CLAUDE.md
+
+# Delivery rules are canonical install sources and must be tracked.
+!/delivery/rules/AGENTS.md
+!/delivery/rules/CLAUDE.md
 
 # Meta Flow process artifacts (archived to sibling meta-flow-artifacts repo)
 # process/ is a symlink -> ../meta-flow-artifacts/process/ptm-atomic
