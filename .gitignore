@@ -8,11 +8,10 @@
 .codex/
 .agents/
 
-# Meta Flow generated process artifacts
+# Meta Flow process artifacts (archived to sibling meta-flow-artifacts repo)
+# process/ is a symlink -> ../meta-flow-artifacts/process/ptm-atomic
 .input/
-/process/
-/checkpoints/
-AGENTS.md
+/process
 
 # Python virtual environments and caches
 .venv/
