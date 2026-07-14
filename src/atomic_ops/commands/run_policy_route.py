@@ -22,8 +22,9 @@ from atomic_ops.runner.session import resolve_session_file
 def build_subtree() -> tuple[CommandSpec, ...]:
     return (
         CommandSpec(name="config", help="Create a new policy route.", description="Create a new policy route.", handler=_run_config, add_args=_add_common_args),
-        CommandSpec(name="update", help="Update an existing policy route.", description="Update an existing policy route.", handler=_run_update, add_args=_add_common_args),
+        CommandSpec(name="update", help="Update an existing policy route.", description="Update an existing policy route by id.", handler=_run_update, add_args=_add_update_args),
         CommandSpec(name="delete", help="Delete a policy route.", description="Delete a policy route by id.", handler=_run_delete, add_args=_add_delete_args),
+        CommandSpec(name="delete-batch", help="Delete multiple policy routes.", description="Batch-delete NGFW policy routes by id.", handler=_run_delete_batch, add_args=_add_delete_args),
         CommandSpec(name="verify", help="Verify a policy route.", description="Verify a policy route.", handler=_run_verify, add_args=_add_verify_args),
         CommandSpec(name="reset-hitcount", help="Reset a policy-route hit count.", description="Reset a policy-route hit count to zero by id.", handler=_run_reset_hitcount, add_args=_add_delete_args),
         CommandSpec(name="verify-hitcount", help="Verify a policy-route hit count.", description="Query a policy-route hit count.", handler=_run_verify_hitcount, add_args=_add_verify_args),
@@ -51,6 +52,11 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     policy_route_active_group.add_argument("--policy-route-inactive", dest="policy_route_active", action="store_false", help="Disable the policy route.")
     parser.add_argument("--policy-route-action", type=int, default=1, help="Policy-route action value.")
     parser.add_argument("--config-source", type=int, default=0, help="Policy-route config_source value.")
+
+
+def _add_update_args(parser: argparse.ArgumentParser) -> None:
+    _add_common_args(parser)
+    parser.add_argument("--id", required=True, help="Policy-route entry id to update.")
 
 
 def _add_delete_args(parser: argparse.ArgumentParser) -> None:
@@ -85,6 +91,11 @@ def _run_delete(args: argparse.Namespace) -> int:
     return _run_policy_route(args, "fw_delete_policy_route")
 
 
+def _run_delete_batch(args: argparse.Namespace) -> int:
+    _require_arg(args, "id")
+    return _run_policy_route(args, "fw_delete_batch_policy_route")
+
+
 def _run_verify(args: argparse.Namespace) -> int:
     return _run_policy_route(args, "fw_verify_policy_route")
 
@@ -104,11 +115,13 @@ def _run_priority(args: argparse.Namespace) -> int:
 
 def _run_policy_route(args: argparse.Namespace, op_id: str) -> int:
     from atomic_ops.runner.policy_route import (
+        build_policy_route_batch_delete_payload,
         build_policy_route_delete_payload,
         build_policy_route_dry_run,
         build_policy_route_payload,
         build_policy_route_priority_payload,
         execute_policy_route,
+        validate_policy_route_payload,
     )
 
     ctx = resolve_run_context(args)
@@ -142,6 +155,12 @@ def _run_policy_route(args: argparse.Namespace, op_id: str) -> int:
             )
         elif op_id == "fw_delete_policy_route":
             payload = build_policy_route_delete_payload(entry_id=_single_arg(args, "id"))
+        elif op_id == "fw_delete_batch_policy_route":
+            payload = build_policy_route_batch_delete_payload(
+                entry_ids=_arg_list(args, "id"),
+                route_type=route_type,
+            )
+            payload = validate_policy_route_payload(payload, op_id=op_id)
         elif op_id == "fw_reset_policy_route_hitcount":
             payload = build_policy_route_delete_payload(entry_id=_single_arg(args, "id"))
         elif op_id == "fw_update_policy_route_priority":

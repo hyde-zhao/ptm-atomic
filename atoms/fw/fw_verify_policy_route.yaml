@@ -34,6 +34,8 @@ returns:
     verification_status: passed
     existence: true
     policy_route_id: "<policy-route-id>"
+    policy_route_ids: "<policy-route-id-list>"
+    count: 0
     full_config: "<policy-route-full-config-ref>"
     hitcount: 0
     next_hop_status: reachable

@@ -403,6 +403,33 @@ operations:
         - is_ip6=false deletes an IPv4 policy route id; is_ip6=true deletes an IPv6 policy route id.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_policy_route:
+    atom_ref: atoms/fw/fw_delete_batch_policy_route.yaml
+    intent: Build a batch policy-route delete request by id and address family.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <policy-route-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch delete is independent from single-route DELETE /api/v1/policyroute and uses the /api/v1/batch endpoint.
+        - Each batch item must be DELETE /api/v1/policyroute with body.id and body.is_ip6 as non-empty string lists.
+        - is_ip6=false deletes an IPv4 policy route; is_ip6=true deletes an IPv6 policy route.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_policy_route:
     atom_ref: atoms/fw/fw_verify_policy_route.yaml
     intent: Build a policy-route query request for IPv4 or IPv6 routes.

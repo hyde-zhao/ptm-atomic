@@ -1,0 +1,94 @@
+schema_version: "1.1"
+op_id: fw_delete_batch_policy_route
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_batch_policy_route
+description: Delete multiple NGFW policy routes through /api/v1/batch.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be policy_route for this operation.
+  params:
+    type: json
+    required: true
+    description: Batch delete request with DELETE /api/v1/policyroute items. Each item body carries id and is_ip6 as non-empty string lists; is_ip6 selects the IPv4 (false) or IPv6 (true) address family for that item.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: policy_route
+  params:
+    batch:
+      - method: DELETE
+        resource: /api/v1/policyroute
+        body:
+          id:
+            - "1"
+          is_ip6:
+            - "false"
+      - method: DELETE
+        resource: /api/v1/policyroute
+        body:
+          id:
+            - "2"
+          is_ip6:
+            - "false"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: policy_route
+      applied_ref: "<policy-route-batch-delete-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+timeout_ms: 60000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - BATCH_PARTIAL_FAILED
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+    - batch_configuration
+gate:
+  required: true
+  reason: Batch policy-route deletion can remove multiple forwarding entries and alter traffic steering across address families; requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+    - concurrency_review
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - Batch body contains only DELETE /api/v1/policyroute items.
+  - Each item body.id and body.is_ip6 must be non-empty string lists; is_ip6 false deletes IPv4 routes and true deletes IPv6 routes.
+postconditions:
+  - Batch policy-route deletion result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_policy_route query can confirm the deleted routes are absent.
+tags:
+  - firewall
+  - capacity
+  - policy_route
+  - batch_configuration
+aliases:
+  - bulk
+  - ipv6-route
+  - ipv6
+  - pbr
+  - policy-based-routing
+since_version: "1.3.0"

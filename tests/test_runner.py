@@ -54,9 +54,11 @@ from atomic_ops.runner.ospfv3_bfd import (
     execute_ospfv3_bfd,
 )
 from atomic_ops.runner.policy_route import (
+    build_policy_route_batch_delete_payload,
     build_policy_route_delete_payload,
     build_policy_route_payload,
     build_policy_route_priority_payload,
+    validate_policy_route_payload,
 )
 from atomic_ops.runner.session import read_session_file, write_session_file
 from atomic_ops.runner.config_transfer import (
@@ -321,6 +323,84 @@ class PolicyRoutePayloadTests(unittest.TestCase):
             payload,
             {"val": {"targetsite": "before", "targetid": 1, "moveid": 15, "is_ip6": True}},
         )
+
+    def test_build_policy_route_batch_delete_payload_ipv4(self) -> None:
+        payload = build_policy_route_batch_delete_payload(
+            entry_ids=["1", "2"],
+            route_type="ipv4",
+        )
+
+        self.assertEqual(len(payload["batch"]), 2)
+        self.assertEqual(
+            payload["batch"][0],
+            {
+                "method": "DELETE",
+                "resource": "/api/v1/policyroute",
+                "body": {"id": ["1"], "is_ip6": ["false"]},
+            },
+        )
+        self.assertEqual(payload["batch"][1]["body"], {"id": ["2"], "is_ip6": ["false"]})
+
+    def test_build_policy_route_batch_delete_payload_ipv6(self) -> None:
+        payload = build_policy_route_batch_delete_payload(
+            entry_ids=["7"],
+            route_type="ipv6",
+        )
+
+        self.assertEqual(payload["batch"][0]["body"], {"id": ["7"], "is_ip6": ["true"]})
+
+    def test_policy_route_batch_delete_rejects_empty(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_policy_route_batch_delete_payload(entry_ids=[], route_type="ipv4")
+
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_validate_policy_route_batch_payload_rejects_wrong_resource(self) -> None:
+        payload = {
+            "batch": [
+                {
+                    "method": "DELETE",
+                    "resource": "/api/v1/ippool",
+                    "body": {"id": ["1"], "is_ip6": ["false"]},
+                }
+            ]
+        }
+        with self.assertRaises(RunnerError) as context:
+            validate_policy_route_payload(payload, op_id="fw_delete_batch_policy_route")
+
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_extract_policy_route_ids_from_verify_response(self) -> None:
+        from atomic_ops.runner.policy_route import _extract_policy_route_summary
+
+        response = {
+            "count": 3,
+            "vals": [
+                {"id": 1, "type": "ipv4"},
+                {"id": 2, "type": "ipv4"},
+                {"id": 3, "type": "ipv4"},
+            ],
+        }
+        summary = _extract_policy_route_summary("fw_verify_policy_route", response)
+
+        self.assertEqual(summary["policy_route_ids"], [1, 2, 3])
+        self.assertEqual(summary["count"], 3)
+
+    def test_extract_policy_route_id_from_config_response(self) -> None:
+        from atomic_ops.runner.policy_route import _extract_policy_route_summary
+
+        summary = _extract_policy_route_summary(
+            "fw_config_policy_route", {"val": {"id": 2}, "msg": "success"}
+        )
+
+        self.assertEqual(summary["policy_route_id"], 2)
+
+    def test_extract_summary_empty_for_delete_response(self) -> None:
+        from atomic_ops.runner.policy_route import _extract_policy_route_summary
+
+        summary = _extract_policy_route_summary("fw_delete_policy_route", {"msg": "success"})
+
+        self.assertEqual(summary, {})
 
 
 class AddressObjectPayloadTests(unittest.TestCase):

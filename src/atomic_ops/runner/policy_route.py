@@ -23,8 +23,11 @@ POLICY_ROUTE_ENDPOINTS = {
     "fw_reset_policy_route_hitcount": ("DELETE", "/api/v1/policyroutehitcount"),
     "fw_verify_policy_route_hitcount": ("GET", "/api/v1/policyroute"),
     "fw_update_policy_route_priority": ("POST", "/api/v1/pridpriconf"),
+    "fw_delete_batch_policy_route": ("POST", "/api/v1/batch"),
 }
+POLICY_ROUTE_RESOURCE = "/api/v1/policyroute"
 GET_OPS = {"fw_verify_policy_route", "fw_verify_policy_route_hitcount"}
+BATCH_OPS = {"fw_delete_batch_policy_route"}
 NO_BODY_OPS = {
     "fw_verify_policy_route",
     "fw_delete_policy_route",
@@ -127,6 +130,73 @@ def build_policy_route_delete_payload(*, entry_id: int | str) -> dict[str, int]:
     return {"id": _validate_positive_int("id", entry_id)}
 
 
+def build_policy_route_batch_delete_payload(
+    *,
+    entry_ids: list[str],
+    route_type: str = "ipv4",
+) -> dict[str, Any]:
+    is_ip6 = _route_type_to_is_ip6(route_type)
+    if not entry_ids:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "At least one id is required for batch delete.",
+            {"field": "id"},
+        )
+    is_ip6_str = str(is_ip6).lower()
+    batch: list[dict[str, Any]] = []
+    for entry_id in entry_ids:
+        _validate_non_empty("id", entry_id)
+        batch.append(
+            {
+                "method": "DELETE",
+                "resource": POLICY_ROUTE_RESOURCE,
+                "body": {"id": [str(entry_id)], "is_ip6": [is_ip6_str]},
+            }
+        )
+    return {"batch": batch}
+
+
+def validate_policy_route_payload(payload: dict[str, Any], *, op_id: str) -> dict[str, Any]:
+    if op_id in BATCH_OPS:
+        return _validate_policy_route_batch_payload(payload)
+    return payload
+
+
+def _validate_policy_route_batch_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    batch = payload.get("batch")
+    if not isinstance(batch, list) or not batch:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Batch delete payload must contain a non-empty batch list.",
+            {"field": "batch"},
+        )
+    for item in batch:
+        if not isinstance(item, dict):
+            raise RunnerError("RUNNER_VALIDATION_FAILED", "Batch item must be an object.", {"field": "batch"})
+        if item.get("method") != "DELETE" or item.get("resource") != POLICY_ROUTE_RESOURCE:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Batch policy-route delete only supports DELETE /api/v1/policyroute items.",
+                {"method": item.get("method"), "resource": item.get("resource")},
+            )
+        body = item.get("body")
+        ids = body.get("id") if isinstance(body, dict) else None
+        if not isinstance(ids, list) or not ids:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Batch delete item body.id must be a non-empty list.",
+                {"field": "batch"},
+            )
+        is_ip6 = body.get("is_ip6") if isinstance(body, dict) else None
+        if not isinstance(is_ip6, list) or not is_ip6:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Batch delete item body.is_ip6 must be a non-empty list.",
+                {"field": "batch"},
+            )
+    return payload
+
+
 def build_policy_route_priority_payload(
     *,
     targetsite: str,
@@ -225,7 +295,7 @@ def execute_policy_route(
                 "response_keys": sorted(response_payload.keys()),
             },
         )
-    return {
+    result: dict[str, Any] = {
         "op_id": op_id,
         "status": "success",
         "status_code": status_code,
@@ -236,6 +306,31 @@ def execute_policy_route(
         },
         "response": response_payload,
     }
+    # 兑现 atom returns.data 契约：从响应中提取结构化策略路由 id。
+    result.update(_extract_policy_route_summary(op_id, response_payload))
+    return result
+
+
+def _extract_policy_route_summary(op_id: str, response_payload: Any) -> dict[str, Any]:
+    """从设备响应中提取 atom returns.data 契约声明的结构化策略路由 id。
+
+    verify 返回 policy_route_ids 列表与 count；config/update 返回新策略路由 id。
+    其余操作（delete/reset/priority）响应不含策略路由 id，返回空 dict。
+    """
+    summary: dict[str, Any] = {}
+    if op_id == "fw_verify_policy_route":
+        vals = response_payload.get("vals") if isinstance(response_payload, dict) else None
+        if isinstance(vals, list):
+            summary["policy_route_ids"] = [
+                item.get("id") for item in vals if isinstance(item, dict)
+            ]
+        if isinstance(response_payload, dict):
+            summary["count"] = response_payload.get("count")
+    elif op_id in {"fw_config_policy_route", "fw_update_policy_route"}:
+        val = response_payload.get("val") if isinstance(response_payload, dict) else None
+        if isinstance(val, dict):
+            summary["policy_route_id"] = val.get("id")
+    return summary
 
 
 def _request_url(
