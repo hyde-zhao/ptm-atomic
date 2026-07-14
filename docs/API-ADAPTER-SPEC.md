@@ -77,6 +77,42 @@ Most `ptm-atomic` commands remain read-only. `ptm-atomic run` is the only execut
 | Payload root | `val` |
 | Required object fields | `val.name`, `val.networks[].ipaddr`, `val.networks[].mask` |
 
+`fw_update_object` currently maps to:
+
+| Field | Value |
+|---|---|
+| Method | `PUT` |
+| Path | `/api/v1/ippool` |
+| Payload root | `id` and `val` |
+| Required object fields | `id`, `val.name`, `val.networks[].ipaddr`, `val.networks[].mask` |
+
+`fw_delete_object` currently maps to:
+
+| Field | Value |
+|---|---|
+| Method | `DELETE` |
+| Path | `/api/v1/ippool` |
+| Query | `id` (address-object name) |
+| Body | none |
+
+`fw_verify_object` currently maps to:
+
+| Field | Value |
+|---|---|
+| Method | `GET` |
+| Path | `/api/v1/ippool` |
+| Query | `page`, `size` |
+| Body | none |
+
+`fw_delete_batch_object` currently maps to:
+
+| Field | Value |
+|---|---|
+| Method | `POST` |
+| Path | `/api/v1/batch` |
+| Payload root | `batch` |
+| Required item fields | `batch[].method=DELETE`, `batch[].resource=/api/v1/ippool`, `batch[].body.id` (non-empty list) |
+
 `fw_config_policy_route` currently maps to:
 
 | Field | Value |

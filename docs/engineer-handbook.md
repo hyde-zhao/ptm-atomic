@@ -129,6 +129,9 @@ Adapter profile 维护规则见 `docs/API-ADAPTER-SPEC.md`。
 - `fw_delete_interface`
 - `fw_delete_batch_interface`
 - `fw_config_object`
+- `fw_update_object`
+- `fw_delete_object`
+- `fw_delete_batch_object`
 - `fw_config_acl_policy`
 - `fw_config_policy_route`
 - `fw_config_ospfv2_global`

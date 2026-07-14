@@ -146,6 +146,10 @@ ptm-atomic run --base-url https://<device-management-ip> auth login --username a
 
 # 地址对象
 ptm-atomic run --base-url https://<device-management-ip> object config --object-name srcObj --ipaddr 192.168.0.0 --mask 16
+ptm-atomic run --base-url https://<device-management-ip> object update --object-name srcObj --ipaddr 192.168.0.0 --mask 16
+ptm-atomic run --base-url https://<device-management-ip> object delete --object-name srcObj
+ptm-atomic run --base-url https://<device-management-ip> object delete-batch --object-name srcObj --object-name dstObj
+ptm-atomic run --base-url https://<device-management-ip> object verify
 
 # 策略路由
 ptm-atomic run --base-url https://<device-management-ip> policy-route config --source-network srcObj --dst-network dstObj --next-hop-ip 18.18.2.2 --in-interface GE0_12

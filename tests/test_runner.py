@@ -27,7 +27,14 @@ from atomic_ops.runner.iptun import (
     validate_iptun_payload,
 )
 from atomic_ops.runner.ngfw_login import login
-from atomic_ops.runner.object import build_address_object_payload
+from atomic_ops.runner.object import (
+    build_address_object_payload,
+    build_address_object_update_payload,
+    build_object_batch_delete_payload,
+    build_object_dry_run,
+    execute_object,
+    validate_object_payload,
+)
 from atomic_ops.runner.ospfv2 import (
     build_ospfv2_delete_payload,
     build_ospfv2_global_payload,
@@ -2127,6 +2134,237 @@ class HaCliDryRunTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["op_id"], "fw_delete_halinkgroup")
         self.assertIn("isGroup=true", payload["data"]["request"]["url"])
+
+
+class ObjectDeleteVerifyTests(unittest.TestCase):
+    def test_build_delete_dry_run_url_carries_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            result = build_object_dry_run(
+                op_id="fw_delete_object",
+                base_url="https://192.0.2.1",
+                session_file=session_file,
+                auth_header="Authorization",
+                payload={"id": "srcObj"},
+                page=1,
+                size=40,
+                verify_tls=False,
+                timeout=10.0,
+            )
+        self.assertEqual(result["op_id"], "fw_delete_object")
+        self.assertEqual(result["request"]["method"], "DELETE")
+        self.assertTrue(result["request"]["url"].endswith("/api/v1/ippool?id=srcObj"))
+        self.assertIsNone(result["request"]["payload"])
+
+    def test_build_verify_dry_run_url_carries_pagination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            result = build_object_dry_run(
+                op_id="fw_verify_object",
+                base_url="https://192.0.2.1",
+                session_file=session_file,
+                auth_header="Authorization",
+                payload=None,
+                page=2,
+                size=20,
+                verify_tls=False,
+                timeout=10.0,
+            )
+        self.assertEqual(result["op_id"], "fw_verify_object")
+        self.assertEqual(result["request"]["method"], "GET")
+        self.assertTrue(result["request"]["url"].endswith("/api/v1/ippool?page=2&size=20"))
+        self.assertIsNone(result["request"]["payload"])
+
+    def test_execute_verify_get_sends_no_json_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.object.request_json", return_value=(200, {"count": 1, "vals": []}, "{}")) as request:
+                result = execute_object(
+                    op_id="fw_verify_object",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=None,
+                    page=1,
+                    size=40,
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["status"], "success")
+        request.assert_called_once()
+        args, kwargs = request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertTrue(args[1].endswith("/api/v1/ippool?page=1&size=40"))
+        self.assertIsNone(kwargs["json_payload"])
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer abc123")
+
+    def test_execute_delete_uses_query_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.object.request_json", return_value=(200, {"ok": True}, "{}")) as request:
+                result = execute_object(
+                    op_id="fw_delete_object",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="AuthorizationToken",
+                    payload={"id": "srcObj"},
+                    page=1,
+                    size=40,
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["status"], "success")
+        request.assert_called_once()
+        args, kwargs = request.call_args
+        self.assertEqual(args[0], "DELETE")
+        self.assertTrue(args[1].endswith("/api/v1/ippool?id=srcObj"))
+        self.assertIsNone(kwargs["json_payload"])
+        self.assertEqual(kwargs["headers"]["AuthorizationToken"], "abc123")
+
+    def test_rejects_delete_with_empty_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            with self.assertRaises(RunnerError) as context:
+                build_object_dry_run(
+                    op_id="fw_delete_object",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload={"id": ""},
+                    page=1,
+                    size=40,
+                    verify_tls=False,
+                    timeout=10.0,
+                )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_cli_object_delete_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "object", "delete", "--object-name", "srcObj"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_object")
+        self.assertEqual(payload["data"]["request"]["method"], "DELETE")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/ippool?id=srcObj"))
+
+    def test_cli_object_verify_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "object", "verify", "--page", "1", "--size", "40"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_object")
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/ippool?page=1&size=40"))
+
+    def test_build_update_payload_carries_id_and_val(self) -> None:
+        payload = build_address_object_update_payload(
+            object_name="srcObj", ipaddr="192.168.0.0", mask="16", object_desc=None,
+        )
+        self.assertEqual(payload["id"], "srcObj")
+        self.assertEqual(payload["val"]["name"], "srcObj")
+        self.assertEqual(payload["val"]["type"], 4)
+        self.assertEqual(payload["val"]["networks"][0]["ipaddr"], "192.168.0.0")
+        self.assertEqual(payload["val"]["networks"][0]["mask"], "16")
+
+    def test_build_batch_delete_payload(self) -> None:
+        payload = build_object_batch_delete_payload(entry_ids=["srcObj", "dstObj"])
+        self.assertEqual(len(payload["batch"]), 2)
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/ippool")
+        self.assertEqual(payload["batch"][0]["body"], {"id": ["srcObj"]})
+
+    def test_rejects_batch_delete_with_wrong_resource(self) -> None:
+        with self.assertRaises(RunnerError):
+            validate_object_payload(
+                {"batch": [{"method": "DELETE", "resource": "/api/v1/intf", "body": {"id": ["srcObj"]}}]},
+                op_id="fw_delete_batch_object",
+            )
+
+    def test_build_update_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            result = build_object_dry_run(
+                op_id="fw_update_object",
+                base_url="https://192.0.2.1",
+                session_file=session_file,
+                auth_header="Authorization",
+                payload={"id": "srcObj", "val": {"name": "srcObj"}},
+                page=1,
+                size=40,
+                verify_tls=False,
+                timeout=10.0,
+            )
+        self.assertEqual(result["op_id"], "fw_update_object")
+        self.assertEqual(result["request"]["method"], "PUT")
+        self.assertTrue(result["request"]["url"].endswith("/api/v1/ippool"))
+        self.assertEqual(result["request"]["payload"]["id"], "srcObj")
+
+    def test_build_batch_delete_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            result = build_object_dry_run(
+                op_id="fw_delete_batch_object",
+                base_url="https://192.0.2.1",
+                session_file=session_file,
+                auth_header="Authorization",
+                payload={"batch": [{"method": "DELETE", "resource": "/api/v1/ippool", "body": {"id": ["srcObj"]}}]},
+                page=1,
+                size=40,
+                verify_tls=False,
+                timeout=10.0,
+            )
+        self.assertEqual(result["op_id"], "fw_delete_batch_object")
+        self.assertEqual(result["request"]["method"], "POST")
+        self.assertTrue(result["request"]["url"].endswith("/api/v1/batch"))
+        self.assertEqual(len(result["request"]["payload"]["batch"]), 1)
+
+    def test_cli_object_update_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "object", "update", "--object-name", "srcObj", "--ipaddr", "192.168.0.0", "--mask", "16"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_update_object")
+        self.assertEqual(payload["data"]["request"]["method"], "PUT")
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], "srcObj")
+
+    def test_cli_object_delete_batch_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "object", "delete-batch", "--object-name", "srcObj", "--object-name", "dstObj"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_batch_object")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/batch"))
+        self.assertEqual(len(payload["data"]["request"]["payload"]["batch"]), 2)
 
 
 if __name__ == "__main__":

@@ -169,6 +169,116 @@ operations:
         - Address-object names are later referenced by policy route source_network or dst_network fields.
         - CIDR input must be split into ipaddr and mask before calling this endpoint.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_object:
+    atom_ref: atoms/fw/fw_update_object.yaml
+    intent: Build an address-object update request by name.
+    request:
+      method: PUT
+      path: /api/v1/ippool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          name: "{{ params.val.name }}"
+          desc: "{{ params.val.desc }}"
+          type: 4
+          ranges: []
+          networks:
+            - ipaddr: "{{ params.val.networks[0].ipaddr }}"
+              mask: "{{ params.val.networks[0].mask }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <object-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT carries top-level id (target name) and a val body mirroring the POST shape.
+        - id and val.name must identify the same address object to update.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_object:
+    atom_ref: atoms/fw/fw_delete_object.yaml
+    intent: Build an address-object delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/ippool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <object-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the address-object val.name to delete.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_object:
+    atom_ref: atoms/fw/fw_verify_object.yaml
+    intent: Build an address-object query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/ippool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <object-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET returns all address objects in vals; supports page and size query parameters.
+        - GET requests send no JSON body.
+        - Each val entry carries name, type, networks, desc, and refcnt fields.
+  fw_delete_batch_object:
+    atom_ref: atoms/fw/fw_delete_batch_object.yaml
+    intent: Build a batch address-object delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <object-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch delete is independent from single-object DELETE /api/v1/ippool.
+        - Each batch item must be DELETE /api/v1/ippool with body.id as a non-empty list.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_policy_route:
     atom_ref: atoms/fw/fw_config_policy_route.yaml
     intent: Build an IPv4 or IPv6 policy-route create request from a validated atom parameter set.

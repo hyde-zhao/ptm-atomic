@@ -1,37 +1,50 @@
 schema_version: "1.1"
 op_id: fw_verify_object
 device_type: fw
-description: Verify object configuration contract result for NGFW capacity operations.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_object
+description: Query NGFW address objects through /api/v1/ippool with pagination.
 parameters:
-  config_result_ref:
+  session_ref:
     type: string
     required: false
-    description: Non-sensitive reference to the related configuration result.
-  config_result:
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be object for this operation.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the address-object query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the address-object query.
+  params:
     type: json
-    required: false
-    description: Inline non-sensitive configuration result envelope.
-  verification_rules:
-    type: list
     required: true
-    description: Rules used to check object configuration state.
-  expected_object_ref:
-    type: string
-    required: true
-    description: Expected object reference.
+    description: Address-object query envelope; GET sends no JSON body and returns all address objects in vals.
 inputs:
-  state_ref: "<state-ref>"
-  config_result_ref: "<object-config-result-ref>"
+  session_ref: "<session-ref>"
   config_domain: object
+  page: 1
+  size: 40
+  params: {}
+side_effect: observation
 returns:
   status: success
   data:
-    verification_summary_ref: "<object-verification-summary-ref>"
-    verification_status: passed
-    manual_handling_ref: "<manual-handling-ref>"
+    observed_state_ref: "<object-state-ref>"
+    full_config_ref: "<object-full-config-ref>"
+    vals_ref: "<object-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+dry_run_supported: true
+risk_level: low
 timeout_ms: 30000
 error_types:
   - NONE
@@ -42,14 +55,14 @@ error_types:
 verification:
   kind: capacity_domain
   rules:
-    - name: object_state_matches
-      input_ref: "<object-config-result-ref>"
-      expected_result: object type, name, reference, and digest match
+    - name: object_query_returns_object_list
+      input_ref: "<object-query-result-ref>"
+      expected_result: the device returns the full address-object list in vals with name, type, networks, and desc fields.
   summary_ref: "<object-verification-summary-ref>"
 preconditions:
-  - A related object configuration result reference is available.
+  - External orchestration holds a valid session_ref or runner session file.
 postconditions:
-  - Verification summary and diagnostic references are available to the caller.
+  - Address-object query result and diagnostic references are available to the caller.
   - Any failed check is reported for manual handling.
 tags:
   - firewall

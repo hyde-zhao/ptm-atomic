@@ -1,0 +1,115 @@
+schema_version: "1.1"
+op_id: fw_update_object
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_object
+description: Update an NGFW address object through /api/v1/ippool.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be object for this operation.
+  params:
+    type: json
+    required: true
+    description: Complete /api/v1/ippool payload for address-object update with id and val.name identifying the target.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: object
+  params:
+    id: atomicSrc1921680016
+    val:
+      name: atomicSrc1921680016
+      desc: atomicSrc1921680016
+      type: 4
+      ranges: []
+      networks:
+        - ipaddr: 192.168.0.0
+          mask: "16"
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    object_name: atomicSrc1921680016
+    pre_snapshot_ref: "<object-pre-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: object
+      applied_ref: "<object-update-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - object_name
+    - full_config
+  notes: Restore the original address-object definition from the pre-update snapshot.
+pre_snapshot:
+  op_id: fw_verify_object
+  capture_fields:
+    - object_name
+    - full_config
+rollback_apply:
+  op_id: fw_update_object
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_object
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Address-object updates can change policy matching and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk address-object update is used.
+postconditions:
+  - Address-object update result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - object
+  - configuration
+aliases:
+  - address-object
+  - service-object
+  - ip-pool
+  - ippool
+since_version: "1.6.0"

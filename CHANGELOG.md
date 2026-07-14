@@ -39,6 +39,8 @@ The two streams are intentionally separate. A schema or operation-library change
 - Add configuration import/export and reboot atom specs, adapter profile mappings, and allowlisted runner support: `fw_config_export_file` (3-step async download workflow over `/api/v1/downloadfilehandle` and `/api/v1/downloadfile`), `fw_config_import_file` (4-step async upload workflow over `/api/v1/uploadfile`, `/api/v1/uploadfilehandle`, and `/api/v1/importfile`), and `fw_config_reboot` over `/api/v1/reboot`. `moduletype` is an open string so non-systemconfig modules pass through unchanged.
 - Extend `runner/http.py` with `request_bytes` for binary downloads and `request_multipart` for form-data uploads; add `runner/polling.py` `poll_until` for async task polling. Reboot is a terminal destructive action whose runner never issues follow-up requests, so the expected post-reboot disconnect is not misread as `DEVICE_UNREACHABLE`.
 - Add HA (high availability) atom specs, adapter profile mappings, and allowlisted runner support: `fw_config_hasync`, `fw_verify_hasynclist`, `fw_config_haconfig`, `fw_config_hainterface`, `fw_verify_hainterface`, `fw_delete_hainterface`, `fw_delete_batch_hainterface`, `fw_config_havrrp`, `fw_update_havrrp`, `fw_verify_havrrp`, `fw_delete_havrrp`, `fw_delete_batch_havrrp`, `fw_config_haiplink`, `fw_verify_haiplink`, `fw_delete_haiplink`, `fw_delete_batch_haiplink`, `fw_config_halinkgroup`, `fw_verify_halinkgroup`, `fw_delete_halinkgroup`, `fw_delete_batch_halinkgroup`. haiplink/halinkgroup use a dedicated runner because their DELETE path (`/api/v1/ha/iplink`) carries an `isGroup` flag that diverges from the iplink pattern; haiplink/halinkgroup do not support PUT.
+- Add `fw_delete_object` atom spec, adapter profile mapping, and allowlisted runner support: `DELETE /api/v1/ippool?id=<object-name>` deletes a single NGFW address object by name, with a `restore_snapshot` rollback that recreates the object via `fw_config_object` and confirms via `fw_verify_object`.
+- Add `fw_update_object` and `fw_delete_batch_object` atom specs, adapter profile mappings, and allowlisted runner support: `fw_update_object` updates an NGFW address object via `PUT /api/v1/ippool` with a top-level `id` and `val` body mirroring the POST shape; `fw_delete_batch_object` batch-deletes multiple address objects via `POST /api/v1/batch` with `DELETE /api/v1/ippool` items, mirroring the iptun batch pattern.
 
 ### Changed
 
@@ -55,6 +57,7 @@ The two streams are intentionally separate. A schema or operation-library change
 - Clarify that policy route `source_network` and `dst_network` reference address object names by default, with explicit `*_is_group` flags for address group names.
 - Make successful `ptm-atomic run` stdout use the fixed envelope `op_id`, `status`, `data`, `error_type`, and `diag_snapshot_ref`; runner-specific request, session, and response details now live under `data`.
 - Allow digits in the `op_id` target segment so protocol names such as `ospfv2` can be represented directly.
+- Repurpose `fw_verify_object` from a contract-only verification (based on `config_result_ref`) to a device query operation (`GET /api/v1/ippool?page=&size=`) aligned with `fw_verify_iptun`; the `op_id` is unchanged, the `ngfw_verification` package reference is unchanged, and `since_version` remains `1.1.0`.
 
 ### Deprecated
 

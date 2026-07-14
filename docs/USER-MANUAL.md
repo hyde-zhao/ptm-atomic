@@ -224,6 +224,58 @@ ptm-atomic run fw_config_object \
 
 地址对象 runner 调用 `POST /api/v1/ippool`。设备对象名只允许字母、数字和连字符；不要使用下划线或 CIDR 字符串作为对象名。
 
+地址对象更新 dry-run 与真实执行（`PUT /api/v1/ippool`，body 含顶层 `id` 与 `val`，`id` 与 `val.name` 指向同一对象）：
+
+```bash
+ptm-atomic run object update \
+  --base-url https://<device-management-ip> \
+  --object-name srcObj \
+  --ipaddr 192.168.0.0 \
+  --mask 16
+ptm-atomic run object update \
+  --base-url https://<device-management-ip> \
+  --object-name srcObj \
+  --ipaddr 192.168.0.0 \
+  --mask 16 \
+  --execute
+```
+
+地址对象删除 dry-run 与真实执行（`DELETE /api/v1/ippool?id=<object-name>`，按对象名删除，不发 JSON body）：
+
+```bash
+ptm-atomic run object delete \
+  --base-url https://<device-management-ip> \
+  --object-name srcObj
+ptm-atomic run object delete \
+  --base-url https://<device-management-ip> \
+  --object-name srcObj \
+  --execute
+```
+
+地址对象查询 dry-run 与真实执行（`GET /api/v1/ippool?page=&size=`，返回 `count` 与 `vals` 列表，每个 `vals` 项含 `name`、`type`、`networks`、`desc`、`refcnt`）：
+
+```bash
+ptm-atomic run object verify \
+  --base-url https://<device-management-ip> \
+  --page 1 --size 40
+ptm-atomic run object verify \
+  --base-url https://<device-management-ip> \
+  --page 1 --size 40 \
+  --execute
+```
+
+地址对象批量删除 dry-run 与真实执行（`POST /api/v1/batch`，body 为 `batch` 数组，每项是 `DELETE /api/v1/ippool` 且 `body.id` 为对象名列表）：
+
+```bash
+ptm-atomic run object delete-batch \
+  --base-url https://<device-management-ip> \
+  --object-name srcObj --object-name dstObj
+ptm-atomic run object delete-batch \
+  --base-url https://<device-management-ip> \
+  --object-name srcObj --object-name dstObj \
+  --execute
+```
+
 策略路由 dry-run：
 
 ```bash
