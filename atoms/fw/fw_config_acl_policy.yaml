@@ -1,7 +1,8 @@
 schema_version: "1.1"
 op_id: fw_config_acl_policy
 device_type: fw
-description: Define ACL policy configuration contract for NGFW capacity operations.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_acl_policy
+description: Create an IPv4 or IPv6 NGFW control policy through /api/v1/ip{4,6}policy/fwaclconf.
 parameters:
   state_ref:
     type: string
@@ -18,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: ACL policy configuration object with required domain fields.
+    description: Control-policy create object. policy_type selects the IPv4 (ip4policy) or IPv6 (ip6policy) address family and only changes the request path; the val body is identical for both families. name, szone, dzone, src_addr, dst_addr, and service are required match fields.
   idempotency_key:
     type: string
     required: true
@@ -28,14 +29,28 @@ inputs:
   session_ref: "<session-ref>"
   config_domain: acl_policy
   params:
-    policy_name: "<policy-name>"
-    rule_ref: "<rule-ref>"
-    action: allow
-    params_digest: "<params-digest>"
+    policy_type: ipv4
+    name: test1
+    enable: true
+    action: 0
+    log: false
+    szone: any
+    dzone: any
+    policy_group: "全部"
+    desc: ""
+    src_addr: any
+    src_addr_is_group: false
+    dst_addr: any
+    dst_addr_is_group: false
+    service: any
+    service_is_group: false
   idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
 returns:
   status: success
   data:
+    acl_policy_id: "<acl-policy-id>"
+    created: true
     config_result:
       status: succeeded
       config_domain: acl_policy
@@ -47,6 +62,29 @@ returns:
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_acl_policy
+  snapshot_required: false
+  required_inputs:
+    - policy_type
+    - name
+  id_source: query
+  id_field: id
+  query_op: fw_verify_acl_policy
+  query_match: name
+  query_match_source: args
+  notes: Delete only when the create result reports created=true; pre-existing idempotent objects must not be deleted by default. The device returns no id on create; rollback resolves the id via fw_verify_acl_policy matching the policy name from args, then DELETE /api/v1/ip{4,6}policy/fwaclconf?id=<id>.
+pre_snapshot:
+  op_id: fw_verify_acl_policy
+  capture_fields:
+    - acl_policy_id
+    - existence
+post_verify:
+  op_id: fw_verify_acl_policy
+  expected_state: absent
+dry_run_supported: true
+risk_level: high
 timeout_ms: 30000
 error_types:
   - NONE
@@ -63,7 +101,7 @@ risk:
     - capacity_domain
 gate:
   required: true
-  reason: ACL policy changes can affect traffic decisions and require review.
+  reason: Control-policy changes can alter traffic filtering decisions and require review.
   approver_role: change_reviewer
   evidence_required:
     - approved_change_record
@@ -74,6 +112,7 @@ preconditions:
   - Gate evidence exists before this high-risk configuration contract is used.
 postconditions:
   - Configuration result and diagnostic references are available to the caller.
+  - The device does not return the new policy id on create; a follow-up fw_verify_acl_policy query filtered by policy_name resolves the id for update or delete.
 tags:
   - firewall
   - capacity
@@ -86,5 +125,7 @@ aliases:
   - security-policy
   - ipv4-policy
   - ipv4-security-policy
+  - ipv6-policy
+  - ipv6-security-policy
   - control-policy
-since_version: "1.1.0"
+since_version: "1.7.0"

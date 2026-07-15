@@ -423,7 +423,7 @@ ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-i
 | `ngfw_installation` | 5 | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
 | `ngfw_capacity_config` | 33 | `fw_config_interface`、`fw_update_interface`、`fw_delete_interface`、`fw_config_policy_route`、`fw_config_ospfv2_global` |
 | `ngfw_verification` | 25 | `fw_verify_interface`、`fw_verify_policy_route`、`fw_verify_ospfv2_neighbor`、`fw_verify_ospfv3_neighbor`、`fw_verify_bfd_session` |
-| `ngfw_batch_config` | 10 | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_acl_policy`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
+| `ngfw_batch_config` | 9 | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_static_route`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
 
 `package_id` 必须与 `packages/<package_id>.yaml` 文件名一致。package 是 `list`、`validate --package` 等命令使用的过滤视图，不复制 atom 文件，不安装 atom，不执行 atom，不分发 atom，也不表示可执行计划。
 

@@ -206,6 +206,8 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_auth as run_auth
     from atomic_ops.commands import run_object as run_object
     from atomic_ops.commands import run_policy_route as run_policy_route
+    from atomic_ops.commands import run_acl_policy as run_acl_policy
+    from atomic_ops.commands import run_acl_policy_group as run_acl_policy_group
     from atomic_ops.commands import run_interface as run_interface
     from atomic_ops.commands import run_ospf as run_ospf
     from atomic_ops.commands import run_ospfv3 as run_ospfv3
@@ -234,6 +236,18 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="Policy-based routing operations.",
             description="Policy-route configuration, update, delete, verify, and priority operations.",
             children=run_policy_route.build_subtree(),
+        ),
+        CommandGroup(
+            name="acl-policy",
+            help="Control-policy operations.",
+            description="Control-policy (acl_policy) configuration, update, delete, batch-delete, and verify operations over IPv4 and IPv6.",
+            children=run_acl_policy.build_subtree(),
+        ),
+        CommandGroup(
+            name="acl-policy-group",
+            help="Control-policy group operations.",
+            description="Control-policy group (acl_policy_group) configuration, rename, delete, and verify operations over IPv4 and IPv6.",
+            children=run_acl_policy_group.build_subtree(),
         ),
         CommandGroup(
             name="interface",
