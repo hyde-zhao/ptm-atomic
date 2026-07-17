@@ -1,0 +1,97 @@
+schema_version: "1.1"
+op_id: tg_apply_traffic_template
+device_type: tg
+description: Create or update a TRex traffic template YAML on the TG host.
+parameters:
+  template:
+    type: string
+    required: true
+    description: Template name, limited to lowercase letters, digits, underscore, and hyphen.
+  tx_port:
+    type: string
+    required: true
+    description: Default TX port stored in the generated template.
+  rx_port:
+    type: string
+    required: true
+    description: Default RX port stored in the generated template.
+  ip_version:
+    type: string
+    required: false
+    description: Network layer packet type, either ipv4 or ipv6; defaults to ipv4.
+  l4_protocol:
+    type: string
+    required: true
+    description: Layer 4 protocol, currently tcp or udp.
+  l4_sport:
+    type: int
+    required: true
+    description: Layer 4 source port.
+  l4_dport:
+    type: int
+    required: true
+    description: Layer 4 destination port.
+  traffic_mode:
+    type: string
+    required: true
+    description: Traffic mode, either count or continuous.
+  count:
+    type: int
+    required: false
+    description: Packet count, required when traffic_mode is count.
+  rate:
+    type: string
+    required: true
+    description: TRex-style rate string such as 100pps or 10mbps.
+  frame_size:
+    type: int
+    required: false
+    description: Ethernet frame size in bytes.
+  vlan:
+    type: string
+    required: false
+    description: VLAN ID or VLAN stack when VLAN traffic is needed.
+  src_ip:
+    type: string
+    required: false
+    description: Optional source IP; otherwise derived from interface direction.
+  dst_ip:
+    type: string
+    required: false
+    description: Optional destination IP; otherwise derived from interface direction.
+  src_mac:
+    type: string
+    required: false
+    description: Optional source MAC; otherwise derived from interface configuration.
+  dst_mac:
+    type: string
+    required: false
+    description: Optional destination MAC; otherwise derived from learned gateway MAC.
+returns:
+  status: success
+  data:
+    template: tcp_demo
+    template_path: /opt/trex/v3.08/trex_template/tcp_demo.yaml
+    status: applied
+    updated: true
+  error_type: INVALID_PARAM
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: state_mutation
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - INVALID_PARAM
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - The trex-api service can write to the configured TRex template directory.
+postconditions:
+  - The generated TRex YAML exists on the TG host template directory.
+tags:
+  - traffic
+  - trex
+  - template
+since_version: "1.1.0"
