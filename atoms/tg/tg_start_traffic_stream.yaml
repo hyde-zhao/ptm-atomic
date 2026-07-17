@@ -1,89 +1,36 @@
 schema_version: "1.1"
 op_id: tg_start_traffic_stream
 device_type: tg
-description: Start an Ixia-C traffic stream from a topology-defined TX link to RX link.
+description: Start a TRex traffic stream from a predefined traffic template.
 parameters:
-  topology:
+  ports:
+    type: list
+    required: true
+    description: TRex port IDs occupied by this operation.
+  txport:
     type: string
     required: true
-    description: Topology YAML file path consumed by the traffic CLI.
-  tx:
+    description: TRex port ID that transmits traffic.
+  rxport:
     type: string
     required: true
-    description: TX link name in the topology file.
-  rx:
+    description: TRex port ID that receives traffic.
+  template:
     type: string
     required: true
-    description: RX link name in the topology file.
+    description: Traffic template name created by tg_apply_traffic_template.
   name:
     type: string
     required: true
-    description: Traffic stream name.
-  l3:
-    type: string
-    required: false
-    description: L3 protocol, one of ipv4, ipv6, or arp.
-  src_ip:
-    type: string
-    required: false
-    description: Source IP address without prefix length.
-  dst_ip:
-    type: string
-    required: false
-    description: Destination IP address without prefix length.
-  l4:
-    type: string
-    required: false
-    description: L4 protocol, one of tcp, udp, icmp, or icmpv6.
-  src_port:
-    type: int
-    required: false
-    description: TCP or UDP source port.
-  dst_port:
-    type: int
-    required: false
-    description: TCP or UDP destination port.
-  src_mac:
-    type: string
-    required: false
-    description: Source MAC address.
-  dst_mac:
-    type: string
-    required: false
-    description: Destination MAC address.
-  vlan:
-    type: string
-    required: false
-    description: VLAN ID or comma-separated VLAN stack.
-  count:
-    type: int
-    required: false
-    description: Fixed frame count.
-  continuous:
-    type: bool
-    required: false
-    description: Whether to send traffic continuously.
-  pps:
-    type: int
-    required: false
-    description: Packets per second.
-  frame_size:
-    type: int
-    required: false
-    description: Frame size in bytes.
+    description: Runtime stream instance name used by verify and stop.
 returns:
   status: success
   data:
-    stream_id: "<stream-id>"
-    flow_name: ""
-    tx_link: ""
-    rx_link: ""
-    l3: ipv4
-    l4: ""
-    count: 100
-    continuous: false
-    pps: 10000
-    frame_size: 128
+    name: demo
+    template: tcp_demo
+    txport: "0"
+    rxport: "1"
+    state: running
   error_type: INVALID_PARAM
   diag_snapshot_ref: ""
 idempotent: false
@@ -93,30 +40,27 @@ rollback_strategy:
   op_id: tg_stop_traffic_stream
   snapshot_required: false
   required_inputs:
-    - stream_id
-    - topology
-    - tx
-    - rx
+    - ports
+    - txport
+    - rxport
     - name
-  notes: Stop must preserve the runtime handle in detailed logs when cleanup fails.
-post_verify:
-  op_id: tg_capture_traffic_result
-  expected_state: stopped
+  notes: Stop cleans the runtime stream and does not preserve final statistics.
 dry_run_supported: true
 risk_level: medium
 timeout_ms: 60000
 error_types:
   - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
   - DEVICE_UNREACHABLE
   - TIMEOUT
   - INTERNAL_ERROR
 preconditions:
-  - The topology file exists and maps the TX and RX links to one TG node.
-  - The Ixia-C API server and SSH endpoint are reachable.
+  - The template exists on the TRex API host.
+  - The TRex STL server and trex-api service are reachable.
 postconditions:
-  - The named traffic stream is configured and started on Ixia-C.
+  - The named TRex runtime stream is running on the requested TX port.
 tags:
   - traffic
-  - ixiac
+  - trex
   - stream
-since_version: "1.0.0"
+since_version: "1.1.0"

@@ -1,29 +1,30 @@
 schema_version: "1.1"
 op_id: tg_stop_traffic_stream
 device_type: tg
-description: Stop one Ixia-C traffic stream or all active traffic streams.
+description: Stop a TRex traffic stream and clean its runtime stream configuration.
 parameters:
-  topology:
+  ports:
+    type: list
+    required: true
+    description: TRex port IDs occupied by this traffic instance.
+  txport:
     type: string
     required: true
-    description: Topology YAML file path consumed by the traffic CLI.
-  tx:
+    description: TRex port ID that transmits traffic.
+  rxport:
     type: string
     required: true
-    description: TX link name in the topology file.
-  rx:
-    type: string
-    required: true
-    description: RX link name in the topology file.
+    description: TRex port ID that receives traffic.
   name:
     type: string
-    required: false
-    description: Optional traffic stream name; omit to stop all streams.
+    required: true
+    description: Runtime stream instance name to stop.
 returns:
   status: success
   data:
-    stream_id: "<stream-id>"
-    stopped: ""
+    name: demo
+    stopped: true
+    cleaned: true
   error_type: RESOURCE_NOT_FOUND
   diag_snapshot_ref: ""
 idempotent: true
@@ -32,10 +33,7 @@ rollback_strategy:
   type: manual_required
   snapshot_required: false
   required_inputs: []
-  notes: Stopping traffic is a cleanup action; ptm-atomic cannot automatically restore the previous runtime stream state.
-post_verify:
-  op_id: tg_capture_traffic_result
-  expected_state: stopped
+  notes: Stopping traffic is a cleanup action and does not save final stats.
 dry_run_supported: true
 risk_level: medium
 timeout_ms: 30000
@@ -46,12 +44,12 @@ error_types:
   - TIMEOUT
   - INTERNAL_ERROR
 preconditions:
-  - The topology file exists and maps the TX and RX links to one TG node.
-  - The Ixia-C API server is reachable.
+  - Loss verification has already run if statistics are required.
+  - The TRex STL server and trex-api service are reachable.
 postconditions:
-  - The selected traffic stream or all streams are stopped.
+  - The selected TRex runtime stream is stopped and removed from the TX port.
 tags:
   - traffic
-  - ixiac
+  - trex
   - stream
-since_version: "1.0.0"
+since_version: "1.1.0"

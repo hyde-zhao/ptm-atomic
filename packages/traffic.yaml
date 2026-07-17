@@ -2,11 +2,12 @@
 # They do not install, copy, or distribute operation YAML files.
 package_id: traffic
 display_name: Traffic
-description: Traffic generator operations for Ixia-C stream lifecycle and statistics verification.
-version: "1.0.0"
+description: Traffic generator operations for TRex template and stream lifecycle.
+version: "1.1.0"
 operations:
+  - tg_config_interface
+  - tg_apply_traffic_template
   - tg_start_traffic_stream
-  - tg_capture_traffic_result
   - tg_verify_traffic_loss
   - tg_stop_traffic_stream
-  - tg_delete_traffic_stream
+  - tg_delete_traffic_template
