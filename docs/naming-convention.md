@@ -77,7 +77,7 @@ atoms/fw/<op_id>.yaml
 | Login action verb | `login` | `fw_login_web_management` |
 | Login-state observation verb | `check` | `fw_check_login_state` |
 | Configuration action verb | `config` | `fw_config_acl_policy` |
-| Batch configuration action verb | `config_batch` | `fw_config_batch_acl_policy` |
+| Batch configuration action verb | `config_batch` | `fw_config_batch_object` |
 | Verification action verb | `verify` | `fw_verify_acl_policy` |
 
 `config_batch` is a frozen firewall v1.1 logical verb. The broad `op_id`

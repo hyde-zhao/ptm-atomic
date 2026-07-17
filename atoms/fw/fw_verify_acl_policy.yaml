@@ -1,37 +1,77 @@
 schema_version: "1.1"
 op_id: fw_verify_acl_policy
 device_type: fw
-description: Verify ACL policy configuration contract result for NGFW capacity operations.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_acl_policy
+description: Query IPv4 or IPv6 NGFW control policies.
 parameters:
-  config_result_ref:
+  session_ref:
     type: string
     required: false
-    description: Non-sensitive reference to the related configuration result.
-  config_result:
-    type: json
-    required: false
-    description: Inline non-sensitive configuration result envelope.
-  verification_rules:
-    type: list
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
     required: true
-    description: Rules used to check ACL policy configuration state.
-  expected_rule_ref:
+    description: Query page number for the paginated filter mode.
+  size:
+    type: int
+    required: true
+    description: Query page size for the paginated filter mode.
+  policy_type:
     type: string
     required: true
-    description: Expected rule reference.
+    description: ipv4 queries IPv4 control policies through /api/v1/ip4policy/fwaclconf and ipv6 queries IPv6 control policies through /api/v1/ip6policy/fwaclconf.
+  policy_id:
+    type: int
+    required: false
+    description: Optional single-policy lookup query value. When set (including 0 for the default policy) the request uses the ?id mode instead of the paginated filter.
+  content:
+    type: string
+    required: false
+    description: Optional free-text content filter for the paginated filter mode.
+  policy_name:
+    type: string
+    required: false
+    description: Optional policy-name filter for the paginated filter mode; resolves the id needed by fw_update_acl_policy.
+  source:
+    type: string
+    required: false
+    description: Optional source-address filter for the paginated filter mode.
+  destination:
+    type: string
+    required: false
+    description: Optional destination-address filter for the paginated filter mode.
+  service:
+    type: string
+    required: false
+    description: Optional service filter for the paginated filter mode.
+  policy_group:
+    type: string
+    required: false
+    description: Optional policy-group filter for the paginated filter mode; defaults to the localized "全部" (all) group and is URL-encoded by the runner.
 inputs:
-  state_ref: "<state-ref>"
-  config_result_ref: "<acl-policy-config-result-ref>"
+  session_ref: "<session-ref>"
   config_domain: acl_policy
+  page: 1
+  size: 10
+  policy_type: ipv4
+  policy_group: "全部"
+side_effect: observation
 returns:
   status: success
   data:
     verification_summary_ref: "<acl-policy-verification-summary-ref>"
     verification_status: passed
+    existence: true
+    acl_policy_id: "<acl-policy-id>"
+    acl_policy_ids: "<acl-policy-id-list>"
+    count: 0
+    full_config: "<acl-policy-full-config-ref>"
     manual_handling_ref: "<manual-handling-ref>"
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+dry_run_supported: true
+risk_level: low
 timeout_ms: 30000
 error_types:
   - NONE
@@ -42,15 +82,15 @@ error_types:
 verification:
   kind: capacity_domain
   rules:
-    - name: acl_policy_state_matches
-      input_ref: "<acl-policy-config-result-ref>"
-      expected_result: policy name, rule reference, action, and digest match
+    - name: acl_policy_query_returns_requested_address_family
+      input_ref: "<acl-policy-query-result-ref>"
+      expected_result: policy_type selects the ip4 or ip6 request path; the default policy_group filter is URL-encoded when present.
   summary_ref: "<acl-policy-verification-summary-ref>"
 preconditions:
-  - A related ACL policy configuration result reference is available.
+  - External orchestration holds a valid session_ref.
 postconditions:
-  - Verification summary and diagnostic references are available to the caller.
-  - Any failed check is reported for manual handling.
+  - Control-policy query result and diagnostic references are available to the caller.
+  - The returned acl_policy_ids list and count let callers resolve the id needed by fw_update_acl_policy and fw_delete_acl_policy.
 tags:
   - firewall
   - capacity
@@ -63,5 +103,7 @@ aliases:
   - security-policy
   - ipv4-policy
   - ipv4-security-policy
+  - ipv6-policy
+  - ipv6-security-policy
   - control-policy
-since_version: "1.1.0"
+since_version: "1.7.0"
