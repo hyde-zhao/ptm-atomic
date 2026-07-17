@@ -1,35 +1,37 @@
 schema_version: "1.1"
 op_id: tg_verify_traffic_loss
 device_type: tg
-description: Verify Ixia-C traffic loss against a maximum allowed loss ratio.
+description: Verify TRex port statistics against a maximum allowed traffic loss ratio.
 parameters:
-  topology:
+  ports:
+    type: list
+    required: true
+    description: TRex port IDs occupied by this traffic instance.
+  txport:
     type: string
     required: true
-    description: Topology YAML file path consumed by the traffic CLI.
-  tx:
+    description: TRex port ID that transmits traffic.
+  rxport:
     type: string
     required: true
-    description: TX link name in the topology file.
-  rx:
-    type: string
-    required: true
-    description: RX link name in the topology file.
+    description: TRex port ID that receives traffic.
   name:
     type: string
-    required: false
-    description: Optional traffic stream name; omit to verify all streams.
+    required: true
+    description: Runtime stream instance name to verify.
   max_loss:
     type: float
-    required: false
+    required: true
     description: Maximum allowed loss ratio.
 returns:
   status: success
   data:
     passed: true
-    max_loss: 0.01
-    failures: []
-    flows: []
+    tx_packets: 500
+    rx_packets: 500
+    loss: 0
+    loss_ratio: 0
+    max_loss: 0
   error_type: STATE_MISMATCH
   diag_snapshot_ref: ""
 idempotent: true
@@ -45,12 +47,12 @@ error_types:
   - TIMEOUT
   - INTERNAL_ERROR
 preconditions:
-  - The topology file exists and maps the TX and RX links to one TG node.
-  - Traffic stream statistics are available for verification.
+  - The named TRex runtime stream is still running.
+  - This operation is executed before tg_stop_traffic_stream.
 postconditions:
-  - Traffic stream configuration is not modified by the verification.
+  - TRex traffic runtime is not modified by the verification.
 tags:
   - traffic
-  - ixiac
+  - trex
   - verification
-since_version: "1.0.0"
+since_version: "1.1.0"
