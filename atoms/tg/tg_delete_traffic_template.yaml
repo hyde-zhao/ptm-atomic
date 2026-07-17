@@ -1,0 +1,37 @@
+schema_version: "1.1"
+op_id: tg_delete_traffic_template
+device_type: tg
+description: Delete a TRex traffic template when no runtime stream uses it.
+parameters:
+  template:
+    type: string
+    required: true
+    description: Traffic template name to delete.
+returns:
+  status: success
+  data:
+    template: tcp_demo
+    deleted: true
+  error_type: RESOURCE_NOT_FOUND
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: state_mutation
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - RESOURCE_CONFLICT
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - No running traffic stream references the target template.
+postconditions:
+  - The generated TRex YAML template is removed from the TG host.
+tags:
+  - traffic
+  - trex
+  - template
+since_version: "1.1.0"

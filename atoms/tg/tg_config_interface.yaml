@@ -1,0 +1,37 @@
+schema_version: "1.1"
+op_id: tg_config_interface
+device_type: tg
+description: Configure TRex IPv4 or IPv6 interfaces and learn gateway MAC addresses with ARP or Neighbor Discovery.
+parameters:
+  interfaces:
+    type: list
+    required: true
+    description: List of port, same-version IPv4 or IPv6 address, gateway, and optional MAC or VLAN settings.
+returns:
+  status: success
+  data:
+    interfaces: []
+    status: configured
+  error_type: STATE_MISMATCH
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: state_mutation
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 60000
+error_types:
+  - INVALID_PARAM
+  - STATE_MISMATCH
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - The TRex STL server and trex-api service are reachable.
+  - Each requested port is physically connected to a reachable gateway.
+postconditions:
+  - Each configured port has interface settings and a gateway MAC learned through ARP or IPv6 Neighbor Discovery.
+tags:
+  - traffic
+  - trex
+  - interface
+since_version: "1.1.0"
