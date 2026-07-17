@@ -190,7 +190,6 @@ Adapter profile 维护规则见 `docs/API-ADAPTER-SPEC.md`。
 
 - `fw_config_batch_interface`
 - `fw_config_batch_object`
-- `fw_config_batch_acl_policy`
 - `fw_config_batch_policy_route`
 - `fw_config_batch_static_route`
 - `fw_config_batch_nat`

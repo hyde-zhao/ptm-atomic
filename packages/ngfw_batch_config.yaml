@@ -2,12 +2,11 @@
 # They do not install, copy, execute, or distribute operation YAML files.
 package_id: ngfw_batch_config
 display_name: NGFW Batch Configuration
-description: Multi-device batch configuration contract operations for ten NGFW domains.
-version: "1.1.0"
+description: Multi-device batch configuration contract operations for nine NGFW domains.
+version: "1.2.0"
 operations:
   - fw_config_batch_interface
   - fw_config_batch_object
-  - fw_config_batch_acl_policy
   - fw_config_batch_policy_route
   - fw_config_batch_static_route
   - fw_config_batch_nat

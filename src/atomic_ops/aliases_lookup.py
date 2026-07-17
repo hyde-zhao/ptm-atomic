@@ -64,7 +64,7 @@ def extract_alias_keywords(op_id: str) -> list[str]:
         fw_config_pppoe -> ["pppoe"]
         fw_config_security_policy -> ["security-policy"]
         fw_config_southbound_interface -> ["southbound-interface"]
-        fw_config_batch_acl_policy -> ["acl-policy"]
+        fw_config_batch_object -> ["object"]
     """
     if not op_id:
         return []

@@ -1,0 +1,66 @@
+schema_version: "1.1"
+op_id: fw_verify_acl_policy_group
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_acl_policy_group
+description: Query IPv4 or IPv6 NGFW control-policy groups.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  policy_type:
+    type: string
+    required: true
+    description: ipv4 queries IPv4 control-policy groups through /api/v1/ip4policy/group and ipv6 queries IPv6 control-policy groups through /api/v1/ip6policy/group.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: acl_policy_group
+  policy_type: ipv4
+side_effect: observation
+returns:
+  status: success
+  data:
+    verification_summary_ref: "<acl-policy-group-verification-summary-ref>"
+    verification_status: passed
+    existence: true
+    group_name: "<group-name>"
+    group_names: "<group-name-list>"
+    count: 0
+    full_config: "<acl-policy-group-full-config-ref>"
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: acl_policy_group_query_returns_requested_address_family
+      input_ref: "<acl-policy-group-query-result-ref>"
+      expected_result: policy_type selects the ip4 or ip6 request path; GET takes no query parameters and returns all groups in vals.
+  summary_ref: "<acl-policy-group-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - Control-policy group query result and diagnostic references are available to the caller.
+  - The returned group_names list and count let callers confirm group existence before update or delete.
+tags:
+  - firewall
+  - capacity
+  - acl_policy_group
+  - verification
+aliases:
+  - policy-group
+  - control-policy-group
+  - acl-policy-group
+  - ipv4-policy-group
+  - ipv6-policy-group
+since_version: "1.7.0"

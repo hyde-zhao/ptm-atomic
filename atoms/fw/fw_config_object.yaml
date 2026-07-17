@@ -49,6 +49,24 @@ returns:
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+side_effect: state_mutation
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_object
+  snapshot_required: false
+  required_inputs:
+    - object_name
+  id_source: args
+  id_field: object_name
+  notes: The address-object id is its name; rollback deletes via DELETE /api/v1/ippool?id=<object_name>.
+pre_snapshot:
+  op_id: fw_verify_object
+  capture_fields:
+    - object_name
+    - existence
+post_verify:
+  op_id: fw_verify_object
+  expected_state: absent
 timeout_ms: 30000
 error_types:
   - NONE

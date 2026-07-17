@@ -30,7 +30,7 @@ change set.
 | `returns` | `object` | Yes | v1.0/v1.1 | Fixed response envelope consumed by validators and later CLI readers. | `{status: success, data: {}, error_type: VALIDATION_ERROR, diag_snapshot_ref: ""}` |
 | `idempotent` | `boolean` | Yes | v1.0/v1.1 | Must be explicitly set. | `true` |
 | `side_effect` | `enum` | Rollback check | v1.1 | Environment side-effect class: `none`, `observation`, `traffic_runtime`, `state_mutation`, `destructive`, or `irreversible`. `ptm-atomic validate --check rollback` treats missing values as a blocking metadata defect. | `"state_mutation"` |
-| `rollback_strategy` | `object` | Conditional | v1.1 | Required by rollback validation when `side_effect` is `traffic_runtime`, `state_mutation`, `destructive`, or `irreversible`. | `{type: inverse_op, op_id: fw_delete_policy_route, snapshot_required: false, required_inputs: [policy_route_id]}` |
+| `rollback_strategy` | `object` | Conditional | v1.1 | Required by rollback validation when `side_effect` is `traffic_runtime`, `state_mutation`, `destructive`, or `irreversible`. Optional `id_source`/`id_field` (plus `query_op`/`query_match`/`query_match_source` for `query`) describe how the rollback PUT/DELETE obtains the target id. | `{type: inverse_op, op_id: fw_delete_policy_route, snapshot_required: false, required_inputs: [policy_route_id], id_source: response, id_field: policy_route_id}` |
 | `pre_snapshot` | `object` | Conditional | v1.1 | Snapshot capture contract used by `restore_snapshot` and audit-only irreversible operations. | `{op_id: fw_verify_policy_route, capture_fields: [policy_route_id, full_config]}` |
 | `rollback_apply` | `object` | Conditional | v1.1 | Restore or compensating apply contract. Required for `restore_snapshot`. | `{op_id: fw_update_policy_route, input_from: pre_snapshot.full_config}` |
 | `post_verify` | `object` | Recommended | v1.1 | Verification op and expected state after rollback or cleanup. Missing values are reported as rollback warnings for state-changing operations. | `{op_id: fw_verify_policy_route, expected_state: absent}` |
@@ -217,7 +217,7 @@ rollback stack before live execution.
 
 | Value | Required fields | Semantics |
 |---|---|---|
-| `inverse_op` | `op_id`, `required_inputs` | A concrete inverse operation can be called with inputs from op input, result, or snapshot. |
+| `inverse_op` | `op_id`, `required_inputs`, optional `id_source`/`id_field` (plus `query_op`/`query_match`/`query_match_source` when `id_source: query`) | A concrete inverse operation can be called with inputs from op input, result, or snapshot. `id_source` declares how the rollback PUT/DELETE resolves the target id. |
 | `restore_snapshot` | `snapshot_required: true`, `pre_snapshot`, `rollback_apply` | ptm-te must capture old state before the operation and reapply the full old state on rollback. |
 | `compensating_op` | `op_id`, `required_inputs`, `notes` recommended | A compensating action restores an equivalent state but may not be byte-identical. |
 | `manual_required` | `notes` recommended | Live execution requires human confirmation because automatic rollback is not safe enough. |
@@ -233,6 +233,11 @@ rollback stack before live execution.
   `returns.data`, `inputs.params`, or `pre_snapshot.capture_fields`.
 - `irreversible` strategies must explain the risk in `notes`.
 - `post_verify` is recommended and reported as a warning when omitted.
+- `rollback_strategy.id_source` (optional) declares how the rollback inverse_op obtains the target id for its PUT/DELETE:
+  - `response`: from the forward POST response (`id_field` names the response field); e.g. `fw_config_policy_route` POST returns the id.
+  - `args`: from the forward op inputs (`id_field` names the args field); e.g. `fw_config_object` id is its name.
+  - `query`: from a verify query (`query_op` + `query_match` + `query_match_source`); e.g. `fw_config_acl_policy` POST returns no id and requires a GET lookup.
+  - `placeholder`: the id is a fixed placeholder and the real target is located by `id_field`; e.g. `fw_update_acl_policy_group` PUT id is the fixed literal "1" and rename is driven by `old_name`/`new_name`.
 
 `ptm-atomic rollback check --op <op_id> --format json` returns a ptm-te oriented
 readiness result. `status: pass` means the operation is safe to enter the normal

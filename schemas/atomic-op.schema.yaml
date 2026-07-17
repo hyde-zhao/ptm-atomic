@@ -461,6 +461,33 @@ $defs:
         uniqueItems: true
       notes:
         type: string
+      id_source:
+        type: string
+        enum:
+          - response
+          - args
+          - query
+          - placeholder
+        description: >-
+          How the rollback inverse_op obtains the target identifier.
+          response: from the forward POST response (id_field names the response field);
+          args: from the forward op inputs (id_field names the args field);
+          query: from a verify query (query_op + query_match + query_match_source);
+          placeholder: the id is a fixed placeholder and the real target is located by id_field.
+      id_field:
+        $ref: "#/$defs/snakeCaseString"
+        description: Field carrying or locating the identifier; see id_source.
+      query_op:
+        $ref: "#/$defs/opId"
+        description: Verify op used to resolve the id when id_source is query.
+      query_match:
+        $ref: "#/$defs/snakeCaseString"
+        description: Field used to match during the query (e.g. name).
+      query_match_source:
+        type: string
+        enum:
+          - args
+        description: Where the query match value comes from.
   preSnapshotContract:
     type: object
     additionalProperties: false

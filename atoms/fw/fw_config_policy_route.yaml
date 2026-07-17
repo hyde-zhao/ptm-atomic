@@ -68,7 +68,9 @@ rollback_strategy:
   snapshot_required: false
   required_inputs:
     - policy_route_id
-  notes: Delete only when the create result reports created=true; pre-existing idempotent objects must not be deleted by default.
+  id_source: response
+  id_field: policy_route_id
+  notes: Delete only when the create result reports created=true; pre-existing idempotent objects must not be deleted by default. The policy_route_id is taken from the POST /api/v1/policyroute response.
 pre_snapshot:
   op_id: fw_verify_policy_route
   capture_fields:

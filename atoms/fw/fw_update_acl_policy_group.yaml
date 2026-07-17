@@ -1,0 +1,115 @@
+schema_version: "1.1"
+op_id: fw_update_acl_policy_group
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_acl_policy_group
+description: Rename an IPv4 or IPv6 NGFW control-policy group through /api/v1/ip{4,6}policy/group.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be acl_policy_group for this operation.
+  params:
+    type: json
+    required: true
+    description: Control-policy group rename object. The top-level id is the fixed literal "1" and the rename is driven by val.old_name and val.new_name. policy_type selects the IPv4 (ip4policy) or IPv6 (ip6policy) address family and only changes the request path.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: acl_policy_group
+  params:
+    policy_type: ipv4
+    id: "1"
+    old_name: test1
+    new_name: test2
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    group_name: test2
+    pre_snapshot_ref: "<acl-policy-group-pre-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: acl_policy_group
+      applied_ref: "<acl-policy-group-update-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_update_acl_policy_group
+  snapshot_required: false
+  required_inputs:
+    - policy_type
+    - old_name
+    - new_name
+  id_source: placeholder
+  id_field: old_name
+  notes: Rename back：将 new_name 改回 old_name。PUT id 为固定占位符 "1"，真正靠 old_name（前向 rename 后即原 new_name）定位。
+pre_snapshot:
+  op_id: fw_verify_acl_policy_group
+  capture_fields:
+    - group_name
+    - full_config
+post_verify:
+  op_id: fw_verify_acl_policy_group
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Renaming a control-policy group can break references held by existing policies; requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this configuration contract is used.
+  - The PUT id is the fixed literal "1"; old_name must match an existing group and new_name must not collide with an existing group.
+postconditions:
+  - Control-policy group rename result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_acl_policy_group query can confirm the new group name.
+tags:
+  - firewall
+  - capacity
+  - acl_policy_group
+  - configuration
+aliases:
+  - policy-group
+  - control-policy-group
+  - acl-policy-group
+  - ipv4-policy-group
+  - ipv6-policy-group
+since_version: "1.7.0"

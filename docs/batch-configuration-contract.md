@@ -3,7 +3,7 @@
 ## Scope
 
 This document defines the static multi-device batch configuration contract for `ptm-atomic`.
-It documents atom YAML inputs, outputs, package scope, and safety boundaries for the ten NGFW
+It documents atom YAML inputs, outputs, package scope, and safety boundaries for the nine NGFW
 capacity domains. It does not define or provide a batch executor, device connection, inventory
 reader, request payload, response payload, runtime log, or automatic recovery mechanism.
 
@@ -13,7 +13,6 @@ reader, request payload, response payload, runtime log, or automatic recovery me
 |---|---|
 | `interface` | `fw_config_batch_interface` |
 | `object` | `fw_config_batch_object` |
-| `acl_policy` | `fw_config_batch_acl_policy` |
 | `policy_route` | `fw_config_batch_policy_route` |
 | `static_route` | `fw_config_batch_static_route` |
 | `nat` | `fw_config_batch_nat` |
@@ -22,7 +21,7 @@ reader, request payload, response payload, runtime log, or automatic recovery me
 | `ssl_vpn` | `fw_config_batch_ssl_vpn` |
 | `dynamic_routing` | `fw_config_batch_dynamic_routing` |
 
-`packages/ngfw_batch_config.yaml` contains exactly these ten `fw_config_batch_<domain>` operation ids.
+`packages/ngfw_batch_config.yaml` contains exactly these nine `fw_config_batch_<domain>` operation ids.
 It is a package filter view only: it supports package listing and reference validation, but does
 not install, copy, execute, or distribute atom files. It does not include single-device
 `fw_config_<domain>` or `fw_verify_<domain>` operation ids.
@@ -153,4 +152,4 @@ Current repository checks and package-reference probes can rely on these stable 
 - `batch.max_concurrency` default `1`, minimum `1`, maximum `5`.
 - Required non-sensitive inventory, selector, batch reference, and idempotency fields.
 - Required `batch_status`, `per_device_results[]`, `failed_devices[]`, and `verification_summary_ref`.
-- `ngfw_batch_config` is a filter view only and contains exactly the ten batch `op_id` values listed above.
+- `ngfw_batch_config` is a filter view only and contains exactly the nine batch `op_id` values listed above.
