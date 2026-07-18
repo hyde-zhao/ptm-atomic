@@ -1,0 +1,504 @@
+"""TRex traffic generator runner for the trex-api HTTP service.
+
+The trex-api service exposes a single dispatch endpoint
+``POST /api/v1/ops/{op_id}`` for all six ``tg`` operations. Requests carry a
+flat JSON payload (no ``{id, val}`` wrapping) and the response is an
+``OperationEnvelope`` whose ``status`` / ``error_type`` fields decide success --
+the HTTP status code stays 200 even when an operation fails. The service is
+unauthenticated, so the runner sends no credential header and does not touch
+the NGFW session file.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from ipaddress import AddressValueError, ip_address
+from pathlib import Path
+from typing import Any
+
+from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.http import request_json
+from atomic_ops.runner.ngfw_login import normalize_base_url
+
+
+SUCCESS_STATUS = {200}
+TEMPLATE_RE = re.compile(r"^[a-z0-9_-]+$")
+RATE_RE = re.compile(r"^[1-9][0-9]*(pps|kbps|mbps|gbps)$", re.IGNORECASE)
+
+TREX_OPS: dict[str, tuple[str, str]] = {
+    op_id: ("POST", f"/api/v1/ops/{op_id}")
+    for op_id in (
+        "tg_config_interface",
+        "tg_apply_traffic_template",
+        "tg_start_traffic_stream",
+        "tg_verify_traffic_loss",
+        "tg_stop_traffic_stream",
+        "tg_delete_traffic_template",
+    )
+}
+
+# trex-api OperationEnvelope.error_type -> (CLI runner error_code, retryable)
+ERROR_TYPE_MAP: dict[str, tuple[str, bool]] = {
+    "INVALID_PARAM": ("RUNNER_VALIDATION_FAILED", False),
+    "RESOURCE_NOT_FOUND": ("RUNNER_VALIDATION_FAILED", False),
+    "STATE_MISMATCH": ("RUNNER_VALIDATION_FAILED", False),
+    "RESOURCE_CONFLICT": ("RUNNER_CONFIG_REJECTED", False),
+    "INTERNAL_ERROR": ("RUNNER_RESPONSE_INVALID", False),
+    "DEVICE_UNREACHABLE": ("RUNNER_DEVICE_UNREACHABLE", True),
+    "TIMEOUT": ("RUNNER_DEVICE_UNREACHABLE", True),
+}
+
+
+def load_trex_json_payload(*, payload_file: str | None, payload_json: str | None) -> dict[str, Any] | None:
+    """Load an optional complete JSON payload supplied by the caller."""
+    if payload_file and payload_json:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "--payload-file and --payload-json cannot be used together.",
+            {"fields": ["payload_file", "payload_json"]},
+        )
+    if not payload_file and not payload_json:
+        return None
+    try:
+        raw = Path(payload_file).read_text(encoding="utf-8") if payload_file else str(payload_json)
+        payload = json.loads(raw)
+    except OSError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "TRex payload file cannot be read.",
+            {"path": payload_file, "reason": exc.__class__.__name__},
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "TRex payload must be valid JSON.",
+            {"reason": exc.msg},
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "TRex payload JSON root must be an object.",
+            {"type": type(payload).__name__},
+        )
+    return payload
+
+
+def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Build the flat trex-api request payload for ``op_id`` from CLI params."""
+    if op_id == "tg_config_interface":
+        interfaces = params.get("interfaces")
+        if not isinstance(interfaces, list) or not interfaces:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "interfaces must be a non-empty list.",
+                {"field": "interfaces"},
+            )
+        payload: dict[str, Any] = {"interfaces": interfaces}
+    elif op_id == "tg_apply_traffic_template":
+        payload = {
+            "template": params.get("template"),
+            "tx_port": params.get("tx_port"),
+            "rx_port": params.get("rx_port"),
+            "ip_version": params.get("ip_version") or "ipv4",
+            "l4_protocol": params.get("l4_protocol"),
+            "l4_sport": params.get("l4_sport"),
+            "l4_dport": params.get("l4_dport"),
+            "traffic_mode": params.get("traffic_mode"),
+            "rate": params.get("rate"),
+        }
+        for optional in ("count", "frame_size", "vlan", "src_ip", "dst_ip", "src_mac", "dst_mac"):
+            value = params.get(optional)
+            if value is not None:
+                payload[optional] = value
+    elif op_id in {"tg_start_traffic_stream", "tg_stop_traffic_stream", "tg_verify_traffic_loss"}:
+        payload = {
+            "ports": params.get("ports"),
+            "txport": params.get("txport"),
+            "rxport": params.get("rxport"),
+            "name": params.get("name"),
+        }
+        if op_id == "tg_start_traffic_stream":
+            payload["template"] = params.get("template")
+        if op_id == "tg_verify_traffic_loss":
+            payload["max_loss"] = params.get("max_loss")
+    elif op_id == "tg_delete_traffic_template":
+        payload = {"template": params.get("template")}
+    else:
+        raise RunnerError(
+            "RUNNER_UNSUPPORTED_OP",
+            "Runner does not support this TRex operation.",
+            {"op_id": op_id, "supported_ops": list(TREX_OPS)},
+        )
+    return validate_trex_payload(op_id, payload)
+
+
+def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate the trex-api payload against the operation contract locally."""
+    if op_id == "tg_config_interface":
+        _validate_interfaces(payload.get("interfaces"))
+    elif op_id == "tg_apply_traffic_template":
+        _validate_template_name(payload.get("template"), field="template")
+        _require_payload_str(payload, "tx_port")
+        _require_payload_str(payload, "rx_port")
+        ip_version = payload.get("ip_version", "ipv4")
+        if ip_version not in ("ipv4", "ipv6"):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ip_version must be ipv4 or ipv6.",
+                {"field": "ip_version", "actual": ip_version},
+            )
+        if payload.get("l4_protocol") not in ("tcp", "udp"):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "l4_protocol must be tcp or udp.",
+                {"field": "l4_protocol", "actual": payload.get("l4_protocol")},
+            )
+        payload["l4_sport"] = _validate_port_int("l4_sport", payload.get("l4_sport"))
+        payload["l4_dport"] = _validate_port_int("l4_dport", payload.get("l4_dport"))
+        traffic_mode = payload.get("traffic_mode")
+        if traffic_mode not in ("count", "continuous"):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "traffic_mode must be count or continuous.",
+                {"field": "traffic_mode", "actual": traffic_mode},
+            )
+        rate = payload.get("rate")
+        if not isinstance(rate, str) or not RATE_RE.fullmatch(rate):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "rate must use TRex-style units such as 100pps or 10mbps.",
+                {"field": "rate", "actual": rate},
+            )
+        if traffic_mode == "count":
+            count = payload.get("count")
+            if count is None:
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "count is required when traffic_mode=count.",
+                    {"field": "count"},
+                )
+            payload["count"] = _validate_positive_int("count", count)
+        elif payload.get("count") is not None:
+            payload["count"] = _validate_positive_int("count", payload["count"])
+        if payload.get("frame_size") is not None:
+            payload["frame_size"] = _validate_min_int("frame_size", payload["frame_size"], minimum=64)
+        _validate_ip_pair(ip_version, payload.get("src_ip"), payload.get("dst_ip"))
+    elif op_id in {"tg_start_traffic_stream", "tg_stop_traffic_stream", "tg_verify_traffic_loss"}:
+        ports = _validate_ports_list(payload.get("ports"))
+        payload["ports"] = ports
+        _require_payload_str(payload, "txport")
+        _require_payload_str(payload, "rxport")
+        if payload["txport"] == payload["rxport"]:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "txport and rxport must be different.",
+                {"txport": payload["txport"], "rxport": payload["rxport"]},
+            )
+        if payload["txport"] not in ports or payload["rxport"] not in ports:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "txport and rxport must both be included in ports.",
+                {"ports": ports, "txport": payload["txport"], "rxport": payload["rxport"]},
+            )
+        _require_payload_str(payload, "name")
+        if op_id == "tg_start_traffic_stream":
+            _validate_template_name(payload.get("template"), field="template")
+        if op_id == "tg_verify_traffic_loss":
+            max_loss = payload.get("max_loss")
+            if not isinstance(max_loss, (int, float)) or isinstance(max_loss, bool) or max_loss < 0:
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "max_loss must be a non-negative number.",
+                    {"field": "max_loss", "actual": max_loss},
+                )
+            payload["max_loss"] = float(max_loss)
+    elif op_id == "tg_delete_traffic_template":
+        _validate_template_name(payload.get("template"), field="template")
+    else:
+        raise RunnerError(
+            "RUNNER_UNSUPPORTED_OP",
+            "Runner does not support this TRex operation.",
+            {"op_id": op_id, "supported_ops": list(TREX_OPS)},
+        )
+    return payload
+
+
+def build_trex_dry_run(
+    *,
+    op_id: str,
+    base_url: str,
+    payload: dict[str, Any] | None,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    method, _path = _method_path(op_id)
+    return {
+        "op_id": op_id,
+        "status": "dry_run",
+        "execute_required": True,
+        "request": {
+            "method": method,
+            "url": _request_url(base_url, op_id),
+            "auth": {"name": "(none)", "value": "<trex-no-auth>"},
+            "content_type": "application/json",
+            "payload": payload,
+        },
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
+def execute_trex(
+    *,
+    op_id: str,
+    base_url: str,
+    payload: dict[str, Any] | None,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    method, path = _method_path(op_id)
+    headers = {"Content-Type": "application/json"}
+    status_code, response_payload, _text = request_json(
+        method,
+        _request_url(base_url, op_id),
+        headers=headers,
+        json_payload=payload,
+        timeout=timeout,
+        verify_tls=verify_tls,
+    )
+    if status_code not in SUCCESS_STATUS:
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "TRex trex-api request did not return a success HTTP status.",
+            {
+                "op_id": op_id,
+                "status_code": status_code,
+                "response_keys": sorted(response_payload.keys()),
+            },
+        )
+    envelope_status = str(response_payload.get("status") or "")
+    if envelope_status == "success":
+        return {
+            "op_id": op_id,
+            "status": "success",
+            "status_code": status_code,
+            "request": {"method": method, "path": path, "auth": {"name": "(none)"}},
+            "response": response_payload.get("data") or {},
+        }
+    error_type = str(response_payload.get("error_type") or "INTERNAL_ERROR")
+    error_code, retryable = ERROR_TYPE_MAP.get(error_type, ("RUNNER_RESPONSE_INVALID", False))
+    raise RunnerError(
+        error_code,
+        f"TRex trex-api operation {op_id} failed with error_type {error_type}.",
+        {
+            "op_id": op_id,
+            "envelope_status": envelope_status or "unknown",
+            "error_type": error_type,
+            "data": response_payload.get("data") or {},
+            "diag_snapshot_ref": response_payload.get("diag_snapshot_ref") or "",
+        },
+        retryable=retryable,
+    )
+
+
+def _method_path(op_id: str) -> tuple[str, str]:
+    try:
+        return TREX_OPS[op_id]
+    except KeyError as exc:
+        raise RunnerError(
+            "RUNNER_UNSUPPORTED_OP",
+            "Runner does not support this TRex operation.",
+            {"op_id": op_id, "supported_ops": list(TREX_OPS)},
+        ) from exc
+
+
+def _request_url(base_url: str, op_id: str) -> str:
+    _method, path = _method_path(op_id)
+    return f"{normalize_base_url(base_url)}{path}"
+
+
+def _validate_interfaces(interfaces: Any) -> None:
+    if not isinstance(interfaces, list) or not interfaces:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "interfaces must be a non-empty list.",
+            {"field": "interfaces"},
+        )
+    for index, item in enumerate(interfaces):
+        if not isinstance(item, dict):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each interface entry must be an object.",
+                {"field": "interfaces", "index": index},
+            )
+        for required in ("port", "ip", "gateway"):
+            value = item.get(required)
+            if not isinstance(value, str) or not value.strip():
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    f"Interface entry is missing required field {required}.",
+                    {"field": f"interfaces[{index}].{required}"},
+                )
+        try:
+            ip_version = ip_address(item["ip"]).version
+            gateway_version = ip_address(item["gateway"]).version
+        except (AddressValueError, ValueError) as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Interface ip or gateway is not a valid IP address.",
+                {"field": f"interfaces[{index}]", "ip": item.get("ip"), "gateway": item.get("gateway")},
+            ) from exc
+        if ip_version != gateway_version:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Interface ip and gateway must use the same IP version.",
+                {"field": f"interfaces[{index}]", "ip": item["ip"], "gateway": item["gateway"]},
+            )
+
+
+def _validate_template_name(value: Any, *, field: str) -> str:
+    if not isinstance(value, str) or not TEMPLATE_RE.fullmatch(value):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"{field} must match ^[a-z0-9_-]+$.",
+            {"field": field, "actual": value},
+        )
+    return value
+
+
+def _validate_ports_list(value: Any) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ports must be a non-empty list.",
+            {"field": "ports"},
+        )
+    ports: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each port entry must be a non-empty string.",
+                {"field": "ports", "actual": item},
+            )
+        ports.append(item)
+    return ports
+
+
+def _validate_port_int(field: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        try:
+            value = int(value)
+        except (TypeError, ValueError) as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                f"{field} must be an integer port number.",
+                {"field": field, "actual": value},
+            ) from exc
+    if value < 0 or value > 65535:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"{field} must be between 0 and 65535.",
+            {"field": field, "actual": value},
+        )
+    return value
+
+
+def _validate_positive_int(field: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        try:
+            value = int(value)
+        except (TypeError, ValueError) as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                f"{field} must be a positive integer.",
+                {"field": field, "actual": value},
+            ) from exc
+    if value <= 0:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"{field} must be a positive integer.",
+            {"field": field, "actual": value},
+        )
+    return value
+
+
+def _validate_min_int(field: str, value: Any, *, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        try:
+            value = int(value)
+        except (TypeError, ValueError) as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                f"{field} must be an integer.",
+                {"field": field, "actual": value},
+            ) from exc
+    if value < minimum:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"{field} must be >= {minimum}.",
+            {"field": field, "actual": value, "minimum": minimum},
+        )
+    return value
+
+
+def _validate_ip_pair(ip_version: str, src_ip: Any, dst_ip: Any) -> None:
+    expected = 6 if ip_version == "ipv6" else 4
+    src_present = src_ip is not None
+    dst_present = dst_ip is not None
+    if src_present and dst_present:
+        try:
+            src_version = ip_address(src_ip).version
+            dst_version = ip_address(dst_ip).version
+        except (AddressValueError, ValueError) as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "src_ip or dst_ip is not a valid IP address.",
+                {"src_ip": src_ip, "dst_ip": dst_ip},
+            ) from exc
+        if src_version != dst_version:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "src_ip and dst_ip must use the same IP version.",
+                {"src_ip": src_ip, "dst_ip": dst_ip},
+            )
+        if src_version != expected:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "src_ip and dst_ip do not match ip_version.",
+                {"ip_version": ip_version, "src_ip": src_ip, "dst_ip": dst_ip},
+            )
+    elif ip_version == "ipv6":
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "IPv6 traffic requires both src_ip and dst_ip.",
+            {"ip_version": ip_version},
+        )
+    elif src_present or dst_present:
+        address = src_ip if src_present else dst_ip
+        try:
+            actual = ip_address(address).version
+        except (AddressValueError, ValueError) as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "src_ip or dst_ip is not a valid IP address.",
+                {"address": address},
+            ) from exc
+        if actual != expected:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "src_ip or dst_ip does not match ip_version.",
+                {"ip_version": ip_version, "address": address},
+            )
+
+
+def _require_payload_str(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"Required field {key} is missing or empty.",
+            {"field": key},
+        )
+    return value

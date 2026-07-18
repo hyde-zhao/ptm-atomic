@@ -2,6 +2,7 @@ schema_version: "1.1"
 op_id: tg_verify_traffic_loss
 device_type: tg
 description: Verify TRex port statistics against a maximum allowed traffic loss ratio.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_verify_traffic_loss
 parameters:
   ports:
     type: list
