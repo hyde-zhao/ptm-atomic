@@ -2,6 +2,7 @@ schema_version: "1.1"
 op_id: tg_config_interface
 device_type: tg
 description: Configure TRex IPv4 or IPv6 interfaces and learn gateway MAC addresses with ARP or Neighbor Discovery.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_config_interface
 parameters:
   interfaces:
     type: list
