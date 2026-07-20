@@ -57,9 +57,7 @@ def build_policy_route_payload(
     action: int = 1,
     config_source: int = 0,
 ) -> dict[str, Any]:
-    _validate_non_empty("source_network", source_network)
     _validate_non_empty("dst_network", dst_network)
-    _validate_non_empty("in_interface", in_interface)
     route_type = _validate_route_type(route_type)
     next_hop_ip = (next_hop_ip or "").strip()
     outgoing_interface = (outgoing_interface or "").strip()
