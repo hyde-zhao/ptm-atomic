@@ -1,0 +1,176 @@
+schema_version: "1.0"
+adapter_id: trex.default
+device_type: tg
+profile_family: trex
+description: Public non-sensitive TRex trex-api HTTP shape profile for external script generators.
+operations:
+  tg_config_interface:
+    atom_ref: atoms/tg/tg_config_interface.yaml
+    intent: Build a TRex interface configuration request that sets port IPs and learns gateway MACs via ARP or Neighbor Discovery.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_config_interface
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        interfaces: "{{ params.interfaces }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-config-interface-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_apply_traffic_template:
+    atom_ref: atoms/tg/tg_apply_traffic_template.yaml
+    intent: Build a TRex traffic template apply request that generates a native TRex YAML template on the trex-api service.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_apply_traffic_template
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        template: "{{ params.template }}"
+        tx_port: "{{ params.tx_port }}"
+        rx_port: "{{ params.rx_port }}"
+        ip_version: "{{ params.ip_version }}"
+        l4_protocol: "{{ params.l4_protocol }}"
+        l4_sport: "{{ params.l4_sport }}"
+        l4_dport: "{{ params.l4_dport }}"
+        traffic_mode: "{{ params.traffic_mode }}"
+        rate: "{{ params.rate }}"
+        count: "{{ params.count }}"
+        frame_size: "{{ params.frame_size }}"
+        vlan: "{{ params.vlan }}"
+        src_ip: "{{ params.src_ip }}"
+        dst_ip: "{{ params.dst_ip }}"
+        src_mac: "{{ params.src_mac }}"
+        dst_mac: "{{ params.dst_mac }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-apply-template-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_start_traffic_stream:
+    atom_ref: atoms/tg/tg_start_traffic_stream.yaml
+    intent: Build a TRex runtime stream start request from a predefined traffic template.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_start_traffic_stream
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        ports: "{{ params.ports }}"
+        txport: "{{ params.txport }}"
+        rxport: "{{ params.rxport }}"
+        template: "{{ params.template }}"
+        name: "{{ params.name }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-start-stream-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_verify_traffic_loss:
+    atom_ref: atoms/tg/tg_verify_traffic_loss.yaml
+    intent: Build a TRex port-stat loss verification request against a maximum allowed loss ratio.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_verify_traffic_loss
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        ports: "{{ params.ports }}"
+        txport: "{{ params.txport }}"
+        rxport: "{{ params.rxport }}"
+        name: "{{ params.name }}"
+        max_loss: "{{ params.max_loss }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-verify-loss-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_stop_traffic_stream:
+    atom_ref: atoms/tg/tg_stop_traffic_stream.yaml
+    intent: Build a TRex runtime stream stop request that removes the stream and cleans its runtime configuration.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_stop_traffic_stream
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        ports: "{{ params.ports }}"
+        txport: "{{ params.txport }}"
+        rxport: "{{ params.rxport }}"
+        name: "{{ params.name }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-stop-stream-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_delete_traffic_template:
+    atom_ref: atoms/tg/tg_delete_traffic_template.yaml
+    intent: Build a TRex traffic template delete request that removes a template when no runtime stream uses it.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_delete_traffic_template
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        template: "{{ params.template }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-delete-template-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.

@@ -217,6 +217,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_config_transfer as run_config_transfer
     from atomic_ops.commands import run_reboot as run_reboot
     from atomic_ops.commands import run_ha as run_ha
+    from atomic_ops.commands import run_trex as run_trex
 
     return (
         CommandGroup(
@@ -273,6 +274,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_config_transfer.build_subtree(),
         *run_reboot.build_subtree(),
         *run_ha.build_subtree(),
+        *run_trex.build_subtree(),
     )
 
 

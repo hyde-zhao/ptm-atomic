@@ -2,6 +2,7 @@ schema_version: "1.1"
 op_id: tg_stop_traffic_stream
 device_type: tg
 description: Stop a TRex traffic stream and clean its runtime stream configuration.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_stop_traffic_stream
 parameters:
   ports:
     type: list
