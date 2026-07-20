@@ -2,6 +2,7 @@ schema_version: "1.1"
 op_id: tg_delete_traffic_template
 device_type: tg
 description: Delete a TRex traffic template when no runtime stream uses it.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_delete_traffic_template
 parameters:
   template:
     type: string

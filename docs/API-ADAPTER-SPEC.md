@@ -8,6 +8,7 @@
 | v0.2 | 2026-05-19 | Codex | Align policy-route adapter with executable NGFW runner contract. |
 | v0.3 | 2026-05-20 | Codex | Add OSPFv2 method-level adapter operations for config, query, and delete. |
 | v0.4 | 2026-05-20 | Codex | Add OSPFv3 and BFD method-level adapter operations. |
+| v0.5 | 2026-07-17 | meta-dev | Add trex.default adapter profile for tg TRex operations. |
 
 ## Purpose
 
@@ -35,6 +36,9 @@ adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_policy_ro
 | `ptm-atomic adapter fw_config_ospfv2_global` | Reads the synced cache and shows an OSPFv2 adapter operation. |
 | `ptm-atomic adapter fw_config_ospfv3_global` | Reads the synced cache and shows an OSPFv3 adapter operation. |
 | `ptm-atomic adapter fw_config_bfd_global` | Reads the synced cache and shows a BFD adapter operation. |
+| `adapters/trex/default.yaml` | Defines the TRex default profile for tg traffic-generator operations. |
+| `atoms/tg/tg_config_interface.yaml` | References the TRex config-interface profile operation through `adapter_contract_ref`. |
+| `ptm-atomic adapter tg_config_interface` | Reads the synced cache and shows the TRex config-interface adapter operation. |
 | `scripts/validate_adapter_profiles.py` | Checks profile schema validity and atom reference integrity. |
 | `scripts/security_gate_check.py` | Includes `adapters/` in the default read-only security scan and performs structured adapter sensitive-content checks. |
 
@@ -151,6 +155,21 @@ OSPFv2 operations are represented one HTTP method at a time because adapter sche
 
 GET entries keep `payload_template: {}` to satisfy the schema while the runner sends no JSON body. Interface GET calls `/api/v1/intf` without filters and returns all interfaces. Interface DELETE and OSPFv2/OSPFv3 interface DELETE entries use `?id=<interface>` and send no body. Network DELETE entries use the id-only JSON shape `{"id": "<id>"}`. Interface batch deletion is modeled separately as `POST /api/v1/batch`.
 
+## TRex Profile
+
+The `adapters/trex/default.yaml` profile maps the six `tg` traffic-generator operations to the trex-api HTTP service. Unlike the NGFW profile, trex-api exposes a single dispatch endpoint `POST /api/v1/ops/{op_id}` for every operation (including verify and delete), and success is decided by the response `OperationEnvelope` (`{op_id, status, data, error_type, diag_snapshot_ref}`) rather than the HTTP status code, which stays `200` even on failure. The service is unauthenticated, so the profile declares a placeholder `external_credential_ref` auth entry and the runner sends no credential header at runtime.
+
+| Operation | Method | Path | Payload |
+|---|---|---|---|
+| `tg_config_interface` | `POST` | `/api/v1/ops/tg_config_interface` | `interfaces` array |
+| `tg_apply_traffic_template` | `POST` | `/api/v1/ops/tg_apply_traffic_template` | flat template fields (`template`, `tx_port`, `rx_port`, `l4_*`, `rate`, ...) |
+| `tg_start_traffic_stream` | `POST` | `/api/v1/ops/tg_start_traffic_stream` | flat stream fields (`ports`, `txport`, `rxport`, `template`, `name`) |
+| `tg_verify_traffic_loss` | `POST` | `/api/v1/ops/tg_verify_traffic_loss` | flat stream fields + `max_loss` |
+| `tg_stop_traffic_stream` | `POST` | `/api/v1/ops/tg_stop_traffic_stream` | flat stream fields |
+| `tg_delete_traffic_template` | `POST` | `/api/v1/ops/tg_delete_traffic_template` | `template` |
+
+The runner reads the trex-api base URL from `--base-url` (for example `http://10.0.0.1:8000`) and does not consume the NGFW session file. On a failed envelope the runner maps `error_type` to a stable CLI error code: `INVALID_PARAM` / `RESOURCE_NOT_FOUND` / `STATE_MISMATCH` -> `RUNNER_VALIDATION_FAILED`, `RESOURCE_CONFLICT` -> `RUNNER_CONFIG_REJECTED`, `INTERNAL_ERROR` -> `RUNNER_RESPONSE_INVALID`, `DEVICE_UNREACHABLE` / `TIMEOUT` -> `RUNNER_DEVICE_UNREACHABLE`.
+
 ## Validation
 
 Run the adapter profile check together with the normal repository checks:
@@ -162,6 +181,7 @@ uv run ptm-atomic adapter fw_config_ospfv2_global
 uv run ptm-atomic adapter fw_delete_ospfv2_network
 uv run ptm-atomic adapter fw_config_ospfv3_global
 uv run ptm-atomic adapter fw_config_bfd_global
+uv run ptm-atomic adapter tg_config_interface
 uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/security_gate_check.py
 ```
