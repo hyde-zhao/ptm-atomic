@@ -34,7 +34,7 @@ def build_subtree() -> tuple[CommandSpec, ...]:
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--source-network", required=False, default="", help="Policy-route source address object or address-group name (empty = any)."
+        "--source-network", required=False, default="any", help="Policy-route source address object or address-group name (default: any; empty normalized to any)."
     )
     parser.add_argument("--source-network-is-group", action="store_true", help="Treat --source-network as an address-group name.")
     parser.add_argument("--dst-network", default="any", help="Policy-route destination address object or address-group name.")
