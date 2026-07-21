@@ -34,13 +34,13 @@ def build_subtree() -> tuple[CommandSpec, ...]:
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--source-network", required=True, help="Policy-route source address object or address-group name."
+        "--source-network", required=False, default="any", help="Policy-route source address object or address-group name (default: any; empty normalized to any)."
     )
     parser.add_argument("--source-network-is-group", action="store_true", help="Treat --source-network as an address-group name.")
     parser.add_argument("--dst-network", default="any", help="Policy-route destination address object or address-group name.")
     parser.add_argument("--dst-network-is-group", action="store_true", help="Treat --dst-network as an address-group name.")
     parser.add_argument("--next-hop-ip", help="Policy-route forwarding next-hop IP address.")
-    parser.add_argument("--in-interface", required=True, help="Policy-route incoming interface.")
+    parser.add_argument("--in-interface", required=False, default="any", help="Policy-route incoming interface (default: any).")
     parser.add_argument("--outgoing-interface", default="", help="Policy-route outgoing interface.")
     parser.add_argument("--service", default="any", help="Policy-route service object/name.")
     parser.add_argument("--service-is-group", action="store_true", help="Treat --service as a service-group name.")
