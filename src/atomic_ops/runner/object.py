@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,7 @@ def build_address_object_payload(
     mask: str,
     object_desc: str | None,
 ) -> dict[str, Any]:
-    _validate_object_name(object_name)
+    object_name = _validate_object_name(object_name)
     _validate_ipaddr(ipaddr)
     _validate_ipv4_mask(mask)
     return {
@@ -148,19 +149,39 @@ def execute_address_object(
     }
 
 
-def _validate_object_name(value: str) -> None:
+# 设备对象名规则：1-31 个字符，由大小写字母/数字/中文/连接符(-)/点(.)构成；
+# 名称不能是 "." 或 ".." 单独出现；不能以 "IDMC-" 开头。
+# 真相源：ptm-te 实测设备规则。原 isalnum() 实现拒绝点(.)、放行 Unicode 非 ASCII、缺长度/前缀校验。
+_OBJ_NAME_RE = re.compile(r"^[A-Za-z0-9一-鿿.\-]{1,31}$")
+
+
+def _validate_object_name(value: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "Address-object name is required.",
             {"field": "object_name"},
         )
-    if not value.replace("-", "").isalnum():
+    name = value.strip()
+    if name in {".", ".."}:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
-            "Address-object name may contain only letters, numbers, and hyphens.",
-            {"field": "object_name"},
+            "Address-object name must not be '.' or '..'.",
+            {"field": "object_name", "value": value},
         )
+    if name.startswith("IDMC-"):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Address-object name must not start with 'IDMC-'.",
+            {"field": "object_name", "value": value},
+        )
+    if not _OBJ_NAME_RE.match(name):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Address-object name must be 1-31 chars of letters, digits, Chinese, hyphen or dot.",
+            {"field": "object_name", "value": value},
+        )
+    return name
 
 
 def _validate_ipaddr(value: str) -> None:

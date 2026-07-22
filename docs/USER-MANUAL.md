@@ -134,6 +134,34 @@ ptm-atomic adapter fw_config_policy_route --format json
 
 `ptm-atomic run` 支持六个操作族，默认 dry-run，必须显式 `--execute` 才发真实请求。
 
+### 执行审计日志（exec-log）
+
+仅 `--execute` 调用（含成功与错误）写本地执行审计日志，dry-run 不记。每次 execute 调用生成一个 `run_id`，日志按 `run_id` 分目录隔离，避免单文件 append 累积。日志路径与 atom 缓存分开（日志是运行历史，不应被缓存清理误删）：
+
+| 平台 | 路径 |
+|------|------|
+| Linux/macOS | `~/.local/state/ptm-atomic/runs/<run_id>/exec-log.jsonl` |
+| Windows | `%LOCALAPPDATA%\ptm-atomic\runs\<run_id>\exec-log.jsonl` |
+
+调用方定位日志：
+
+- 成功：返回 envelope 的 `metadata.exec_log`，含 `run_id` 与 `path`。
+- 错误：stderr 错误对象含 `run_id` 与 `exec_log_path`，透传的 `err_code` / `err_msg` 同步写入日志。
+
+日志记录字段（按需出现）：
+
+| 字段 | 含义 |
+|------|------|
+| `run_id` | 本次 execute 调用唯一标识 |
+| `timestamp` | 写入时刻（ISO-8601 毫秒） |
+| `op_id` | 原子操作 id |
+| `mode` | 固定 `execute` |
+| `status` | `success` 或 `error` |
+| `http_status` | 设备 HTTP 状态码 |
+| `err_code` / `err_msg` | 设备透传错误码与信息（错误时） |
+| `error_type` | CLI 错误类型（错误时，如 `RUNNER_CONFIG_REJECTED`） |
+| `duration_ms` | 调用耗时（毫秒） |
+
 ### 操作族与新命令格式
 
 | 旧 op_id | 新命令 |
@@ -222,7 +250,7 @@ ptm-atomic run fw_config_object \
   --execute
 ```
 
-地址对象 runner 调用 `POST /api/v1/ippool`。设备对象名只允许字母、数字和连字符；不要使用下划线或 CIDR 字符串作为对象名。
+地址对象 runner 调用 `POST /api/v1/ippool`。设备对象名规则：1-31 个字符，由大小写字母、数字、中文、连接符(-)、点(.)构成；名称不能是 `.` 或 `..` 单独出现；不能以 `IDMC-` 开头；不接受下划线，也不要用 CIDR 字符串作为对象名。
 
 地址对象更新 dry-run 与真实执行（`PUT /api/v1/ippool`，body 含顶层 `id` 与 `val`，`id` 与 `val.name` 指向同一对象）：
 
