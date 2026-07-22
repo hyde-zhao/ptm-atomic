@@ -74,6 +74,25 @@ def write_error(error: CliError, output_format: str) -> int:
     """Write a CLI error object to stderr and return its fixed exit code."""
 
     payload = error.to_dict()
+    # run execute 错误：写 exec-log 审计日志（含透传的 err_code/err_msg），
+    # 并在 payload 标注 run_id 供调用方定位日志文件。非 run 命令的 contextvar 未设，不记。
+    from atomic_ops.runner.exec_log import current_run, run_log_path, write_exec_log
+
+    ctx = current_run()
+    if ctx is not None and ctx.mode == "execute":
+        details = error.details if isinstance(error.details, dict) else {}
+        write_exec_log(
+            run_id=ctx.run_id,
+            op_id=details.get("op_id"),
+            mode=ctx.mode,
+            status="error",
+            status_code=details.get("status_code"),
+            err_code=details.get("err_code"),
+            err_msg=details.get("err_msg"),
+            error_type=error.error_code,
+        )
+        payload["run_id"] = ctx.run_id
+        payload["exec_log_path"] = str(run_log_path(ctx.run_id))
     if output_format == "json":
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=sys.stderr)
     else:

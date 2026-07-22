@@ -402,6 +402,46 @@ class PolicyRoutePayloadTests(unittest.TestCase):
 
         self.assertEqual(summary, {})
 
+    def test_normalizes_empty_source_in_interface_dst_network_to_any(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="",
+            source_network_is_group=False,
+            dst_network="",
+            dst_network_is_group=False,
+            next_hop_ip="2.2.2.2",
+            in_interface="",
+            outgoing_interface="",
+            service="any",
+            weight=1,
+            time_obj="",
+        )
+        self.assertEqual(payload["val"]["source_network"], "any")
+        self.assertEqual(payload["val"]["in_interface"], "any")
+        self.assertEqual(payload["val"]["dst_network"], "any")
+
+    def test_extract_created_from_config_response(self) -> None:
+        from atomic_ops.runner.policy_route import _extract_policy_route_summary
+
+        # 设备未显式返回 created -> 默认 True（成功 POST 即新建）
+        summary = _extract_policy_route_summary(
+            "fw_config_policy_route", {"val": {"id": 2}, "msg": "success"}
+        )
+        self.assertEqual(summary["policy_route_id"], 2)
+        self.assertTrue(summary["created"])
+
+        # 设备显式返回 created -> 用设备值
+        summary2 = _extract_policy_route_summary(
+            "fw_config_policy_route", {"val": {"id": 3}, "created": False}
+        )
+        self.assertFalse(summary2["created"])
+
+    def test_update_response_has_no_created(self) -> None:
+        from atomic_ops.runner.policy_route import _extract_policy_route_summary
+
+        summary = _extract_policy_route_summary("fw_update_policy_route", {"val": {"id": 5}})
+        self.assertEqual(summary["policy_route_id"], 5)
+        self.assertNotIn("created", summary)
+
 
 class AddressObjectPayloadTests(unittest.TestCase):
     def test_build_ipv4_address_object_payload(self) -> None:
@@ -427,6 +467,44 @@ class AddressObjectPayloadTests(unittest.TestCase):
             )
 
         self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_accepts_address_object_name_with_dot_chinese_hyphen(self) -> None:
+        for name in ("OBJ-SRC-192", "name.1", "测试对象", "a"):
+            payload = build_address_object_payload(
+                object_name=name,
+                ipaddr="192.168.0.0",
+                mask="16",
+                object_desc=None,
+            )
+            self.assertEqual(payload["val"]["name"], name)
+
+    def test_rejects_address_object_name_too_long(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_address_object_payload(
+                object_name="a" * 32,
+                ipaddr="192.168.0.0",
+                mask="16",
+                object_desc=None,
+            )
+
+    def test_rejects_address_object_name_dot_or_double_dot(self) -> None:
+        for name in (".", ".."):
+            with self.assertRaises(RunnerError):
+                build_address_object_payload(
+                    object_name=name,
+                    ipaddr="192.168.0.0",
+                    mask="16",
+                    object_desc=None,
+                )
+
+    def test_rejects_address_object_name_with_idmc_prefix(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_address_object_payload(
+                object_name="IDMC-xxx",
+                ipaddr="192.168.0.0",
+                mask="16",
+                object_desc=None,
+            )
 
 
 class Ospfv2PayloadTests(unittest.TestCase):

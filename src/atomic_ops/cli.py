@@ -183,7 +183,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args, _unknown = parser.parse_known_args(argv)
     handler: Callable[[argparse.Namespace], int] = args.handler
-    return handler(args)
+    # run 命令 execute 模式：绑定 run 上下文供 exec-log 记录（dry-run 不记）。
+    from atomic_ops.runner.exec_log import bind_run_context, generate_run_id, reset_run_context
+
+    token = None
+    if getattr(args, "execute", False):
+        token = bind_run_context(generate_run_id(), "execute")
+    try:
+        return handler(args)
+    finally:
+        if token is not None:
+            reset_run_context(token)
 
 
 if __name__ == "__main__":

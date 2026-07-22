@@ -57,11 +57,13 @@ def build_policy_route_payload(
     action: int = 1,
     config_source: int = 0,
 ) -> dict[str, Any]:
-    # source_network 空串/None 归一化为 "any"（全 any 匹配场景）。NGFW 不接受空串
-    # source_network（eObjParse "被引用对象不存在"），需显式 "any"（与 dst_network 一致）。
-    # 真相源：M4-01-08 全 any 用例实测，default="" 导致 payload source_network="" 被 NGFW 拒绝。
-    source_network = (source_network or "").strip() or "any"
-    _validate_non_empty("dst_network", dst_network)
+    # 全 any 匹配场景：source_network / in_interface / dst_network 空串/None 统一归一化为 "any"。
+    # NGFW 不接受空串（eObjParse "被引用对象不存在"），需显式 "any"。
+    # 真相源：M4-01-08 全 any 用例实测，default="" 导致 payload 空串被 NGFW 拒绝。
+    # commit 2fd9b04 仅修了 source_network，in_interface/dst_network 漏修，此处补齐对称归一化。
+    source_network = _normalize_any("source_network", source_network)
+    in_interface = _normalize_any("in_interface", in_interface)
+    dst_network = _normalize_any("dst_network", dst_network)
     route_type = _validate_route_type(route_type)
     next_hop_ip = (next_hop_ip or "").strip()
     outgoing_interface = (outgoing_interface or "").strip()
@@ -332,6 +334,15 @@ def _extract_policy_route_summary(op_id: str, response_payload: Any) -> dict[str
         val = response_payload.get("val") if isinstance(response_payload, dict) else None
         if isinstance(val, dict):
             summary["policy_route_id"] = val.get("id")
+        # config 是新建语义：到达此处说明 POST 成功（重复创建已被 err_code/err_msg 透传拦截）。
+        # 兑现 atom returns.data.created 契约，供外部调用方判断是否需要 rollback。
+        # 设备未显式返回 created 时默认 True（成功 POST 即新建）；update 不是新建，不设 created。
+        if op_id == "fw_config_policy_route":
+            summary["created"] = (
+                response_payload.get("created", True)
+                if isinstance(response_payload, dict)
+                else True
+            )
     return summary
 
 
@@ -418,3 +429,13 @@ def _validate_non_empty(field: str, value: str) -> None:
             "Required policy-route field is empty.",
             {"field": field},
         )
+
+
+def _normalize_any(field: str, value: str | None) -> str:
+    """空串/None 归一化为 "any"（全 any 匹配场景）。
+
+    NGFW 不接受空串 source_network/in_interface/dst_network，需显式 "any"。
+    CLI default="any" 只覆盖省略参数；显式传空串仍需在此归一化。
+    """
+    normalized = (value or "").strip()
+    return normalized or "any"
