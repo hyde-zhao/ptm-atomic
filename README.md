@@ -96,7 +96,8 @@
 ### 安装或临时运行 CLI
 
 ```bash
-uv tool install .
+# 重装前用 `git rev-parse HEAD` 确认当前分支/ref 含全部能力；--no-cache 避免命中旧构建产物
+uv tool install . --no-cache
 ptm-atomic --version
 ```
 
@@ -163,6 +164,15 @@ ptm-atomic run --base-url https://<device-management-ip> ospfv3 bfd verify-sessi
 ```
 
 旧格式 `ptm-atomic run <op_id>` 仍然兼容，但会显示 deprecation warning。迁移指引：`ptm-atomic run --help` 查看所有可用操作族。
+
+### 执行审计日志
+
+仅 `--execute` 调用（含成功与错误）会写本地执行审计日志（JSONL，每行一条记录），dry-run 不记。日志按 `run_id` 分目录隔离，与 atom 缓存（`~/.cache/ptm-atomic/repo/`）分开存放：
+
+- Linux/macOS：`~/.local/state/ptm-atomic/runs/<run_id>/exec-log.jsonl`
+- Windows：`%LOCALAPPDATA%\ptm-atomic\runs\<run_id>\exec-log.jsonl`
+
+调用方定位日志：成功时从返回 envelope 的 `metadata.exec_log`（含 `run_id` 与 `path`）；错误时从 stderr 错误对象的 `run_id` / `exec_log_path`。字段：`run_id`、`timestamp`、`op_id`、`mode`、`status`、`http_status`、`err_code`、`err_msg`、`error_type`、`duration_ms`（按需出现）。
 
 ## 5. CLI 命令
 

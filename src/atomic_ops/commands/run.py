@@ -863,7 +863,39 @@ def _to_run_envelope(payload: dict[str, Any]) -> dict[str, Any]:
             metadata["rollback_context"] = rollback_context
     if metadata:
         envelope["metadata"] = metadata
+    _record_exec_log(envelope, op_id, status, data)
     return envelope
+
+
+def _record_exec_log(
+    envelope: dict[str, Any],
+    op_id: str | None,
+    status: str | None,
+    data: dict[str, Any],
+) -> None:
+    """execute 且成功时写 exec-log，envelope 输出 run_id/path 供调用方获取。
+
+    dry-run 不记；错误由 write_error 记录，不在此重复。
+    """
+    from atomic_ops.runner.exec_log import current_run, run_log_path, write_exec_log
+
+    ctx = current_run()
+    if ctx is None or ctx.mode != "execute":
+        return
+    if status != "success":
+        return
+    path = write_exec_log(
+        run_id=ctx.run_id,
+        op_id=op_id,
+        mode=ctx.mode,
+        status="success",
+        status_code=data.get("status_code"),
+    )
+    metadata = envelope.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        envelope["metadata"] = metadata
+    metadata["exec_log"] = {"run_id": ctx.run_id, "path": str(path)}
 
 
 def _load_rollback_context(op_id: str, result_data: dict[str, Any]) -> dict[str, Any] | None:
