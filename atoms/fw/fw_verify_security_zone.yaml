@@ -1,0 +1,58 @@
+schema_version: "1.1"
+op_id: fw_verify_security_zone
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_security_zone
+description: Query NGFW security zones.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: security_zone
+side_effect: observation
+returns:
+  status: success
+  data:
+    verification_summary_ref: "<security-zone-verification-summary-ref>"
+    verification_status: passed
+    existence: true
+    security_zone_name: "<security-zone-name>"
+    security_zone_names: "<security-zone-name-list>"
+    count: 0
+    full_config: "<security-zone-full-config-ref>"
+    refcnt: 0
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: security_zone_query_returns_all_zones
+      input_ref: "<security-zone-query-result-ref>"
+      expected_result: All security zones are returned including the read-only "any" zone.
+  summary_ref: "<security-zone-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - Security zone query result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - security_zone
+  - verification
+aliases:
+  - zone
+  - sfarea
+since_version: "1.4.0"
