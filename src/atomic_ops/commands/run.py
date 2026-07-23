@@ -73,6 +73,12 @@ INTERFACE_OPS = (
     "fw_delete_interface",
     "fw_delete_batch_interface",
 )
+SECURITY_ZONE_OPS = (
+    "fw_config_security_zone",
+    "fw_update_security_zone",
+    "fw_delete_security_zone",
+    "fw_verify_security_zone",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_config_object",
@@ -80,6 +86,7 @@ SUPPORTED_OPS = (
     *INTERFACE_OPS,
     *OSPFV2_OPS,
     *OSPFV3_BFD_OPS,
+    *SECURITY_ZONE_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -129,6 +136,10 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_verify_bfd_global": ("ospfv3", "bfd", "verify-global"),
     "fw_verify_bfd_session": ("ospfv3", "bfd", "verify-session"),
     "fw_capture_bfd_log": ("ospfv3", "bfd", "verify-session"),
+    "fw_config_security_zone": ("security-zone", "config"),
+    "fw_update_security_zone": ("security-zone", "update"),
+    "fw_delete_security_zone": ("security-zone", "delete"),
+    "fw_verify_security_zone": ("security-zone", "verify"),
 }
 
 # 共享参数名列表（子命令通过 getattr 从父解析器结果中读取）
@@ -206,6 +217,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_auth as run_auth
     from atomic_ops.commands import run_object as run_object
     from atomic_ops.commands import run_policy_route as run_policy_route
+    from atomic_ops.commands import run_security_zone as run_security_zone
     from atomic_ops.commands import run_acl_policy as run_acl_policy
     from atomic_ops.commands import run_acl_policy_group as run_acl_policy_group
     from atomic_ops.commands import run_interface as run_interface
@@ -236,6 +248,12 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="Policy-based routing operations.",
             description="Policy-route configuration, update, delete, verify, and priority operations.",
             children=run_policy_route.build_subtree(),
+        ),
+        CommandGroup(
+            name="security-zone",
+            help="Security zone operations.",
+            description="Security zone configuration, update, delete, and verify operations.",
+            children=run_security_zone.build_subtree(),
         ),
         CommandGroup(
             name="acl-policy",
@@ -332,6 +350,8 @@ def _dispatch_legacy(op_id: str, args: argparse.Namespace) -> int:
             payload = _run_policy_route_legacy(args)
         elif op_id in INTERFACE_OPS:
             payload = _run_interface_legacy(args)
+        elif op_id in SECURITY_ZONE_OPS:
+            payload = _run_security_zone_legacy(args)
         elif op_id in OSPFV2_OPS:
             payload = _run_ospfv2_legacy(args)
         elif op_id in OSPFV3_BFD_OPS:
@@ -581,6 +601,61 @@ def _run_interface_legacy(args: argparse.Namespace) -> dict[str, Any]:
             timeout=float(getattr(args, "timeout")),
         )
     return execute_interface(
+        op_id=op_id,
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        payload=payload,
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout")),
+    )
+
+
+def _run_security_zone_legacy(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.security_zone import (
+        build_security_zone_create_payload,
+        build_security_zone_delete_payload,
+        build_security_zone_dry_run,
+        build_security_zone_update_payload,
+        execute_security_zone,
+    )
+
+    op_id = getattr(args, "op_id")
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    payload: dict[str, Any] | None
+
+    if op_id == "fw_config_security_zone":
+        _require_arg(args, "name")
+        payload = build_security_zone_create_payload(
+            name=getattr(args, "name"),
+            desc=getattr(args, "desc", ""),
+            interfaces=_arg_list(args, "interfaces"),
+        )
+    elif op_id == "fw_update_security_zone":
+        _require_arg(args, "name")
+        payload = build_security_zone_update_payload(
+            name=getattr(args, "name"),
+            desc=getattr(args, "desc", ""),
+            interfaces=_arg_list(args, "interfaces"),
+            refcnt=int(getattr(args, "refcnt", 0)),
+        )
+    elif op_id == "fw_delete_security_zone":
+        _require_arg(args, "name")
+        payload = build_security_zone_delete_payload(name=_single_arg(args, "name") or "")
+    else:
+        payload = None
+
+    if not getattr(args, "execute"):
+        return build_security_zone_dry_run(
+            op_id=op_id,
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            payload=payload,
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout")),
+        )
+    return execute_security_zone(
         op_id=op_id,
         base_url=getattr(args, "base_url"),
         session_file=session_file,
