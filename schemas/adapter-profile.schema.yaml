@@ -60,8 +60,6 @@ $defs:
     required:
       - atom_ref
       - intent
-      - request
-      - response
       - safety
     properties:
       atom_ref:
@@ -70,6 +68,18 @@ $defs:
       intent:
         type: string
         minLength: 1
+      transport:
+        type: string
+        enum:
+          - http
+          - ssh
+          - telnet
+          - cli
+        default: http
+        description: >-
+          Transport this profile operation maps to. Must match the atom's
+          transport field. http operations require the request block;
+          ssh/telnet/cli operations require the shell block.
       request:
         type: object
         additionalProperties: false
@@ -118,6 +128,37 @@ $defs:
           payload_template:
             type: object
             additionalProperties: true
+      shell:
+        type: object
+        additionalProperties: false
+        description: >-
+          Shell command shape for ssh/telnet/cli transports. Required when
+          transport is ssh, telnet, or cli; forbidden for http. The runner
+          MUST shell-escape every {{param}} placeholder.
+        required:
+          - command_template
+          - success_pattern
+        properties:
+          command_template:
+            type: string
+            minLength: 1
+            description: >-
+              Shell command template with {{param}} placeholders. The runner
+              MUST shell-escape every placeholder; the profile MUST NOT pre-encode
+              shell metacharacters.
+          success_pattern:
+            type: string
+            minLength: 1
+            description: Regex matched against stdout/stderr to indicate success.
+          prompt_timeout_ms:
+            type: integer
+            minimum: 1
+          privilege_level:
+            type: string
+            enum:
+              - user
+              - enable
+              - configure
       response:
         type: object
         additionalProperties: false
@@ -152,3 +193,34 @@ $defs:
             items:
               type: string
               minLength: 1
+    allOf:
+      - if:
+          required:
+            - transport
+          properties:
+            transport:
+              enum:
+                - ssh
+                - telnet
+                - cli
+        then:
+          required:
+            - shell
+      - if:
+          required:
+            - transport
+          properties:
+            transport:
+              const: http
+        then:
+          required:
+            - request
+            - response
+      - if:
+          not:
+            required:
+              - transport
+        then:
+          required:
+            - request
+            - response

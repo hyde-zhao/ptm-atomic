@@ -167,6 +167,20 @@ properties:
       contract. The referenced profile describes endpoint and payload shape only;
       it does not contain device addresses, credentials, cookies, or production
       response data.
+  transport:
+    type: string
+    description: >-
+      Network transport used by the runner. Defaults to http. ssh, telnet, and
+      cli operations require a matching runner implementation and an adapter
+      profile entry whose transport field matches; they are not executed by the
+      default HTTP runner. Adding this field to existing v1.0/v1.1 HTTP atoms is
+      optional because http is the implicit default.
+    enum:
+      - http
+      - ssh
+      - telnet
+      - cli
+    default: http
   aliases:
     type: array
     description: >-
@@ -222,6 +236,7 @@ allOf:
         - required: ["post_verify"]
         - required: ["dry_run_supported"]
         - required: ["risk_level"]
+        - required: ["transport"]
     then:
       properties:
         schema_version:

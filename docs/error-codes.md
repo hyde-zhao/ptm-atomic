@@ -7,8 +7,8 @@ The contract has two layers:
 - Operation-level errors use `error_type` in atomic operation returns and validate findings.
 - CLI-level errors use `error_code` in the top-level CLI error object and have fixed process exit codes.
 
-The current runtime baseline contains exactly 23 error codes: 9 operation-level
-codes and 14 CLI-level codes. Repository scripts additionally use static check
+The current runtime baseline contains exactly 26 error codes: 9 operation-level
+codes and 17 CLI-level codes. Repository scripts additionally use static check
 exit semantics; those static check exits are not `ptm-atomic` CLI-level
 `error_code` values and do not represent real device execution failures.
 
@@ -48,6 +48,9 @@ CLI-level errors describe command execution failures. These are the only errors 
 | `RUNNER_RESPONSE_INVALID` | 47 | Runner received an unexpected device response shape. | Response is not JSON, JSON root is not an object, login page lacks the RSA public-key script, or an OSPFv2/OSPFv3/BFD GET returned a non-success status. | Capture sanitized diagnostics and verify firmware/API compatibility. | No |
 | `RUNNER_CONFIG_REJECTED` | 48 | Device rejected a runner configuration request. | Address object, policy route, OSPFv2, OSPFv3, or BFD POST/PUT/DELETE returned a non-success status. | Check session validity, object names, route references, entry ids, parameters, and device-side validation. | No |
 | `RUNNER_VALIDATION_FAILED` | 49 | Runner input failed local validation. | Missing required CLI argument, invalid base URL, invalid address object name, invalid IPv4/CIDR input, invalid OSPF metric/timer/page/size, missing update/delete id, or invalid weight. | Fix CLI parameters and retry dry-run first. | No |
+| `RUNNER_SHELL_CONNECT_FAILED` | 50 | SSH/Telnet/CLI connection to the device failed. | Network unreachable, auth rejected, host key mismatch, or terminal negotiation failure. | Check management reachability, credentials, and known-hosts; rerun login if session expired. | Yes |
+| `RUNNER_SHELL_COMMAND_TIMEOUT` | 51 | The shell command did not return a prompt within `timeout_ms`. | Device hung, interactive prompt not matched, or `success_pattern` never appeared. | Inspect the diagnostic snapshot, lengthen timeout, or fix the command template. | No |
+| `RUNNER_SHELL_UNEXPECTED_PROMPT` | 52 | Shell command returned an unexpected prompt or error banner. | Privilege level insufficient, command rejected by device, or console stuck in a submenu. | Check privilege level, command syntax, and device state; rerun from a clean prompt. | No |
 
 ## Static Repository Check Exit Semantics
 
@@ -160,9 +163,9 @@ To add or change a static repository check exit code:
 
 ## Review Checklist
 
-- The runtime total number of operation-level and CLI-level error codes is 14.
+- The runtime total number of operation-level and CLI-level error codes is 26.
 - Operation-level errors are listed separately from CLI-level errors.
-- The 5 CLI-level exit codes are exactly `21`, `22`, `23`, `24`, and `25`.
+- The CLI-level exit codes span `21`–`25` and `41`–`52`.
 - Static repository check exits `31`, `32`, and `33` are documented separately
   from CLI-level `error_code` values.
 - Process files such as `process/*` are workflow/internal artifacts ignored by source control policy; they are not shipped delivery docs for `ptm-atomic`.
