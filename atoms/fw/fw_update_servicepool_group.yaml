@@ -1,0 +1,101 @@
+schema_version: "1.1"
+op_id: fw_update_servicepool_group
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_servicepool_group
+description: Update an existing custom service pool group configuration contract for NGFW capacity.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be servicepool_group for this operation.
+  params:
+    type: json
+    required: true
+    description: Custom service pool group update with id (name) and a val envelope of mutable fields.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: servicepool_group
+  params:
+    id: atomicSvcGroup
+    val:
+      name: atomicSvcGroup
+      desc: atomic custom service pool group updated
+      servicepools:
+        - ntp
+        - ospf
+        - pop3
+        - smtp
+        - ssh
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: servicepool_group
+      applied_ref: "<servicepool-group-update-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+side_effect: state_mutation
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_batch_servicepool_group
+  snapshot_required: false
+  required_inputs:
+    - name
+  id_source: args
+  id_field: name
+  notes: The service pool group id is its name; rollback deletes via POST /api/v1/batch with DELETE /api/v1/servicepool/group.
+pre_snapshot:
+  op_id: fw_verify_servicepool_group
+  capture_fields:
+    - name
+    - existence
+post_verify:
+  op_id: fw_verify_servicepool_group
+  expected_state: present
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Custom service pool group updates can affect policy matching and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - The target service pool group name exists on the device.
+postconditions:
+  - Update result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - servicepool_group
+  - configuration
+aliases:
+  - service-group
+  - servicepool-group
+since_version: "1.8.0"

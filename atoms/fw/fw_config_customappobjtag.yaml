@@ -1,0 +1,111 @@
+schema_version: "1.1"
+op_id: fw_config_customappobjtag
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_customappobjtag
+description: Define a custom application tag configuration contract for NGFW capacity.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be customappobjtag for this operation.
+  params:
+    type: json
+    required: true
+    description: Custom application tag configuration with name_cn, desc, customflag and appobjkeys.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: customappobjtag
+  params:
+    name_cn: atomicAppTag
+    desc: atomic custom application tag
+    customflag: true
+    appobjkeys:
+      - appname: 3COM-TSMUX
+        appid: "2"
+      - appname: 914CG
+        appid: "4"
+      - appname: ACA-Services
+        appid: "5"
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: customappobjtag
+      applied_ref: "<customappobjtag-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+side_effect: state_mutation
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_batch_customappobjtag
+  snapshot_required: false
+  required_inputs:
+    - name_cn
+  id_source: args
+  id_field: name_cn
+  notes: The custom application tag id is its name_cn; rollback deletes via POST /api/v1/batch with DELETE /api/v1/customappobjtag.
+pre_snapshot:
+  op_id: fw_verify_customappobjtag
+  capture_fields:
+    - name_cn
+    - existence
+post_verify:
+  op_id: fw_verify_customappobjtag
+  expected_state: present
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Custom application-tag changes can affect application-aware policy matching and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk configuration contract is used.
+postconditions:
+  - Configuration result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - customappobjtag
+  - configuration
+aliases:
+  - application-tag
+  - custom-app-tag
+  - appobjtag
+since_version: "1.8.0"

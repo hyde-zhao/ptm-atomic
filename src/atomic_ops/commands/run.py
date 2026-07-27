@@ -79,6 +79,54 @@ SECURITY_ZONE_OPS = (
     "fw_delete_security_zone",
     "fw_verify_security_zone",
 )
+CUSTOMAPPOBJ_OPS = (
+    "fw_config_customappobj",
+    "fw_update_customappobj",
+    "fw_delete_customappobj",
+    "fw_delete_batch_customappobj",
+    "fw_verify_customappobj",
+)
+CUSTOMAPPOBJTAG_OPS = (
+    "fw_config_customappobjtag",
+    "fw_update_customappobjtag",
+    "fw_delete_customappobjtag",
+    "fw_delete_batch_customappobjtag",
+    "fw_verify_customappobjtag",
+)
+SERVICEPOOL_OPS = (
+    "fw_config_servicepool",
+    "fw_update_servicepool",
+    "fw_delete_servicepool",
+    "fw_delete_batch_servicepool",
+    "fw_verify_servicepool",
+    "fw_verify_servicepool_preset",
+    "fw_config_servicepool_group",
+    "fw_update_servicepool_group",
+    "fw_delete_servicepool_group",
+    "fw_delete_batch_servicepool_group",
+    "fw_verify_servicepool_group",
+)
+IPPOOL_GROUP_OPS = (
+    "fw_config_ippool_group",
+    "fw_update_ippool_group",
+    "fw_delete_ippool_group",
+    "fw_delete_batch_ippool_group",
+    "fw_verify_ippool_group",
+)
+IP6POOL_GROUP_OPS = (
+    "fw_config_ip6pool_group",
+    "fw_update_ip6pool_group",
+    "fw_delete_ip6pool_group",
+    "fw_delete_batch_ip6pool_group",
+    "fw_verify_ip6pool_group",
+)
+TIMEOBJECT_OPS = (
+    "fw_config_timeobject",
+    "fw_update_timeobject",
+    "fw_delete_timeobject",
+    "fw_delete_batch_timeobject",
+    "fw_verify_timeobject",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_config_object",
@@ -87,6 +135,12 @@ SUPPORTED_OPS = (
     *OSPFV2_OPS,
     *OSPFV3_BFD_OPS,
     *SECURITY_ZONE_OPS,
+    *CUSTOMAPPOBJ_OPS,
+    *CUSTOMAPPOBJTAG_OPS,
+    *SERVICEPOOL_OPS,
+    *IPPOOL_GROUP_OPS,
+    *IP6POOL_GROUP_OPS,
+    *TIMEOBJECT_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -216,6 +270,12 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     """构建 run 子命令树。每个操作族为一个 CommandGroup。"""
     from atomic_ops.commands import run_auth as run_auth
     from atomic_ops.commands import run_object as run_object
+    from atomic_ops.commands import run_customappobj as run_customappobj
+    from atomic_ops.commands import run_customappobjtag as run_customappobjtag
+    from atomic_ops.commands import run_servicepool as run_servicepool
+    from atomic_ops.commands import run_ippool_group as run_ippool_group
+    from atomic_ops.commands import run_ip6pool_group as run_ip6pool_group
+    from atomic_ops.commands import run_timeobject as run_timeobject
     from atomic_ops.commands import run_policy_route as run_policy_route
     from atomic_ops.commands import run_security_zone as run_security_zone
     from atomic_ops.commands import run_acl_policy as run_acl_policy
@@ -243,6 +303,42 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="Address object operations.",
             description="Address object configuration operations.",
             children=run_object.build_subtree(),
+        ),
+        CommandGroup(
+            name="app-obj",
+            help="Custom application object operations.",
+            description="Custom application object configuration, update, delete, and query operations.",
+            children=run_customappobj.build_subtree(),
+        ),
+        CommandGroup(
+            name="app-tag",
+            help="Custom application tag operations.",
+            description="Custom application tag configuration, update, delete, and query operations.",
+            children=run_customappobjtag.build_subtree(),
+        ),
+        CommandGroup(
+            name="service-pool",
+            help="Service pool and group operations.",
+            description="Service pool and service group configuration, update, delete, and query operations.",
+            children=run_servicepool.build_subtree(),
+        ),
+        CommandGroup(
+            name="ippool-group",
+            help="IPv4 address group operations.",
+            description="IPv4 address group configuration, update, delete, batch-delete, and verify operations.",
+            children=run_ippool_group.build_subtree(),
+        ),
+        CommandGroup(
+            name="ip6pool-group",
+            help="IPv6 address group operations.",
+            description="IPv6 address group configuration, update, delete, batch-delete, and verify operations.",
+            children=run_ip6pool_group.build_subtree(),
+        ),
+        CommandGroup(
+            name="time-object",
+            help="Time object operations.",
+            description="Time object configuration, update, delete, batch-delete, and verify operations.",
+            children=run_timeobject.build_subtree(),
         ),
         CommandGroup(
             name="policy-route",

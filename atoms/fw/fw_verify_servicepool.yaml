@@ -1,0 +1,81 @@
+schema_version: "1.1"
+op_id: fw_verify_servicepool
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_servicepool
+description: Query NGFW custom service pools through /api/v1/servicepool with type CUSTOM and pagination.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be servicepool for this operation.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the custom service pool query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the custom service pool query.
+  keywords:
+    type: string
+    required: false
+    description: Keyword filter for the custom service pool query.
+  params:
+    type: json
+    required: true
+    description: Custom service pool query envelope; GET sends no JSON body and returns count and vals with type CUSTOM.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: servicepool
+  page: 1
+  size: 40
+  keywords: ""
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<servicepool-state-ref>"
+    full_config_ref: "<servicepool-full-config-ref>"
+    vals_ref: "<servicepool-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: servicepool_query_returns_custom_list
+      input_ref: "<servicepool-query-result-ref>"
+      expected_result: the device returns count and vals with name, desc, type CUSTOM, ranges and refcnt fields.
+  summary_ref: "<servicepool-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Custom service pool query result and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - servicepool
+  - verification
+aliases:
+  - service-pool
+  - custom-service
+  - servicepool
+since_version: "1.8.0"

@@ -1,0 +1,86 @@
+schema_version: "1.1"
+op_id: fw_verify_ippool_group
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ippool_group
+description: Query NGFW IPv4 address groups through /api/v1/ippool/group with pagination.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ippool_group for this operation.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the IPv4 address group query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the IPv4 address group query.
+  keywords:
+    type: string
+    required: false
+    description: Keyword filter for the IPv4 address group query.
+  type:
+    type: string
+    required: false
+    description: Address group type filter (e.g. ANY, CUSTOM); may be repeated.
+  params:
+    type: json
+    required: true
+    description: IPv4 address group query envelope; GET sends no JSON body and returns count and vals.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: ippool_group
+  page: 1
+  size: 40
+  keywords: ""
+  type: ""
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<ippool-group-state-ref>"
+    full_config_ref: "<ippool-group-full-config-ref>"
+    vals_ref: "<ippool-group-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: ippool_group_query_returns_list
+      input_ref: "<ippool-group-query-result-ref>"
+      expected_result: the device returns count and vals with name, desc, ippools and refcnt fields.
+  summary_ref: "<ippool-group-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Query result and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - ippool_group
+  - verification
+aliases:
+  - ippool-group
+  - ipv4-address-group
+  - address-group
+since_version: "1.9.0"

@@ -1,0 +1,83 @@
+schema_version: "1.1"
+op_id: fw_delete_batch_customappobjtag
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_batch_customappobjtag
+description: Delete multiple NGFW custom application tags through /api/v1/batch.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be customappobjtag for this operation.
+  params:
+    type: json
+    required: true
+    description: Batch delete request with DELETE /api/v1/customappobjtag items.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: customappobjtag
+  params:
+    batch:
+      - method: DELETE
+        resource: /api/v1/customappobjtag
+        body:
+          id:
+            - atomicAppTag
+      - method: DELETE
+        resource: /api/v1/customappobjtag
+        body:
+          id:
+            - atomicAppTag2
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: customappobjtag
+      applied_ref: "<customappobjtag-batch-delete-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+timeout_ms: 60000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - BATCH_PARTIAL_FAILED
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+    - batch_configuration
+gate:
+  required: true
+  reason: Batch custom application-tag deletion can remove multiple referenced capacity objects and affect policy matching; requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+    - concurrency_review
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - Batch body contains only DELETE /api/v1/customappobjtag items.
+postconditions:
+  - Batch custom application-tag deletion result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - customappobjtag
+  - batch_configuration
+aliases:
+  - application-tag
+  - custom-app-tag
+  - appobjtag
+  - bulk
+since_version: "1.8.0"
