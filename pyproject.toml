@@ -12,6 +12,7 @@ dependencies = [
     "jsonschema",
     "requests",
     "cryptography",
+    "paramiko",
 ]
 
 [project.scripts]

@@ -1,0 +1,68 @@
+schema_version: "1.1"
+op_id: fw_verify_system_version
+device_type: fw
+transport: ssh
+description: Verify NGFW system version by reading /appdata/etc/version over SSH or Telnet.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_system_version
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when telnet target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  expected_version:
+    type: string
+    required: false
+    description: Optional version string to assert against the device version file output.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  expected_version: ""
+side_effect: observation
+returns:
+  status: success
+  data:
+    version_raw: "<version-raw-ref>"
+    matches_expected: true
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: version_file_returned
+      input_ref: "<version-raw-ref>"
+      expected_result: The device returns the contents of /appdata/etc/version as session output.
+  summary_ref: "<version-verification-summary-ref>"
+preconditions:
+  - Device management SSH or Telnet service is reachable.
+  - A valid admin credential is available via the runner credential env var.
+postconditions:
+  - Version output is captured in diag_snapshot_ref; nothing is written to the repo.
+tags:
+  - firewall
+  - system
+  - version
+  - verification
+  - cli
+aliases:
+  - system-version
+  - version
+since_version: "1.1.0"

@@ -44,6 +44,7 @@ change set.
 | `verification` | `object` | No | v1.1 only | Verification contract and summary reference. Failure handling is diagnostic and manual; it is not automatic rollback. | `{kind: config_validation, rules: [...], summary_ref: "<summary-ref>"}` |
 | `batch` | `object` | No | v1.1 only | Multi-device batch contract for inventory reference, concurrency, idempotency, and failure isolation. | `{max_concurrency: 1, device_inventory_ref: "<inventory-ref>", idempotency_key: "<idempotency-key>", failure_policy: isolate_failed_device}` |
 | `adapter_contract_ref` | `string` | No | v1.1 only | JSON Pointer to a public, non-sensitive adapter profile operation. It lets external generators find API shape without reading `.input/` materials. | `"adapters/ngfw/default.yaml#/operations/fw_config_policy_route"` |
+| `transport` | `enum` | No | v1.1 only | Network transport used by the runner. Allowed values: `http` (default), `ssh`, `telnet`, `cli`. Non-http transports require a matching runner and adapter profile `shell` block. Existing HTTP atoms may omit this field. | `"ssh"` |
 | `preconditions` | `array[string]` | No | v1.0/v1.1 | Human-readable preconditions before execution. | `["Target policy package is already published."]` |
 | `postconditions` | `array[string]` | No | v1.0/v1.1 | Human-readable postconditions after success. | `["Rule hit count is greater than zero."]` |
 | `tags` | `array[string]` | No | v1.0/v1.1 | Free-form discovery tags. | `["acl", "verification"]` |
@@ -382,6 +383,53 @@ batch:
   device_inventory_ref: "<inventory-ref>"
   idempotency_key: "<idempotency-key>"
   failure_policy: isolate_failed_device
+```
+
+## Minimal Valid v1.1 SSH Atom Example
+
+```yaml
+schema_version: "1.1"
+op_id: fw_verify_ospfv2_neighbor_cli
+device_type: fw
+description: Verify OSPFv2 neighbor state via device CLI over SSH.
+transport: ssh
+parameters:
+  device:
+    type: string
+    required: true
+    description: Logical device name; resolved by runner from session file.
+  vrf:
+    type: string
+    required: false
+    description: VRF name to scope the neighbor lookup.
+returns:
+  status: success
+  data: {}
+  error_type: ""
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: observation
+timeout_ms: 30000
+error_types:
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+risk:
+  level: low
+  categories:
+    - verification
+credential_ref:
+  kind: placeholder
+  ref: "<credential-ref>"
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ospfv2_neighbor_cli
+aliases:
+  - ospf-neighbor
+  - cli-verify
+preconditions:
+  - Device management SSH is reachable.
+  - A valid admin session exists in the local session file.
+postconditions:
+  - Neighbor state output parsed; full adjacency count returned in data.
 ```
 
 ## Terminology Mapping
