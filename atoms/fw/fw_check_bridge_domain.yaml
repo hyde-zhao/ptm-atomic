@@ -1,0 +1,62 @@
+schema_version: "1.1"
+op_id: fw_check_bridge_domain
+device_type: fw
+transport: ssh
+description: Query the VPP bridge-domain table over SSH or Telnet.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_check_bridge_domain
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when telnet target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+side_effect: observation
+returns:
+  status: success
+  data:
+    bridge_domain_raw: "<bridge-domain-raw-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: bridge_domain_returned
+      input_ref: "<bridge-domain-raw-ref>"
+      expected_result: The device returns the bridge-domain table as session output.
+  summary_ref: "<bridge-domain-summary-ref>"
+preconditions:
+  - Device management SSH or Telnet service is reachable.
+  - A valid admin credential is available via the runner credential env var.
+  - The vppctl binary is available at /opt/dbappsecurity/bin/vppctl on the device.
+postconditions:
+  - Query output is captured in diag_snapshot_ref; nothing is written to the repo.
+tags:
+  - firewall
+  - bridge-domain
+  - vpp
+  - query
+  - cli
+aliases:
+  - bd
+since_version: "1.1.0"

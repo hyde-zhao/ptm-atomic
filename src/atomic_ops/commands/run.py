@@ -134,6 +134,9 @@ SUPPORTED_OPS = (
     *INTERFACE_OPS,
     *OSPFV2_OPS,
     *OSPFV3_BFD_OPS,
+    "fw_verify_system_version",
+    "fw_check_bvi_interface_config",
+    "fw_check_bridge_domain",
     *SECURITY_ZONE_OPS,
     *CUSTOMAPPOBJ_OPS,
     *CUSTOMAPPOBJTAG_OPS,
@@ -190,6 +193,14 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_verify_bfd_global": ("ospfv3", "bfd", "verify-global"),
     "fw_verify_bfd_session": ("ospfv3", "bfd", "verify-session"),
     "fw_capture_bfd_log": ("ospfv3", "bfd", "verify-session"),
+    "fw_verify_system_version": ("cli", "verify-system-version"),
+    "fw_check_bvi_interface_config": ("cli", "check-bvi-interface-config"),
+    "fw_check_bridge_domain": ("cli", "check-bridge-domain"),
+    # Deprecated legacy op_id aliases (merged into the unified transport op)
+    "fw_verify_system_version_cli": ("cli", "verify-system-version"),
+    "fw_verify_system_version_telnet": ("cli", "verify-system-version"),
+    "fw_check_bvi_interface_config_telnet": ("cli", "check-bvi-interface-config"),
+    "fw_check_bridge_domain_telnet": ("cli", "check-bridge-domain"),
     "fw_config_security_zone": ("security-zone", "config"),
     "fw_update_security_zone": ("security-zone", "update"),
     "fw_delete_security_zone": ("security-zone", "delete"),
@@ -290,6 +301,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_reboot as run_reboot
     from atomic_ops.commands import run_ha as run_ha
     from atomic_ops.commands import run_trex as run_trex
+    from atomic_ops.commands import run_cli as run_cli
 
     return (
         CommandGroup(
@@ -389,6 +401,12 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_reboot.build_subtree(),
         *run_ha.build_subtree(),
         *run_trex.build_subtree(),
+        CommandGroup(
+            name="cli",
+            help="SSH/Telnet shell verification operations.",
+            description="Read-only device shell operations executed over SSH/Telnet transports.",
+            children=run_cli.build_subtree(),
+        ),
     )
 
 
