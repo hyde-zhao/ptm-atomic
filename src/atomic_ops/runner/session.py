@@ -74,7 +74,9 @@ def read_session_file(path: Path) -> dict[str, Any]:
             suggestion="Run ptm-atomic run fw_login_web_management --execute first.",
         )
     mode = path.stat().st_mode & 0o777
-    if mode & 0o077:
+    # Windows ACL 模型下 Unix 权限位无意义（os.chmod 无法清除 group/other 位），
+    # 跳过权限检查；Linux/macOS 仍强制 0o600。
+    if os.name != "nt" and mode & 0o077:
         raise RunnerError(
             "RUNNER_SESSION_INVALID",
             "Session file permissions are too broad.",

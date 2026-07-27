@@ -28,6 +28,13 @@ The two streams are intentionally separate. A schema or operation-library change
 - Add the allowlisted `ptm-atomic run` runner for `fw_login_web_management`, `fw_config_object`, and `fw_config_policy_route`, with dry-run by default and explicit `--execute` for live device requests.
 - Add OSPFv2 atom specs, adapter profile mappings, and allowlisted runner support for global config, redistribution, network, interface, neighbor, and log endpoints.
 - Add OSPFv3 and BFD atom specs, adapter profile mappings, and allowlisted runner support for config, query, delete, session, and log endpoints.
+- Add schema v1.1 `transport` field (`http`/`ssh`/`telnet`/`cli`) to `schemas/atomic-op.schema.yaml` and matching `transport`/`shell` block to `schemas/adapter-profile.schema.yaml`, enabling SSH/Telnet/CLI shell-command atom contracts. The default HTTP runner returns `RUNNER_UNSUPPORTED_OP` for non-http transports; a dedicated `runner/ssh.py` and allowlist entry are required before live execution.
+- Add the first SSH transport atom `fw_verify_system_version_cli` with adapter profile `transport: ssh` + `shell` block (`cat /appdata/etc/version`), the `run cli verify-system-version` subcommand, and `runner/ssh.py` live execution via the system `ssh` client (subprocess + optional `sshpass`), reading connection inputs from `--base-url` and the session file and credentials from `--credential-env`.
+- Add the Telnet transport atom `fw_verify_system_version_telnet` with adapter profile `transport: telnet` + `shell` block (`cat /appdata/etc/version`), the `run cli verify-system-version-telnet` subcommand supporting an independent `--host`/`--port` pair (defaults to host parsed from `--base-url` and port 23), and `runner/ssh.py` telnet live execution via Python stdlib `telnetlib` (interactive login flow + command output capture), reading username from the session file and the credential from `--credential-env`.
+- Switch the SSH runner from system `ssh`/`sshpass` subprocess to `paramiko` (pure-Python SSH) for cross-platform password authentication without `sshpass`; add `paramiko` to `pyproject.toml` dependencies. Register `STATE_MISMATCH` (52) in `repository.EXIT_CODES` (previously raised but unmapped, causing `KeyError`).
+- Add SSH query atoms `fw_check_bvi_interface_config` (`etcdctl get --print-value-only /vnf-agent/vpp1/config/vpp/v2/interfaces/bvi{{id}}`, param `bvi_id`) and `fw_check_bridge_domain` (`/opt/dbappsecurity/bin/vppctl show bridge-domain`), with adapter profile `transport: ssh` + `shell` blocks, `run cli check-bvi-interface-config`/`check-bridge-domain` subcommands, and a shared `_execute_ssh_query` helper in `runner/ssh.py`.
+- Add Telnet query atoms `fw_check_bvi_interface_config_telnet` and `fw_check_bridge_domain_telnet` mirroring the SSH variants with `transport: telnet`, supporting an independent `--host`/`--port` pair (defaults to host parsed from `--base-url` and port 23), reusing the `_execute_telnet_query` helper for live execution via `telnetlib`.
+- Add CLI-level error codes `RUNNER_SHELL_CONNECT_FAILED` (50), `RUNNER_SHELL_COMMAND_TIMEOUT` (51), and `RUNNER_SHELL_UNEXPECTED_PROMPT` (52) to `docs/error-codes.md`.
 - Add release guidance for repository checks using `uv run ptm-atomic --help`, `uv run ptm-atomic packages`, `uv run --python 3.11 python scripts/validate_schema.py atoms`, `uv run --python 3.11 python scripts/layout_check.py`, and `uv run --python 3.11 python scripts/security_gate_check.py`.
 - Add `fw_reset_policy_route_hitcount` and `fw_verify_policy_route_hitcount` atom specs, adapter profile mappings, and allowlisted runner support for clearing and querying policy-route hit counts over IPv4 and IPv6.
 - Add iplink, iplink-group, batch-delete, and operation-log atom specs, adapter profile mappings, and allowlisted runner support: `fw_config_iplink`, `fw_update_iplink`, `fw_delete_iplink`, `fw_verify_iplink`, `fw_config_iplink_group`, `fw_update_iplink_group`, `fw_delete_iplink_group`, `fw_verify_iplink_group`, `fw_delete_batch_iplink`, `fw_delete_batch_iplink_group`, and `fw_capture_operation_log`.
@@ -60,14 +67,15 @@ The two streams are intentionally separate. A schema or operation-library change
 - Make successful `ptm-atomic run` stdout use the fixed envelope `op_id`, `status`, `data`, `error_type`, and `diag_snapshot_ref`; runner-specific request, session, and response details now live under `data`.
 - Allow digits in the `op_id` target segment so protocol names such as `ospfv2` can be represented directly.
 - Repurpose `fw_verify_object` from a contract-only verification (based on `config_result_ref`) to a device query operation (`GET /api/v1/ippool?page=&size=`) aligned with `fw_verify_iptun`; the `op_id` is unchanged, the `ngfw_verification` package reference is unchanged, and `since_version` remains `1.1.0`.
+- Merge the SSH and Telnet shell atoms into unified transport-aware ops: `fw_verify_system_version`, `fw_check_bvi_interface_config`, and `fw_check_bridge_domain`. Each op declares `transport: ssh` as the default in its atom file and exposes a runtime `--transport ssh|telnet` CLI parameter (plus `--host`/`--port` overrides) that routes the runner to `_run_ssh_command` (paramiko) or `_run_telnet_command` (telnetlib) via a shared `_run_shell_command` dispatcher. The legacy `fw_verify_system_version_cli`, `fw_verify_system_version_telnet`, `fw_check_bvi_interface_config_telnet`, and `fw_check_bridge_domain_telnet` op_ids are removed from `atoms/` and mapped in `DEPRECATED_OP_MAP` for backward-compatible CLI dispatch.
 
 ### Deprecated
 
-- None.
+- The per-transport op_ids `fw_verify_system_version_cli`, `fw_verify_system_version_telnet`, `fw_check_bvi_interface_config_telnet`, and `fw_check_bridge_domain_telnet` are deprecated in favor of the unified ops with the `--transport` parameter; they remain dispatchable via `DEPRECATED_OP_MAP` for one to two versions.
 
 ### Removed
 
-- None.
+- Remove the redundant per-transport atom files `atoms/fw/fw_verify_system_version_cli.yaml`, `atoms/fw/fw_verify_system_version_telnet.yaml`, `atoms/fw/fw_check_bvi_interface_config_telnet.yaml`, and `atoms/fw/fw_check_bridge_domain_telnet.yaml` after merging their SSH/Telnet variants into the unified transport-aware ops. Legacy op_ids remain dispatchable through `DEPRECATED_OP_MAP`.
 
 ### Fixed
 

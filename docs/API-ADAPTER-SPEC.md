@@ -64,6 +64,30 @@ Adapter profiles must not contain runtime-sensitive information or local input d
 | Production request or response samples | Use shape-only placeholders and result refs. |
 | `.input/capacity` dependency | Migrate public API shape into `adapters/`; do not require consumers to read `.input/`. |
 
+## SSH / Telnet / CLI Operations
+
+Adapter profile schema v1.1 adds optional `transport` and `shell` fields to an
+operation entry. When `transport: ssh`, `telnet`, or `cli`, the operation entry
+MUST declare a `shell` block instead of an HTTP `request` block:
+
+| Field | Required | Description |
+|---|---|---|
+| `shell.command_template` | Yes | Shell command template with `{{param}}` placeholders. Runner shell-escapes every placeholder. |
+| `shell.success_pattern` | Yes | Regex matched against stdout/stderr to indicate success. |
+| `shell.prompt_timeout_ms` | No | Max wait for device prompt. Defaults to the atom `timeout_ms`. |
+| `shell.privilege_level` | No | `user`, `enable`, or `configure`. Defaults to `enable`. |
+
+Security rules:
+
+- The profile MUST NOT pre-encode shell metacharacters (`;`, `|`, backticks, `$()`, `&&`).
+- The runner MUST shell-escape every `{{param}}` substitution.
+- Credentials come only from `--password-env` and the local session file, never from the profile or atom.
+- `destructive`/`irreversible` shell commands MUST declare `gate.required: true` and `rollback_strategy.type: manual_required` (or `irreversible`), mirroring the reboot contract.
+- Shell command stdout/stderr is written only to `diag_snapshot_ref`; never committed to the repo.
+
+The default HTTP runner returns `RUNNER_UNSUPPORTED_OP` for ssh/telnet/cli ops
+until a dedicated `runner/ssh.py` is registered in the allowlist.
+
 ## Runtime Boundary
 
 Most `ptm-atomic` commands remain read-only. `ptm-atomic run` is the only execution entry and is limited to explicit allowlisted operations. Adapter profiles still do not store device addresses, passwords, session material, or production samples.
