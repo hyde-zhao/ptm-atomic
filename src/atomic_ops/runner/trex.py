@@ -314,6 +314,17 @@ def _method_path(op_id: str) -> tuple[str, str]:
 
 
 def _request_url(base_url: str, op_id: str) -> str:
+    """Build the full trex-api URL.
+
+    When the TREX_API_URL environment variable is set it takes precedence over
+    ``base_url`` so that TG operations can target a different host than the
+    NGFW management address supplied via ``--base-url``.
+    """
+    import os as _os
+    tg_url = _os.environ.get("TREX_API_URL", "")
+    if tg_url:
+        _, path = _method_path(op_id)
+        return f"{tg_url.rstrip('/')}{path}"
     _method, path = _method_path(op_id)
     return f"{normalize_base_url(base_url)}{path}"
 

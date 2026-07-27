@@ -83,3 +83,31 @@ operations:
   - fw_config_black_white_list
   - fw_config_ssl_vpn
   - fw_config_dynamic_routing
+  - fw_config_customappobj
+  - fw_update_customappobj
+  - fw_delete_batch_customappobj
+  - fw_config_customappobjtag
+  - fw_update_customappobjtag
+  - fw_delete_batch_customappobjtag
+  - fw_config_servicepool
+  - fw_update_servicepool
+  - fw_delete_batch_servicepool
+  - fw_config_servicepool_group
+  - fw_update_servicepool_group
+  - fw_delete_batch_servicepool_group
+  - fw_config_ippool_group
+  - fw_update_ippool_group
+  - fw_delete_ippool_group
+  - fw_delete_batch_ippool_group
+  - fw_config_ip6pool_group
+  - fw_update_ip6pool_group
+  - fw_delete_ip6pool_group
+  - fw_delete_batch_ip6pool_group
+  - fw_config_timeobject
+  - fw_update_timeobject
+  - fw_delete_timeobject
+  - fw_delete_batch_timeobject
+  - fw_delete_servicepool
+  - fw_delete_servicepool_group
+  - fw_delete_customappobj
+  - fw_delete_customappobjtag

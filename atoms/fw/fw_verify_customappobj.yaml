@@ -1,0 +1,77 @@
+schema_version: "1.1"
+op_id: fw_verify_customappobj
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_customappobj
+description: Query NGFW application objects through /api/v1/appobjsearch with searchkeyword and istagcustom filters.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be customappobj for this operation.
+  searchkeyword:
+    type: string
+    required: false
+    description: Keyword used to filter application objects; empty returns the full tree.
+  istagcustom:
+    type: int
+    required: false
+    description: Filter flag, 0 for preset application tree and 1 for custom tags.
+  params:
+    type: json
+    required: true
+    description: Application-object query envelope; GET sends no JSON body and returns the full AppClass, AppGroup, and AppStatic tree.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: customappobj
+  searchkeyword: ""
+  istagcustom: 0
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<appobj-search-result-ref>"
+    full_config_ref: "<appobj-full-config-ref>"
+    appclass_ref: "<appclass-ref>"
+    appgroup_ref: "<appgroup-ref>"
+    appstatic_ref: "<appstatic-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: appobj_search_returns_app_tree
+      input_ref: "<appobj-search-result-ref>"
+      expected_result: the device returns the full application tree containing AppClass, AppGroup, and AppStatic sections.
+  summary_ref: "<appobj-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Application-object query result and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - customappobj
+  - verification
+aliases:
+  - application-object
+  - custom-app
+  - appobj
+since_version: "1.8.0"

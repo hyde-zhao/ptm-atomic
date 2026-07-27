@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-import json
 from ipaddress import AddressValueError, IPv4Address, IPv6Address, ip_address, ip_interface
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from atomic_ops.runner._payload import load_json_payload
 from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
@@ -36,39 +36,6 @@ TUNNEL_ID_RE = re.compile(r"^tunnel[\w-]*$")
 TUNNEL_TYPE_CODES = {"4over6": 15, "6over4": 16, "gre": 11}
 TUNNEL_TYPE_BY_CODE = {15: "4over6", 16: "6over4", 11: "gre"}
 TUNNEL_TYPE_CODES_SET = set(TUNNEL_TYPE_CODES.values())
-
-
-def load_json_payload(*, payload_file: str | None, payload_json: str | None) -> dict[str, Any] | None:
-    if payload_file and payload_json:
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "--payload-file and --payload-json cannot be used together.",
-            {"fields": ["payload_file", "payload_json"]},
-        )
-    if not payload_file and not payload_json:
-        return None
-    try:
-        raw = Path(payload_file).read_text(encoding="utf-8") if payload_file else str(payload_json)
-        payload = json.loads(raw)
-    except OSError as exc:
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Interface payload file cannot be read.",
-            {"path": payload_file, "reason": exc.__class__.__name__},
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Interface payload must be valid JSON.",
-            {"reason": exc.msg},
-        ) from exc
-    if not isinstance(payload, dict):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Interface payload JSON root must be an object.",
-            {"type": type(payload).__name__},
-        )
-    return payload
 
 
 def build_interface_payload(

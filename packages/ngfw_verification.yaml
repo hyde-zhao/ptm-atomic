@@ -35,3 +35,11 @@ operations:
   - fw_verify_ssl_vpn
   - fw_verify_dynamic_routing
   - fw_capture_operation_log
+  - fw_verify_customappobj
+  - fw_verify_customappobjtag
+  - fw_verify_servicepool
+  - fw_verify_servicepool_preset
+  - fw_verify_servicepool_group
+  - fw_verify_ippool_group
+  - fw_verify_ip6pool_group
+  - fw_verify_timeobject

@@ -86,6 +86,47 @@ from atomic_ops.runner.ha_iplink import (
     build_halinkgroup_batch_delete_payload,
     execute_ha_iplink,
 )
+from atomic_ops.runner._payload import load_json_payload
+from atomic_ops.runner.customappobj import (
+    build_customappobj_payload,
+    build_customappobj_update_payload,
+    build_customappobj_batch_delete_payload,
+    build_customappobj_dry_run,
+    validate_customappobj_payload,
+)
+from atomic_ops.runner.customappobjtag import (
+    build_customappobjtag_payload,
+    build_customappobjtag_update_payload,
+    build_customappobjtag_batch_delete_payload,
+    validate_customappobjtag_payload,
+)
+from atomic_ops.runner.servicepool import (
+    build_servicepool_payload,
+    build_servicepool_update_payload,
+    build_servicepool_group_payload,
+    build_servicepool_group_update_payload,
+    build_servicepool_batch_delete_payload,
+    build_servicepool_group_batch_delete_payload,
+    validate_servicepool_payload,
+)
+from atomic_ops.runner.ippool_group import (
+    build_ippool_group_payload,
+    build_ippool_group_update_payload,
+    build_ippool_group_batch_delete_payload,
+    validate_ippool_group_payload,
+)
+from atomic_ops.runner.ip6pool_group import (
+    build_ip6pool_group_payload,
+    build_ip6pool_group_update_payload,
+    build_ip6pool_group_batch_delete_payload,
+    validate_ip6pool_group_payload,
+)
+from atomic_ops.runner.timeobject import (
+    build_timeobject_payload,
+    build_timeobject_update_payload,
+    build_timeobject_batch_delete_payload,
+    validate_timeobject_payload,
+)
 
 
 class InterfacePayloadTests(unittest.TestCase):
@@ -2523,6 +2564,503 @@ class ObjectDeleteVerifyTests(unittest.TestCase):
         self.assertEqual(payload["data"]["request"]["method"], "POST")
         self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/batch"))
         self.assertEqual(len(payload["data"]["request"]["payload"]["batch"]), 2)
+
+
+class CustomAppObjPayloadTests(unittest.TestCase):
+    def test_build_customappobj_payload(self) -> None:
+        payload = build_customappobj_payload(
+            name_cn="testObj",
+            pid="268435599",
+            protocol="TCP",
+            pattern_type="Ascii",
+            pattern="222",
+            platform="Windows、MacOS",
+        )
+        self.assertEqual(payload["val"]["name_cn"], "testObj")
+        self.assertEqual(payload["val"]["pid"], "268435599")
+        self.assertEqual(payload["val"]["tcpudpcfg"]["direct"], "client")
+        self.assertTrue(payload["val"]["customflag"])
+
+    def test_name_en_defaults_to_name_cn(self) -> None:
+        payload = build_customappobj_payload(
+            name_cn="testObj", pid="1", protocol="TCP", pattern_type="Ascii", pattern="p"
+        )
+        self.assertEqual(payload["val"]["name_en"], "testObj")
+
+    def test_update_payload_uses_name_cn_as_top_id_and_appid_in_val(self) -> None:
+        payload = build_customappobj_update_payload(
+            name_cn="testObj", appid="2000000",
+            pid="1", protocol="TCP", pattern_type="Ascii", pattern="p",
+        )
+        # 顶层 id 为 name_cn（设备 delete/update 的 id 语义），val.id 为数字 appid
+        self.assertEqual(payload["id"], "testObj")
+        self.assertEqual(payload["val"]["id"], "2000000")
+
+    def test_rejects_missing_required_fields(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_customappobj_payload(name_cn="", pid="1", protocol="TCP", pattern_type="Ascii", pattern="p")
+
+    def test_build_batch_delete_payload(self) -> None:
+        payload = build_customappobj_batch_delete_payload(entry_ids=["2000000", "ikun"])
+        self.assertEqual(len(payload["batch"]), 2)
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/customappobj")
+        self.assertEqual(payload["batch"][0]["body"]["id"], ["2000000"])
+
+    def test_batch_delete_rejects_empty(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_customappobj_batch_delete_payload(entry_ids=[])
+
+    def test_validate_batch_rejects_wrong_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/ippool", "body": {"id": ["x"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_customappobj_payload(payload, op_id="fw_delete_batch_customappobj")
+
+
+class CustomAppObjTagPayloadTests(unittest.TestCase):
+    def test_build_customappobjtag_payload(self) -> None:
+        payload = build_customappobjtag_payload(
+            name_cn="myTag",
+            desc="desc",
+            appobjkeys=[{"appname": "914CG", "appid": "4"}],
+        )
+        self.assertEqual(payload["val"]["name_cn"], "myTag")
+        self.assertEqual(payload["val"]["appobjkeys"][0]["appid"], "4")
+
+    def test_appobjkeys_normalizes_appid_to_string(self) -> None:
+        payload = build_customappobjtag_payload(
+            name_cn="myTag", appobjkeys=[{"appname": "x", "appid": 7}]
+        )
+        self.assertEqual(payload["val"]["appobjkeys"][0]["appid"], "7")
+
+    def test_appobjkeys_rejects_missing_appname(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_customappobjtag_payload(name_cn="myTag", appobjkeys=[{"appid": "7"}])
+
+    def test_update_payload_wraps_id_and_val(self) -> None:
+        payload = build_customappobjtag_update_payload(
+            entry_id="myTag", name_cn="myTag", appobjkeys=[{"appname": "x", "appid": "1"}]
+        )
+        self.assertEqual(payload["id"], "myTag")
+        self.assertEqual(payload["val"]["name_cn"], "myTag")
+
+    def test_build_batch_delete_payload(self) -> None:
+        payload = build_customappobjtag_batch_delete_payload(entry_ids=["tag1", "tag2"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/customappobjtag")
+        self.assertEqual(len(payload["batch"]), 2)
+
+    def test_validate_batch_rejects_wrong_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/customappobj", "body": {"id": ["x"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_customappobjtag_payload(payload, op_id="fw_delete_batch_customappobjtag")
+
+
+class ServicePoolPayloadTests(unittest.TestCase):
+    def test_build_servicepool_payload_forces_custom_type(self) -> None:
+        payload = build_servicepool_payload(
+            name="mypool",
+            ranges=[{"proto": 6, "s_start": 0, "s_end": 65535, "d_start": 0, "d_end": 65535}],
+        )
+        self.assertEqual(payload["val"]["type"], "CUSTOM")
+        self.assertEqual(payload["val"]["ranges"][0]["proto"], 6)
+
+    def test_ranges_rejects_non_int_proto(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_servicepool_payload(name="p", ranges=[{"proto": "TCP", "s_start": 0, "s_end": 0, "d_start": 0, "d_end": 0}])
+
+    def test_update_payload_includes_config_source(self) -> None:
+        payload = build_servicepool_update_payload(
+            entry_id="mypool", name="mypool",
+            ranges=[{"proto": 6, "s_start": 0, "s_end": 0, "d_start": 0, "d_end": 0}],
+        )
+        self.assertEqual(payload["id"], "mypool")
+        self.assertEqual(payload["val"]["config_source"], 0)
+
+    def test_build_servicepool_group_payload(self) -> None:
+        payload = build_servicepool_group_payload(name="g1", servicepools=["ah", "bgp"])
+        self.assertEqual(payload["val"]["servicepools"], ["ah", "bgp"])
+
+    def test_servicepools_rejects_non_string(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_servicepool_group_payload(name="g1", servicepools=["ah", 5])
+
+    def test_servicepool_batch_delete_resource(self) -> None:
+        payload = build_servicepool_batch_delete_payload(entry_ids=["p1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/servicepool")
+
+    def test_servicepool_group_batch_delete_resource_has_group_suffix(self) -> None:
+        payload = build_servicepool_group_batch_delete_payload(entry_ids=["g1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/servicepool/group")
+
+    def test_validate_servicepool_batch_rejects_group_resource_mismatch(self) -> None:
+        # 服务对象的 batch 校验应拒绝服务组的 resource
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/servicepool/group", "body": {"id": ["g1"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_servicepool_payload(payload, op_id="fw_delete_batch_servicepool")
+
+    def test_validate_servicepool_group_batch_rejects_plain_resource(self) -> None:
+        # 服务组的 batch 校验应拒绝服务对象的 resource（漏 /group 后缀）
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/servicepool", "body": {"id": ["g1"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_servicepool_payload(payload, op_id="fw_delete_batch_servicepool_group")
+
+
+class LoadJsonPayloadTests(unittest.TestCase):
+    def test_returns_none_when_both_empty(self) -> None:
+        self.assertIsNone(load_json_payload(payload_file=None, payload_json=None))
+
+    def test_rejects_both_provided(self) -> None:
+        with self.assertRaises(RunnerError):
+            load_json_payload(payload_file="x", payload_json="{}")
+
+    def test_rejects_invalid_json(self) -> None:
+        with self.assertRaises(RunnerError):
+            load_json_payload(payload_file=None, payload_json="{not json")
+
+    def test_rejects_non_dict_root(self) -> None:
+        with self.assertRaises(RunnerError):
+            load_json_payload(payload_file=None, payload_json="[1,2,3]")
+
+    def test_parses_json_string(self) -> None:
+        result = load_json_payload(payload_file=None, payload_json='{"val":{"name":"x"}}')
+        self.assertEqual(result["val"]["name"], "x")
+
+    def test_parses_file(self) -> None:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write('{"val":{"name":"x"}}')
+            path = f.name
+        try:
+            result = load_json_payload(payload_file=path, payload_json=None)
+            self.assertEqual(result["val"]["name"], "x")
+        finally:
+            os.unlink(path)
+
+
+class NewModuleCliDryRunTests(unittest.TestCase):
+    def test_cli_app_obj_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "app-obj", "config", "--name-cn", "testObj", "--pid", "1",
+                 "--protocol", "TCP", "--pattern-type", "Ascii", "--pattern", "222"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_customappobj")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/customappobj"))
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["name_cn"], "testObj")
+
+    def test_cli_app_obj_verify_url_has_search_params(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "app-obj", "verify", "--search-keyword", "QQ", "--tag-custom", "1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/appobjsearch?", url)
+        self.assertIn("searchkeyword=QQ", url)
+        self.assertIn("istagcustom=1", url)
+
+    def test_cli_app_tag_verify_url_has_pagination(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "app-tag", "verify", "--keywords", "3", "--page", "1", "--size", "40"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/customappobjtag?", url)
+        self.assertIn("keywords=3", url)
+
+    def test_cli_service_pool_verify_preset_url(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "service-pool", "verify-preset"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("type=PRESET", url)
+        self.assertNotIn("keywords", url)
+
+    def test_cli_service_pool_group_delete_uses_group_resource(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "service-pool", "group-delete", "--id", "g1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_servicepool_group")
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/servicepool/group?id=g1", url)
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_service_pool_config_forces_custom_type(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "service-pool", "config", "--name", "mypool",
+                 "--ranges", '[{"proto":6,"s_start":0,"s_end":65535,"d_start":0,"d_end":65535}]']
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["type"], "CUSTOM")
+
+
+class IpPoolGroupPayloadTests(unittest.TestCase):
+    def test_build_ippool_group_payload(self) -> None:
+        payload = build_ippool_group_payload(name="g1", ippools=["any"])
+        self.assertEqual(payload["val"]["name"], "g1")
+        self.assertEqual(payload["val"]["ippools"], ["any"])
+
+    def test_ippools_rejects_non_string(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_ippool_group_payload(name="g1", ippools=["any", 5])
+
+    def test_update_payload_includes_id_and_val(self) -> None:
+        payload = build_ippool_group_update_payload(entry_id="g1", name="g1", ippools=["any"])
+        self.assertEqual(payload["id"], "g1")
+        self.assertEqual(payload["val"]["ippools"], ["any"])
+
+    def test_batch_delete_resource(self) -> None:
+        payload = build_ippool_group_batch_delete_payload(entry_ids=["g1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/ippool/group")
+
+    def test_validate_batch_rejects_wrong_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/servicepool", "body": {"id": ["g1"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_ippool_group_payload(payload, op_id="fw_delete_batch_ippool_group")
+
+
+class Ip6PoolGroupPayloadTests(unittest.TestCase):
+    def test_build_ip6pool_group_payload(self) -> None:
+        payload = build_ip6pool_group_payload(name="g1", ip6pools=["any"])
+        self.assertEqual(payload["val"]["ip6pools"], ["any"])
+
+    def test_batch_delete_resource(self) -> None:
+        payload = build_ip6pool_group_batch_delete_payload(entry_ids=["g1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/ip6pool/group")
+
+
+class TimeObjectPayloadTests(unittest.TestCase):
+    def test_build_oneshot_payload(self) -> None:
+        payload = build_timeobject_payload(
+            name="t1", scheduletype="oneshot",
+            start_time="2026-07-24 00:00:00", end_time="2026-07-24 23:59:59",
+        )
+        self.assertEqual(payload["val"]["scheduletype"], "oneshot")
+        self.assertEqual(payload["val"]["timequantum"][0]["starttime"]["time"], "2026-07-24 00:00:00")
+
+    def test_build_day_payload(self) -> None:
+        payload = build_timeobject_payload(
+            name="t1", scheduletype="day", start_time="00:00:00", end_time="23:59:59",
+        )
+        self.assertEqual(payload["val"]["timequantum"][0]["endtime"]["time"], "23:59:59")
+
+    def test_build_week_payload_includes_weekday(self) -> None:
+        payload = build_timeobject_payload(
+            name="t1", scheduletype="week", start_time="00:30:00", end_time="21:30:00", weekday=1,
+        )
+        self.assertEqual(payload["val"]["timequantum"][0]["starttime"]["weekday"], 1)
+        self.assertEqual(payload["val"]["timequantum"][0]["endtime"]["weekday"], 1)
+
+    def test_build_month_payload_uses_timemonquantum(self) -> None:
+        payload = build_timeobject_payload(
+            name="t1", scheduletype="month", month_time=24, planday="11",
+        )
+        self.assertEqual(payload["val"]["timemonquantum"][0]["time"], 24)
+        self.assertEqual(payload["val"]["timemonquantum"][0]["planday"], "11")
+        self.assertNotIn("timequantum", payload["val"])
+
+    def test_oneshot_rejects_time_only_format(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_timeobject_payload(
+                name="t1", scheduletype="oneshot", start_time="00:00:00", end_time="23:59:59",
+            )
+
+    def test_month_requires_month_time(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_timeobject_payload(name="t1", scheduletype="month", planday="11")
+
+    def test_week_requires_weekday(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_timeobject_payload(
+                name="t1", scheduletype="week", start_time="00:30:00", end_time="21:30:00",
+            )
+
+    def test_invalid_scheduletype(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_timeobject_payload(
+                name="t1", scheduletype="yearly", start_time="00:00:00", end_time="23:59:59",
+            )
+
+    def test_batch_delete_resource(self) -> None:
+        payload = build_timeobject_batch_delete_payload(entry_ids=["t1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/timeobject")
+
+
+class NewModuleV2CliDryRunTests(unittest.TestCase):
+    def test_cli_ippool_group_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ippool-group", "config", "--name", "g1", "--ippools", "any"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_ippool_group")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["ippools"], ["any"])
+
+    def test_cli_ippool_group_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ippool-group", "delete", "--id", "g1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_ippool_group")
+        self.assertIn("/api/v1/ippool/group?id=g1", payload["data"]["request"]["url"])
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_ippool_group_verify_url_has_repeatable_type(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ippool-group", "verify", "--type", "ANY", "--type", "CUSTOM", "--keywords", "g1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("type=ANY", url)
+        self.assertIn("type=CUSTOM", url)
+        self.assertIn("keywords=g1", url)
+
+    def test_cli_ip6pool_group_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ip6pool-group", "config", "--name", "g1", "--ip6pools", "any"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_ip6pool_group")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["ip6pools"], ["any"])
+
+    def test_cli_ip6pool_group_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ip6pool-group", "delete", "--id", "g1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_ip6pool_group")
+        self.assertIn("/api/v1/ip6pool/group?id=g1", payload["data"]["request"]["url"])
+
+    def test_cli_timeobject_config_oneshot(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "time-object", "config", "--name", "t1", "--scheduletype", "oneshot",
+                 "--start-time", "2026-07-24 00:00:00", "--end-time", "2026-07-24 23:59:59"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_timeobject")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["scheduletype"], "oneshot")
+
+    def test_cli_timeobject_config_month(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "time-object", "config", "--name", "t1", "--scheduletype", "month",
+                 "--month-time", "24", "--planday", "11"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["timemonquantum"][0]["time"], 24)
+        self.assertNotIn("timequantum", val)
+
+    def test_cli_timeobject_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "time-object", "delete", "--id", "t1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_timeobject")
+        self.assertIn("/api/v1/timeobject?id=t1", payload["data"]["request"]["url"])
+
+    def test_cli_timeobject_verify_url(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "time-object", "verify", "--keywords", "t1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/timeobject?", url)
+        self.assertIn("keywords=t1", url)
+
+    def test_cli_service_pool_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "service-pool", "delete", "--id", "p1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_servicepool")
+        self.assertIn("/api/v1/servicepool?id=p1", payload["data"]["request"]["url"])
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_app_obj_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "app-obj", "delete", "--id", "obj1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_customappobj")
+        self.assertIn("/api/v1/customappobj?id=obj1", payload["data"]["request"]["url"])
+
+    def test_cli_app_tag_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "app-tag", "delete", "--id", "tag1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_customappobjtag")
+        self.assertIn("/api/v1/customappobjtag?id=tag1", payload["data"]["request"]["url"])
 
 
 if __name__ == "__main__":
