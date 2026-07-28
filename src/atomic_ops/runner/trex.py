@@ -29,14 +29,19 @@ RATE_RE = re.compile(r"^[1-9][0-9]*(pps|kbps|mbps|gbps)$", re.IGNORECASE)
 TREX_OPS: dict[str, tuple[str, str]] = {
     op_id: ("POST", f"/api/v1/ops/{op_id}")
     for op_id in (
+        "tg_acquire_ports",
         "tg_config_interface",
         "tg_apply_traffic_template",
         "tg_start_traffic_stream",
         "tg_verify_traffic_loss",
         "tg_stop_traffic_stream",
         "tg_delete_traffic_template",
+        "tg_release_ports",
     )
 }
+
+# user_id 命名规范：default（兼容旧流程）或 dev<ip末段>-<序号>（如 dev172-1）
+USER_ID_RE = re.compile(r"^(default|dev\d{1,3}-\d+)$")
 
 # trex-api OperationEnvelope.error_type -> (CLI runner error_code, retryable)
 ERROR_TYPE_MAP: dict[str, tuple[str, bool]] = {
@@ -86,7 +91,21 @@ def load_trex_json_payload(*, payload_file: str | None, payload_json: str | None
 
 def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
     """Build the flat trex-api request payload for ``op_id`` from CLI params."""
-    if op_id == "tg_config_interface":
+    if op_id == "tg_acquire_ports":
+        ports = params.get("ports")
+        if not isinstance(ports, list) or not ports:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ports must be a non-empty list.",
+                {"field": "ports"},
+            )
+        payload: dict[str, Any] = {"user_id": params.get("user_id"), "ports": ports}
+    elif op_id == "tg_release_ports":
+        payload = {"user_id": params.get("user_id")}
+        ports = params.get("ports")
+        if ports:
+            payload["ports"] = ports
+    elif op_id == "tg_config_interface":
         interfaces = params.get("interfaces")
         if not isinstance(interfaces, list) or not interfaces:
             raise RunnerError(
@@ -135,7 +154,25 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
 
 def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Validate the trex-api payload against the operation contract locally."""
-    if op_id == "tg_config_interface":
+    if op_id == "tg_acquire_ports":
+        _validate_user_id(payload.get("user_id"))
+        ports = payload.get("ports")
+        if not isinstance(ports, list) or not ports:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ports must be a non-empty list of logical port names.",
+                {"field": "ports"},
+            )
+    elif op_id == "tg_release_ports":
+        _validate_user_id(payload.get("user_id"))
+        ports = payload.get("ports")
+        if ports is not None and (not isinstance(ports, list) or not ports):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ports must be a non-empty list or omitted to release all.",
+                {"field": "ports"},
+            )
+    elif op_id == "tg_config_interface":
         _validate_interfaces(payload.get("interfaces"))
     elif op_id == "tg_apply_traffic_template":
         _validate_template_name(payload.get("template"), field="template")
@@ -327,6 +364,23 @@ def _request_url(base_url: str, op_id: str) -> str:
         return f"{tg_url.rstrip('/')}{path}"
     _method, path = _method_path(op_id)
     return f"{normalize_base_url(base_url)}{path}"
+
+
+def _validate_user_id(value: Any) -> str:
+    """校验 user_id 命名规范：default 或 dev<ip末段>-<序号>。"""
+    if not isinstance(value, str) or not value:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "user_id is required.",
+            {"field": "user_id"},
+        )
+    if not USER_ID_RE.fullmatch(value):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "user_id must be 'default' or match 'dev<ip-suffix>-<seq>' (e.g. dev172-1).",
+            {"field": "user_id", "actual": value},
+        )
+    return value
 
 
 def _validate_interfaces(interfaces: Any) -> None:

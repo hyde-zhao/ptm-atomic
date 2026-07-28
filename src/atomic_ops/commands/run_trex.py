@@ -29,6 +29,13 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                     description="TRex trex-api template and stream lifecycle operations.",
                     children=(
                         CommandSpec(
+                            name="acquire-ports",
+                            help="Acquire TRex ports for exclusive use by a user.",
+                            description="Acquire TRex ports (force=False) and bind them to a user_id until release or timeout.",
+                            handler=_run_acquire_ports,
+                            add_args=_add_acquire_ports_args,
+                        ),
+                        CommandSpec(
                             name="config-interface",
                             help="Configure TRex interfaces and learn gateway MACs.",
                             description="Configure TRex IPv4 or IPv6 interfaces and learn gateway MAC addresses.",
@@ -70,6 +77,13 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                             handler=_run_verify_loss,
                             add_args=_add_verify_loss_args,
                         ),
+                        CommandSpec(
+                            name="release-ports",
+                            help="Release TRex ports previously acquired by a user.",
+                            description="Release TRex ports held by a user_id (all or a subset).",
+                            handler=_run_release_ports,
+                            add_args=_add_release_ports_args,
+                        ),
                     ),
                 ),
             ),
@@ -83,6 +97,34 @@ def build_subtree() -> tuple[CommandGroup, ...]:
 def _add_payload_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_acquire_ports_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--user-id",
+        required=True,
+        help="Occupant identifier, format dev<ip-suffix>-<seq> (e.g. dev172-1).",
+    )
+    parser.add_argument(
+        "--ports",
+        required=True,
+        help="Comma-separated logical port names to acquire, e.g. 2_1,2_2.",
+    )
+    _add_payload_args(parser)
+
+
+def _add_release_ports_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--user-id",
+        required=True,
+        help="Occupant identifier that previously acquired the ports.",
+    )
+    parser.add_argument(
+        "--ports",
+        default=None,
+        help="Comma-separated logical port names to release. If omitted, releases all ports held by the user-id.",
+    )
+    _add_payload_args(parser)
 
 
 def _add_config_interface_args(parser: argparse.ArgumentParser) -> None:
@@ -150,6 +192,10 @@ def _add_verify_loss_args(parser: argparse.ArgumentParser) -> None:
 # ── Handler 函数 ──────────────────────────────────────────
 
 
+def _run_acquire_ports(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_acquire_ports")
+
+
 def _run_config_interface(args: argparse.Namespace) -> int:
     return _run_trex(args, "tg_config_interface")
 
@@ -172,6 +218,10 @@ def _run_stop_stream(args: argparse.Namespace) -> int:
 
 def _run_verify_loss(args: argparse.Namespace) -> int:
     return _run_trex(args, "tg_verify_traffic_loss")
+
+
+def _run_release_ports(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_release_ports")
 
 
 def _run_trex(args: argparse.Namespace, op_id: str) -> int:
@@ -221,6 +271,14 @@ def _run_trex(args: argparse.Namespace, op_id: str) -> int:
 
 
 def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
+    if op_id == "tg_acquire_ports":
+        return {"user_id": getattr(args, "user_id", None), "ports": _parse_ports(getattr(args, "ports", ""))}
+    if op_id == "tg_release_ports":
+        params: dict[str, Any] = {"user_id": getattr(args, "user_id", None)}
+        ports_str = getattr(args, "ports", None)
+        if ports_str:
+            params["ports"] = _parse_ports(ports_str)
+        return params
     if op_id == "tg_config_interface":
         return {"interfaces": _parse_interfaces(getattr(args, "interfaces", ""))}
     if op_id == "tg_apply_traffic_template":
