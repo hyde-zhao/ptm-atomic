@@ -1,0 +1,43 @@
+schema_version: "1.1"
+op_id: tg_release_ports
+device_type: tg
+description: Release TRex ports previously acquired by a user_id (explicit ownership model).
+parameters:
+  user_id:
+    type: string
+    required: true
+    description: Occupant identifier that previously acquired the ports, format dev<ip-suffix>-<seq> (e.g. dev172-1).
+  ports:
+    type: list
+    required: false
+    description: Logical port names to release. If omitted, releases all ports held by the user_id.
+returns:
+  status: success
+  data:
+    user_id: dev172-1
+    released_ports: [0,1]
+    status: released
+  error_type: RESOURCE_NOT_FOUND
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: state_mutation
+dry_run_supported: false
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - The user_id has previously acquired ports via tg_acquire_ports.
+postconditions:
+  - The ports are released and removed from the ownership record.
+  - The ports are available for acquisition by other users.
+tags:
+  - traffic
+  - trex
+  - port_ownership
+  - concurrency
+since_version: "1.2.0"

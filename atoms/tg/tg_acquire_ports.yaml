@@ -1,0 +1,46 @@
+schema_version: "1.1"
+op_id: tg_acquire_ports
+device_type: tg
+description: Acquire TRex ports for exclusive use by a user (explicit ownership model, force=False).
+parameters:
+  user_id:
+    type: string
+    required: true
+    description: Occupant identifier, format dev<ip-suffix>-<seq> (e.g. dev172-1). Agent-supplied; acquire does not generate a new id.
+  ports:
+    type: list
+    required: true
+    description: Logical port names to acquire, e.g. ["2_1","2_2"]. Mapped to physical port indices via the port map.
+returns:
+  status: success
+  data:
+    user_id: dev172-1
+    ports: ["2_1","2_2"]
+    physical_ports: [0,1]
+    client_idx: 0
+    status: acquired
+  error_type: RESOURCE_CONFLICT
+  diag_snapshot_ref: ""
+idempotent: false
+side_effect: state_mutation
+dry_run_supported: false
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_CONFLICT
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - The TRex STL server and trex-api service are reachable.
+  - The requested ports are not already owned by another user_id.
+postconditions:
+  - The ports are acquired (force=False) and bound to user_id until tg_release_ports or timeout.
+  - An ownership record is created mapping user_id to the acquired ports and a fixed client.
+tags:
+  - traffic
+  - trex
+  - port_ownership
+  - concurrency
+since_version: "1.2.0"
