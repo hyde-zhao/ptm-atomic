@@ -78,6 +78,7 @@ SECURITY_ZONE_OPS = (
     "fw_update_security_zone",
     "fw_delete_security_zone",
     "fw_verify_security_zone",
+    "fw_verify_security_zone_vpp",
 )
 CUSTOMAPPOBJ_OPS = (
     "fw_config_customappobj",

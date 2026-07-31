@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -28,46 +27,6 @@ NO_BODY_OPS = {
     "fw_delete_security_zone",
 }
 
-# ── zone name validation ─────────────────────────────────────
-
-_ZONE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9一-鿿.\-]{1,31}$")
-_FORBIDDEN_NAMES = {".", ".."}
-_FORBIDDEN_PREFIX = "IDMC-"
-
-
-def _validate_zone_name(name: str) -> str:
-    """Validate security-zone name per NGFW constraints.
-
-    Returns the trimmed name on success; raises RunnerError on failure.
-    """
-    if not isinstance(name, str) or not name.strip():
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Security-zone name is required and must be a non-empty string.",
-            {"field": "name"},
-        )
-    name = name.strip()
-    if not _ZONE_NAME_PATTERN.match(name):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Security-zone name must be 1-31 chars: letters, digits, Chinese, hyphen (-), dot (.).",
-            {"field": "name", "name": name},
-        )
-    if name in _FORBIDDEN_NAMES:
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Security-zone name cannot be '.' or '..' alone.",
-            {"field": "name", "name": name},
-        )
-    if name.upper().startswith(_FORBIDDEN_PREFIX):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Security-zone name cannot start with 'IDMC-'.",
-            {"field": "name", "name": name},
-        )
-    return name
-
-
 # ── payload builders ──────────────────────────────────────────
 
 
@@ -77,7 +36,6 @@ def build_security_zone_create_payload(
     desc: str = "",
     interfaces: list[str] | None = None,
 ) -> dict[str, Any]:
-    name = _validate_zone_name(name)
     val: dict[str, Any] = {
         "name": name,
         "desc": desc or "",
@@ -93,7 +51,6 @@ def build_security_zone_update_payload(
     interfaces: list[str] | None = None,
     refcnt: int = 0,
 ) -> dict[str, Any]:
-    name = _validate_zone_name(name)
     val: dict[str, Any] = {
         "name": name,
         "desc": desc or "",
@@ -107,7 +64,6 @@ def build_security_zone_delete_payload(
     *,
     name: str,
 ) -> dict[str, str]:
-    name = _validate_zone_name(name)
     return {"id": name}
 
 
@@ -226,7 +182,6 @@ def _request_url(
     url = f"{normalize_base_url(base_url)}{path}"
     if op_id in DELETE_OPS:
         zone_id = str((payload or {}).get("id") or "")
-        _validate_zone_name(zone_id)
         url = f"{url}?{urlencode({'id': zone_id})}"
     return url
 
@@ -240,3 +195,128 @@ def _method_path(op_id: str) -> tuple[str, str]:
             "Runner does not support this security-zone operation.",
             {"op_id": op_id},
         ) from exc
+
+
+# ── VPP data-plane verification via SSH ──────────────────────
+
+VPPCTL_PATH = "/opt/dbappsecurity/bin/vppctl"
+
+
+def build_vpp_verify_dry_run(
+    *,
+    ssh_host: str,
+    ssh_port: int = 22,
+    ssh_user: str = "root",
+    zone_name: str | None = None,
+    expected_interfaces: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "op_id": "fw_verify_security_zone_vpp",
+        "status": "dry_run",
+        "execute_required": True,
+        "request": {
+            "method": "SSH",
+            "host": ssh_host,
+            "port": ssh_port,
+            "user": ssh_user,
+            "command": f"{VPPCTL_PATH} show zone"
+            + (f" name {zone_name}" if zone_name else ""),
+        },
+    }
+
+
+def execute_vpp_verify(
+    *,
+    ssh_host: str,
+    ssh_port: int = 22,
+    ssh_user: str = "root",
+    ssh_password: str,
+    zone_name: str | None = None,
+    expected_interfaces: list[str] | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """SSH into the NGFW device and run 'vppctl show zone' to verify VPP data-plane state."""
+    import paramiko
+
+    cmd = f"{VPPCTL_PATH} show zone"
+    if zone_name:
+        cmd += f" name {zone_name}"
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            hostname=ssh_host,
+            port=ssh_port,
+            username=ssh_user,
+            password=ssh_password,
+            timeout=timeout,
+            look_for_keys=False,
+            allow_agent=False,
+        )
+        _stdin, stdout, stderr = client.exec_command(cmd, timeout=timeout)
+        vpp_output = stdout.read().decode("utf-8", errors="replace").strip()
+        err_output = stderr.read().decode("utf-8", errors="replace").strip()
+        if err_output and not vpp_output:
+            vpp_output = err_output
+        elif err_output:
+            vpp_output = vpp_output + "\n" + err_output
+    except Exception as exc:
+        raise RunnerError(
+            "SSH_CONNECTION_FAILED",
+            f"SSH connection to device failed: {exc}",
+            {"host": ssh_host, "port": ssh_port},
+            suggestion="Verify SSH connectivity and credentials.",
+        ) from exc
+    finally:
+        client.close()
+
+    if not vpp_output:
+        raise RunnerError(
+            "VPP_COMMAND_FAILED",
+            "VPP show zone command returned empty output.",
+            {"host": ssh_host, "command": cmd},
+        )
+
+    # Parse VPP output to extract zone info
+    # VPP output is a table: "Name               Idx     Interface"
+    # Lines like: "trust-zone               0       port1 port2"
+    interfaces_found: list[str] = []
+    zone_found: str | None = None
+    for line in vpp_output.split("\n"):
+        line_stripped = line.strip()
+        if not line_stripped or line_stripped.startswith("Name") or line_stripped.startswith("---"):
+            continue
+        # Check for "unknown zone" response
+        if "unknown zone" in line_stripped.lower():
+            zone_found = None
+            continue
+        # Parse table row: zone_name idx interfaces...
+        parts = line_stripped.split()
+        if len(parts) >= 1 and zone_name:
+            if parts[0] == zone_name:
+                zone_found = zone_name
+                if len(parts) > 2:
+                    interfaces_found = parts[2:]
+        elif len(parts) >= 1:
+            # List all zones mode
+            if not zone_found:
+                zone_found = parts[0] if len(parts) >= 1 else None
+            if len(parts) > 2:
+                if zone_name and parts[0] == zone_name:
+                    interfaces_found = parts[2:]
+
+    vpp_api_consistent = True
+    if expected_interfaces:
+        vpp_api_consistent = set(expected_interfaces) == set(interfaces_found)
+
+    return {
+        "op_id": "fw_verify_security_zone_vpp",
+        "status": "success",
+        "data": {
+            "zone_name": zone_name or zone_found or "<all>",
+            "vpp_output": vpp_output[:4096],
+            "interfaces_found": interfaces_found,
+            "vpp_api_consistent": vpp_api_consistent,
+        },
+    }

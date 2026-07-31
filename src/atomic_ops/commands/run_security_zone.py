@@ -8,6 +8,7 @@ from typing import Any
 from atomic_ops.commands import CommandSpec
 from atomic_ops.commands.run import (
     _arg_list,
+    _read_secret_env,
     _require_arg,
     _single_arg,
     _to_run_envelope,
@@ -48,6 +49,13 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             description="Query all security zones on the device.",
             handler=_run_verify,
             add_args=_add_verify_args,
+        ),
+        CommandSpec(
+            name="verify-vpp",
+            help="Verify security zone VPP data-plane state via SSH.",
+            description="SSH into the device, run vppctl show zone, and compare with expected interfaces.",
+            handler=_run_verify_vpp,
+            add_args=_add_verify_vpp_args,
         ),
     )
 
@@ -153,6 +161,49 @@ def _run_security_zone(args: argparse.Namespace, op_id: str) -> int:
                 payload=payload,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _add_verify_vpp_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--ssh-host", required=True, help="Device SSH hostname or IP.")
+    parser.add_argument("--ssh-port", type=int, default=22, help="SSH port (default 22).")
+    parser.add_argument("--ssh-user", default="root", help="SSH login user (default root).")
+    parser.add_argument("--ssh-password-env", default=None, help="Environment variable containing SSH password.")
+    parser.add_argument("--zone-name", default=None, help="Security-zone name to look up in VPP.")
+    parser.add_argument("--expected-interfaces", nargs="*", default=None, help="Expected interface names in VPP zone output.")
+
+
+def _run_verify_vpp(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.security_zone import build_vpp_verify_dry_run, execute_vpp_verify
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+
+    try:
+        if not ctx.get("execute"):
+            result = build_vpp_verify_dry_run(
+                ssh_host=getattr(args, "ssh_host"),
+                ssh_port=int(getattr(args, "ssh_port", 22)),
+                ssh_user=getattr(args, "ssh_user", "root"),
+                zone_name=getattr(args, "zone_name", None),
+                expected_interfaces=_arg_list(args, "expected_interfaces"),
+            )
+        else:
+            ssh_password = _read_secret_env(getattr(args, "ssh_password_env", None), "ssh_password_env")
+            result = execute_vpp_verify(
+                ssh_host=getattr(args, "ssh_host"),
+                ssh_port=int(getattr(args, "ssh_port", 22)),
+                ssh_user=getattr(args, "ssh_user", "root"),
+                ssh_password=ssh_password,
+                zone_name=getattr(args, "zone_name", None),
+                expected_interfaces=_arg_list(args, "expected_interfaces"),
             )
         _write_output(_to_run_envelope(result), output_format)
         return 0
