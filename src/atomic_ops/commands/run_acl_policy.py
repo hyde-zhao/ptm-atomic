@@ -47,7 +47,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     enable_group = parser.add_mutually_exclusive_group()
     enable_group.add_argument("--enable", dest="acl_policy_enable", action="store_true", default=True, help="Enable the control policy (default).")
     enable_group.add_argument("--disable", dest="acl_policy_enable", action="store_false", help="Disable the control policy.")
-    parser.add_argument("--action", type=int, default=0, help="Control-policy action value (0=permit).")
+    parser.add_argument("--action", type=int, default=1, help="Control-policy action value (1=permit, 0=deny).")
     parser.add_argument("--log", action="store_true", help="Enable session logging for the control policy.")
     parser.add_argument("--szone", default="any", help="Source security zone name.")
     parser.add_argument("--dzone", default="any", help="Destination security zone name.")
@@ -136,7 +136,7 @@ def _run_acl_policy(args: argparse.Namespace, op_id: str) -> int:
                 policy_type=policy_type,
                 name=getattr(args, "name"),
                 enable=bool(getattr(args, "acl_policy_enable", True)),
-                action=int(getattr(args, "action", 0)),
+                action=int(getattr(args, "action", 1)),
                 log=bool(getattr(args, "log", False)),
                 szone=getattr(args, "szone", "any"),
                 dzone=getattr(args, "dzone", "any"),

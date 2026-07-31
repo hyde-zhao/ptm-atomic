@@ -48,7 +48,7 @@ def build_acl_policy_payload(
     policy_type: str = "ipv4",
     name: str,
     enable: bool = True,
-    action: int = 0,
+    action: int = 1,
     log: bool = False,
     szone: str = "any",
     dzone: str = "any",
