@@ -19,7 +19,14 @@ parameters:
   params:
     type: json
     required: true
-    description: Control-policy create object. policy_type selects the IPv4 (ip4policy) or IPv6 (ip6policy) address family and only changes the request path; the val body is identical for both families. name, szone, dzone, src_addr, dst_addr, and service are required match fields.
+    description: >-
+      Control-policy create object. policy_type selects the IPv4 (ip4policy) or
+      IPv6 (ip6policy) address family and only changes the request path; the val
+      body is identical for both families. name, szone, dzone, src_addr, dst_addr,
+      and service are required match fields.
+
+      action 取值为整数: 0=阻断(deny), 1=放行(permit)。与 NGFW Web UI
+      策略配置中"动作"下拉框的"阻断/放行"一一对应。
   idempotency_key:
     type: string
     required: true
@@ -32,7 +39,7 @@ inputs:
     policy_type: ipv4
     name: test1
     enable: true
-    action: 0
+    action: 0  # 0=阻断(deny), 1=放行(permit)
     log: false
     szone: any
     dzone: any
