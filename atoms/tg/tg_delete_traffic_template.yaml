@@ -4,6 +4,13 @@ device_type: tg
 description: Delete a TRex traffic template when no runtime stream uses it.
 adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_delete_traffic_template
 parameters:
+  user_id:
+    type: string
+    required: false
+    description: >-
+      TRex multi-user owner id. Defaults to "default" (legacy force mode).
+      Set to dev<ip-suffix>-<seq> (e.g. dev171-1) and pair with tg_acquire_ports
+      so template delete reuses the acquired client without re-acquiring.
   template:
     type: string
     required: true

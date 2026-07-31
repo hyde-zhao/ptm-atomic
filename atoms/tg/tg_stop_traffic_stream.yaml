@@ -4,6 +4,13 @@ device_type: tg
 description: Stop a TRex traffic stream and clean its runtime stream configuration.
 adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_stop_traffic_stream
 parameters:
+  user_id:
+    type: string
+    required: false
+    description: >-
+      TRex multi-user owner id. Defaults to "default" (legacy force mode).
+      Set to dev<ip-suffix>-<seq> (e.g. dev171-1) and pair with tg_acquire_ports
+      so stream stop reuses the acquired client without re-acquiring.
   ports:
     type: list
     required: true

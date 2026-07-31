@@ -84,6 +84,13 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                             handler=_run_release_ports,
                             add_args=_add_release_ports_args,
                         ),
+                        CommandSpec(
+                            name="verify-ownership",
+                            help="Query TRex port ownership across all users.",
+                            description="Query the trex-api ownership registry for current port occupation by all users.",
+                            handler=_run_verify_ownership,
+                            add_args=_add_verify_ownership_args,
+                        ),
                     ),
                 ),
             ),
@@ -97,6 +104,15 @@ def build_subtree() -> tuple[CommandGroup, ...]:
 def _add_payload_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_user_id_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--user-id",
+        default="default",
+        help="TRex multi-user owner id (default 'default' = legacy force mode; set "
+        "dev<ip-suffix>-<seq> like dev171-1 to pair with acquire-ports for owned mode).",
+    )
 
 
 def _add_acquire_ports_args(parser: argparse.ArgumentParser) -> None:
@@ -128,6 +144,7 @@ def _add_release_ports_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_config_interface_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
     parser.add_argument(
         "--interfaces",
         required=True,
@@ -158,10 +175,12 @@ def _add_apply_template_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dst-ip", default=None, help="Optional destination IP.")
     parser.add_argument("--src-mac", default=None, help="Optional source MAC.")
     parser.add_argument("--dst-mac", default=None, help="Optional destination MAC.")
+    _add_user_id_arg(parser)
     _add_payload_args(parser)
 
 
 def _add_delete_template_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
     parser.add_argument("--template", required=True, help="Traffic template name to delete.")
     _add_payload_args(parser)
 
@@ -175,6 +194,7 @@ def _add_stop_stream_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_stream_args(parser: argparse.ArgumentParser, *, include_template: bool) -> None:
+    _add_user_id_arg(parser)
     parser.add_argument("--ports", required=True, help="Comma-separated TRex port IDs occupied by this operation.")
     parser.add_argument("--txport", required=True, help="TRex port ID that transmits traffic.")
     parser.add_argument("--rxport", required=True, help="TRex port ID that receives traffic.")
@@ -187,6 +207,10 @@ def _add_stream_args(parser: argparse.ArgumentParser, *, include_template: bool)
 def _add_verify_loss_args(parser: argparse.ArgumentParser) -> None:
     _add_stream_args(parser, include_template=False)
     parser.add_argument("--max-loss", type=float, required=True, help="Maximum allowed loss ratio (>= 0).")
+
+
+def _add_verify_ownership_args(parser: argparse.ArgumentParser) -> None:
+    _add_payload_args(parser)
 
 
 # ── Handler 函数 ──────────────────────────────────────────
@@ -222,6 +246,10 @@ def _run_verify_loss(args: argparse.Namespace) -> int:
 
 def _run_release_ports(args: argparse.Namespace) -> int:
     return _run_trex(args, "tg_release_ports")
+
+
+def _run_verify_ownership(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_verify_ownership")
 
 
 def _run_trex(args: argparse.Namespace, op_id: str) -> int:
@@ -279,10 +307,16 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
         if ports_str:
             params["ports"] = _parse_ports(ports_str)
         return params
+    if op_id == "tg_verify_ownership":
+        return {}
     if op_id == "tg_config_interface":
-        return {"interfaces": _parse_interfaces(getattr(args, "interfaces", ""))}
+        return {
+            "user_id": getattr(args, "user_id", "default"),
+            "interfaces": _parse_interfaces(getattr(args, "interfaces", "")),
+        }
     if op_id == "tg_apply_traffic_template":
         return {
+            "user_id": getattr(args, "user_id", "default"),
             "template": getattr(args, "template", None),
             "tx_port": getattr(args, "tx_port", None),
             "rx_port": getattr(args, "rx_port", None),
@@ -301,7 +335,8 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
             "dst_mac": getattr(args, "dst_mac", None),
         }
     if op_id in {"tg_start_traffic_stream", "tg_stop_traffic_stream", "tg_verify_traffic_loss"}:
-        params: dict[str, Any] = {
+        params = {
+            "user_id": getattr(args, "user_id", "default"),
             "ports": _parse_ports(getattr(args, "ports", "")),
             "txport": getattr(args, "txport", None),
             "rxport": getattr(args, "rxport", None),
@@ -313,7 +348,7 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
             params["max_loss"] = getattr(args, "max_loss", None)
         return params
     if op_id == "tg_delete_traffic_template":
-        return {"template": getattr(args, "template", None)}
+        return {"user_id": getattr(args, "user_id", "default"), "template": getattr(args, "template", None)}
     return {}
 
 

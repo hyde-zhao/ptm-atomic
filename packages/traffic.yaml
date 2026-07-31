@@ -2,12 +2,15 @@
 # They do not install, copy, or distribute operation YAML files.
 package_id: traffic
 display_name: Traffic
-description: Traffic generator operations for TRex template and stream lifecycle.
-version: "1.1.0"
+description: Traffic generator operations for TRex template and stream lifecycle, multi-user port ownership, and ownership query.
+version: "1.2.0"
 operations:
+  - tg_acquire_ports
   - tg_config_interface
   - tg_apply_traffic_template
   - tg_start_traffic_stream
   - tg_verify_traffic_loss
   - tg_stop_traffic_stream
   - tg_delete_traffic_template
+  - tg_release_ports
+  - tg_verify_ownership
