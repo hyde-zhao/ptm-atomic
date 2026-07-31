@@ -66,6 +66,12 @@ POLICY_ROUTE_OPS = (
     "fw_verify_policy_route",
     "fw_update_policy_route_priority",
 )
+STATIC_ROUTE_OPS = (
+    "fw_config_static_route",
+    "fw_update_static_route",
+    "fw_delete_static_route",
+    "fw_verify_static_route",
+)
 INTERFACE_OPS = (
     "fw_config_interface",
     "fw_update_interface",
@@ -132,6 +138,7 @@ SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_config_object",
     *POLICY_ROUTE_OPS,
+    *STATIC_ROUTE_OPS,
     *INTERFACE_OPS,
     *OSPFV2_OPS,
     *OSPFV3_BFD_OPS,
@@ -157,6 +164,10 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_delete_policy_route": ("policy-route", "delete"),
     "fw_verify_policy_route": ("policy-route", "verify"),
     "fw_update_policy_route_priority": ("policy-route", "priority"),
+    "fw_config_static_route": ("static-route", "config"),
+    "fw_update_static_route": ("static-route", "update"),
+    "fw_delete_static_route": ("static-route", "delete"),
+    "fw_verify_static_route": ("static-route", "verify"),
     "fw_config_interface": ("interface", "create"),
     "fw_update_interface": ("interface", "update"),
     "fw_verify_interface": ("interface", "verify"),
@@ -289,6 +300,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_ip6pool_group as run_ip6pool_group
     from atomic_ops.commands import run_timeobject as run_timeobject
     from atomic_ops.commands import run_policy_route as run_policy_route
+    from atomic_ops.commands import run_static_route as run_static_route
     from atomic_ops.commands import run_security_zone as run_security_zone
     from atomic_ops.commands import run_acl_policy as run_acl_policy
     from atomic_ops.commands import run_acl_policy_group as run_acl_policy_group
@@ -358,6 +370,12 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="Policy-based routing operations.",
             description="Policy-route configuration, update, delete, verify, and priority operations.",
             children=run_policy_route.build_subtree(),
+        ),
+        CommandGroup(
+            name="static-route",
+            help="Static route operations.",
+            description="Static route configuration, update, delete, and verify operations.",
+            children=run_static_route.build_subtree(),
         ),
         CommandGroup(
             name="security-zone",
@@ -465,6 +483,8 @@ def _dispatch_legacy(op_id: str, args: argparse.Namespace) -> int:
             payload = _run_object_legacy(args)
         elif op_id in POLICY_ROUTE_OPS:
             payload = _run_policy_route_legacy(args)
+        elif op_id in STATIC_ROUTE_OPS:
+            payload = _run_static_route_legacy(args)
         elif op_id in INTERFACE_OPS:
             payload = _run_interface_legacy(args)
         elif op_id in SECURITY_ZONE_OPS:
@@ -652,6 +672,63 @@ def _run_policy_route_legacy(args: argparse.Namespace) -> dict[str, Any]:
         route_type=route_type,
         verify_tls=bool(getattr(args, "verify_tls")),
         timeout=float(getattr(args, "timeout")),
+    )
+
+
+def _run_static_route_legacy(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.static_route import (
+        build_static_route_dry_run,
+        build_static_route_payload,
+        execute_static_route,
+    )
+
+    op_id = getattr(args, "op_id")
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    route_type = getattr(args, "route_type", "ipv4")
+    payload: dict[str, Any] | None
+    if op_id in {"fw_config_static_route", "fw_update_static_route"}:
+        _require_arg(args, "dst_network")
+        _require_arg(args, "next_hop_addr")
+        entry_id = int(getattr(args, "id", 0) or 0)
+        payload = build_static_route_payload(
+            dst_network=getattr(args, "dst_network"),
+            next_hop_addr=getattr(args, "next_hop_addr"),
+            enable=bool(getattr(args, "enable", True)),
+            preference=int(getattr(args, "preference", 1)),
+            weight=int(getattr(args, "weight", 0)),
+            outgoing_interface=getattr(args, "outgoing_interface", "") or "",
+            route_type=route_type,
+            entry_id=entry_id,
+        )
+    elif op_id == "fw_delete_static_route":
+        _require_arg(args, "id")
+        payload = {"id": int(getattr(args, "id"))}
+    else:
+        payload = None
+    if not getattr(args, "execute"):
+        return build_static_route_dry_run(
+            op_id=op_id,
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            payload=payload,
+            page=int(getattr(args, "page", 1)),
+            size=int(getattr(args, "size", 40)),
+            route_type=route_type,
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout", 10.0)),
+        )
+    return execute_static_route(
+        op_id=op_id,
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        payload=payload,
+        page=int(getattr(args, "page", 1)),
+        size=int(getattr(args, "size", 40)),
+        route_type=route_type,
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout", 10.0)),
     )
 
 
