@@ -534,6 +534,119 @@ operations:
         - targetsite supports before, after, first, and last.
         - is_ip6=false moves IPv4 policy route priority; is_ip6=true moves IPv6 policy route priority.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_static_route:
+    atom_ref: atoms/fw/fw_config_static_route.yaml
+    intent: Build a static route create request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/route
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          dst_network: "{{ params.dst_network }}"
+          enable: "{{ params.enable }}"
+          next_hop_addr: "{{ params.next_hop_addr }}"
+          preference: "{{ params.preference }}"
+          weight: "{{ params.weight }}"
+          outgoing_interface: "{{ params.outgoing_interface }}"
+    response:
+      success_status:
+        - 200
+        - 201
+      result_ref: <static-route-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST /api/v1/route creates a new static route; the response does not include the created route id.
+        - dst_network must be in CIDR notation (e.g. 1.1.1.0/24).
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_static_route:
+    atom_ref: atoms/fw/fw_update_static_route.yaml
+    intent: Build a static route update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/route
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          id: "{{ params.id }}"
+          dst_network: "{{ params.dst_network }}"
+          enable: "{{ params.enable }}"
+          next_hop_addr: "{{ params.next_hop_addr }}"
+          preference: "{{ params.preference }}"
+          weight: "{{ params.weight }}"
+          outgoing_interface: "{{ params.outgoing_interface }}"
+    response:
+      success_status:
+        - 200
+        - 201
+      result_ref: <static-route-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/route updates an existing static route; the route id must exist on the device.
+        - All fields must be provided (no partial update).
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_static_route:
+    atom_ref: atoms/fw/fw_delete_static_route.yaml
+    intent: Build a static route delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/route
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+      result_ref: <static-route-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE /api/v1/route?id=<id> removes an existing static route by id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_static_route:
+    atom_ref: atoms/fw/fw_verify_static_route.yaml
+    intent: Build a static route query request.
+    request:
+      method: GET
+      path: /api/v1/route
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        is_ip6: "{{ params.is_ip6 }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <static-route-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET /api/v1/route?page=1&size=40&is_ip6=false queries the static route list.
+        - is_ip6=false queries IPv4 static routes; is_ip6=true queries IPv6 static routes.
   fw_config_ospfv2_global:
     atom_ref: atoms/fw/fw_config_ospfv2_global.yaml
     intent: Build an OSPFv2 global configuration request from a validated atom parameter set.
