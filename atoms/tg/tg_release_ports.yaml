@@ -2,6 +2,7 @@ schema_version: "1.1"
 op_id: tg_release_ports
 device_type: tg
 description: Release TRex ports previously acquired by a user_id (explicit ownership model).
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_release_ports
 parameters:
   user_id:
     type: string
@@ -21,7 +22,15 @@ returns:
   diag_snapshot_ref: ""
 idempotent: true
 side_effect: state_mutation
-dry_run_supported: false
+rollback_strategy:
+  type: inverse_op
+  op_id: tg_acquire_ports
+  snapshot_required: false
+  required_inputs:
+    - user_id
+    - ports
+  notes: Re-acquire the released ports; when ports was omitted (release-all), specify ports explicitly on rollback.
+dry_run_supported: true
 risk_level: low
 timeout_ms: 30000
 error_types:

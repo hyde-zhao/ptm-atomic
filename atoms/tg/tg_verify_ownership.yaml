@@ -1,0 +1,43 @@
+schema_version: "1.1"
+op_id: tg_verify_ownership
+device_type: tg
+description: Query current TRex port ownership across all users from the trex-api internal ownership registry.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_verify_ownership
+parameters: {}
+returns:
+  status: success
+  data:
+    count: 2
+    ownerships:
+      - user_id: dev171-1
+        logical_ports: ["2_3"]
+        physical_ports: [2]
+        client_idx: 2
+        acquired_at: 0.0
+        last_success_at: 0.0
+      - user_id: dev172-1
+        logical_ports: ["2_1","2_2"]
+        physical_ports: [0,1]
+        client_idx: 0
+        acquired_at: 0.0
+        last_success_at: 0.0
+  error_type: INTERNAL_ERROR
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: observation
+dry_run_supported: true
+risk_level: low
+timeout_ms: 15000
+error_types:
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - The trex-api service is reachable.
+postconditions:
+  - The response reflects the current trex-api internal ownership registry.
+tags:
+  - traffic
+  - trex
+  - port_ownership
+since_version: "1.2.0"

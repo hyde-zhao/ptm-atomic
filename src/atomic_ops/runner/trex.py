@@ -39,9 +39,22 @@ TREX_OPS: dict[str, tuple[str, str]] = {
         "tg_release_ports",
     )
 }
+# ownership 走独立 GET 端点，非 /api/v1/ops/{op_id} 调度
+TREX_OPS["tg_verify_ownership"] = ("GET", "/api/v1/ownership")
 
 # user_id 命名规范：default（兼容旧流程）或 dev<ip末段>-<序号>（如 dev172-1）
 USER_ID_RE = re.compile(r"^(default|dev\d{1,3}-\d+)$")
+
+# 这 6 个 op 在多用户占用模式下接受可选 user_id 并转发到 trex-api；
+# acquire/release 的 user_id 是必填参数，由各自的 build/validate 分支单独处理
+_USER_ID_FORWARD_OPS = {
+    "tg_config_interface",
+    "tg_apply_traffic_template",
+    "tg_start_traffic_stream",
+    "tg_verify_traffic_loss",
+    "tg_stop_traffic_stream",
+    "tg_delete_traffic_template",
+}
 
 # trex-api OperationEnvelope.error_type -> (CLI runner error_code, retryable)
 ERROR_TYPE_MAP: dict[str, tuple[str, bool]] = {
@@ -143,12 +156,20 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
             payload["max_loss"] = params.get("max_loss")
     elif op_id == "tg_delete_traffic_template":
         payload = {"template": params.get("template")}
+    elif op_id == "tg_verify_ownership":
+        # GET 查询无请求体
+        payload: dict[str, Any] = {}
     else:
         raise RunnerError(
             "RUNNER_UNSUPPORTED_OP",
             "Runner does not support this TRex operation.",
             {"op_id": op_id, "supported_ops": list(TREX_OPS)},
         )
+    # 多用户占用模式：非 default 的 user_id 转发到 trex-api（default/省略走旧 force 模式）
+    if op_id in _USER_ID_FORWARD_OPS:
+        user_id = params.get("user_id")
+        if user_id is not None and user_id != "default":
+            payload["user_id"] = user_id
     return validate_trex_payload(op_id, payload)
 
 
@@ -252,12 +273,18 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
             payload["max_loss"] = float(max_loss)
     elif op_id == "tg_delete_traffic_template":
         _validate_template_name(payload.get("template"), field="template")
+    elif op_id == "tg_verify_ownership":
+        # GET 查询无请求体，无需校验
+        pass
     else:
         raise RunnerError(
             "RUNNER_UNSUPPORTED_OP",
             "Runner does not support this TRex operation.",
             {"op_id": op_id, "supported_ops": list(TREX_OPS)},
         )
+    # 转发的 user_id 校验命名规范（覆盖 CLI 传参与 --payload-json 两种入口）
+    if op_id in _USER_ID_FORWARD_OPS and "user_id" in payload:
+        _validate_user_id(payload["user_id"])
     return payload
 
 
@@ -295,6 +322,33 @@ def execute_trex(
     timeout: float,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
+    if method == "GET":
+        # ownership 查询：GET 端点，无请求体，响应是裸 {count, ownerships} 对象非 OperationEnvelope
+        status_code, response_payload, _text = request_json(
+            "GET",
+            _request_url(base_url, op_id),
+            headers=None,
+            json_payload=None,
+            timeout=timeout,
+            verify_tls=verify_tls,
+        )
+        if status_code not in SUCCESS_STATUS:
+            raise RunnerError(
+                "RUNNER_RESPONSE_INVALID",
+                "TRex trex-api ownership query did not return a success HTTP status.",
+                {
+                    "op_id": op_id,
+                    "status_code": status_code,
+                    "response_keys": sorted(response_payload.keys()),
+                },
+            )
+        return {
+            "op_id": op_id,
+            "status": "success",
+            "status_code": status_code,
+            "request": {"method": "GET", "path": path, "auth": {"name": "(none)"}},
+            "response": response_payload,
+        }
     headers = {"Content-Type": "application/json"}
     status_code, response_payload, _text = request_json(
         method,

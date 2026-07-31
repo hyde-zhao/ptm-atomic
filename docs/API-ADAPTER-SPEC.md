@@ -9,6 +9,7 @@
 | v0.3 | 2026-05-20 | Codex | Add OSPFv2 method-level adapter operations for config, query, and delete. |
 | v0.4 | 2026-05-20 | Codex | Add OSPFv3 and BFD method-level adapter operations. |
 | v0.5 | 2026-07-17 | meta-dev | Add trex.default adapter profile for tg TRex operations. |
+| v0.6 | 2026-07-30 | meta-dev | Add tg_acquire_ports/tg_release_ports/tg_verify_ownership operations and user_id field for multi-user port ownership. |
 
 ## Purpose
 
@@ -181,16 +182,21 @@ GET entries keep `payload_template: {}` to satisfy the schema while the runner s
 
 ## TRex Profile
 
-The `adapters/trex/default.yaml` profile maps the six `tg` traffic-generator operations to the trex-api HTTP service. Unlike the NGFW profile, trex-api exposes a single dispatch endpoint `POST /api/v1/ops/{op_id}` for every operation (including verify and delete), and success is decided by the response `OperationEnvelope` (`{op_id, status, data, error_type, diag_snapshot_ref}`) rather than the HTTP status code, which stays `200` even on failure. The service is unauthenticated, so the profile declares a placeholder `external_credential_ref` auth entry and the runner sends no credential header at runtime.
+The `adapters/trex/default.yaml` profile maps the nine `tg` traffic-generator operations to the trex-api HTTP service. Eight operations go through the single dispatch endpoint `POST /api/v1/ops/{op_id}` (including verify and delete), and success is decided by the response `OperationEnvelope` (`{op_id, status, data, error_type, diag_snapshot_ref}`) rather than the HTTP status code, which stays `200` even on failure. The `tg_verify_ownership` query uses a dedicated `GET /api/v1/ownership` endpoint and returns a raw `{count, ownerships}` object instead of an envelope; HTTP 200 alone determines success. The service is unauthenticated, so the profile declares a placeholder `external_credential_ref` auth entry and the runner sends no credential header at runtime.
+
+All operations carry an optional `user_id` field (default `"default"` = legacy force mode). Set `user_id` to `dev<ip-suffix>-<seq>` (for example `dev171-1`) and pair `tg_acquire_ports` with `tg_config_interface` / `tg_start_traffic_stream` / `tg_stop_traffic_stream` / `tg_verify_traffic_loss` so they reuse the acquired client without re-acquiring ports. `tg_acquire_ports` and `tg_release_ports` require `user_id`.
 
 | Operation | Method | Path | Payload |
 |---|---|---|---|
-| `tg_config_interface` | `POST` | `/api/v1/ops/tg_config_interface` | `interfaces` array |
-| `tg_apply_traffic_template` | `POST` | `/api/v1/ops/tg_apply_traffic_template` | flat template fields (`template`, `tx_port`, `rx_port`, `l4_*`, `rate`, ...) |
-| `tg_start_traffic_stream` | `POST` | `/api/v1/ops/tg_start_traffic_stream` | flat stream fields (`ports`, `txport`, `rxport`, `template`, `name`) |
-| `tg_verify_traffic_loss` | `POST` | `/api/v1/ops/tg_verify_traffic_loss` | flat stream fields + `max_loss` |
-| `tg_stop_traffic_stream` | `POST` | `/api/v1/ops/tg_stop_traffic_stream` | flat stream fields |
-| `tg_delete_traffic_template` | `POST` | `/api/v1/ops/tg_delete_traffic_template` | `template` |
+| `tg_acquire_ports` | `POST` | `/api/v1/ops/tg_acquire_ports` | `user_id`, `ports` array |
+| `tg_config_interface` | `POST` | `/api/v1/ops/tg_config_interface` | `user_id?`, `interfaces` array |
+| `tg_apply_traffic_template` | `POST` | `/api/v1/ops/tg_apply_traffic_template` | `user_id?`, flat template fields (`template`, `tx_port`, `rx_port`, `l4_*`, `rate`, ...) |
+| `tg_start_traffic_stream` | `POST` | `/api/v1/ops/tg_start_traffic_stream` | `user_id?`, flat stream fields (`ports`, `txport`, `rxport`, `template`, `name`) |
+| `tg_verify_traffic_loss` | `POST` | `/api/v1/ops/tg_verify_traffic_loss` | `user_id?`, flat stream fields + `max_loss` |
+| `tg_stop_traffic_stream` | `POST` | `/api/v1/ops/tg_stop_traffic_stream` | `user_id?`, flat stream fields |
+| `tg_delete_traffic_template` | `POST` | `/api/v1/ops/tg_delete_traffic_template` | `user_id?`, `template` |
+| `tg_release_ports` | `POST` | `/api/v1/ops/tg_release_ports` | `user_id`, `ports?` (omit to release all) |
+| `tg_verify_ownership` | `GET` | `/api/v1/ownership` | none |
 
 The runner reads the trex-api base URL from `--base-url` (for example `http://10.0.0.1:8000`) and does not consume the NGFW session file. On a failed envelope the runner maps `error_type` to a stable CLI error code: `INVALID_PARAM` / `RESOURCE_NOT_FOUND` / `STATE_MISMATCH` -> `RUNNER_VALIDATION_FAILED`, `RESOURCE_CONFLICT` -> `RUNNER_CONFIG_REJECTED`, `INTERNAL_ERROR` -> `RUNNER_RESPONSE_INVALID`, `DEVICE_UNREACHABLE` / `TIMEOUT` -> `RUNNER_DEVICE_UNREACHABLE`.
 

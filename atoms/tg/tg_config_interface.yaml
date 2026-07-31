@@ -4,6 +4,13 @@ device_type: tg
 description: Configure TRex IPv4 or IPv6 interfaces and learn gateway MAC addresses with ARP or Neighbor Discovery.
 adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_config_interface
 parameters:
+  user_id:
+    type: string
+    required: false
+    description: >-
+      TRex multi-user owner id. Defaults to "default" (legacy force mode).
+      Set to dev<ip-suffix>-<seq> (e.g. dev171-1) and pair with tg_acquire_ports
+      so config/start/stop/verify reuse the acquired client without re-acquiring.
   interfaces:
     type: list
     required: true

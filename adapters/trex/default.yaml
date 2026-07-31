@@ -16,6 +16,7 @@ operations:
         header_name: X-Session-Ref
         value_ref: <trex-no-auth>
       payload_template:
+        user_id: "{{ params.user_id }}"
         interfaces: "{{ params.interfaces }}"
     response:
       success_status:
@@ -40,6 +41,7 @@ operations:
         header_name: X-Session-Ref
         value_ref: <trex-no-auth>
       payload_template:
+        user_id: "{{ params.user_id }}"
         template: "{{ params.template }}"
         tx_port: "{{ params.tx_port }}"
         rx_port: "{{ params.rx_port }}"
@@ -79,6 +81,7 @@ operations:
         header_name: X-Session-Ref
         value_ref: <trex-no-auth>
       payload_template:
+        user_id: "{{ params.user_id }}"
         ports: "{{ params.ports }}"
         txport: "{{ params.txport }}"
         rxport: "{{ params.rxport }}"
@@ -107,6 +110,7 @@ operations:
         header_name: X-Session-Ref
         value_ref: <trex-no-auth>
       payload_template:
+        user_id: "{{ params.user_id }}"
         ports: "{{ params.ports }}"
         txport: "{{ params.txport }}"
         rxport: "{{ params.rxport }}"
@@ -135,6 +139,7 @@ operations:
         header_name: X-Session-Ref
         value_ref: <trex-no-auth>
       payload_template:
+        user_id: "{{ params.user_id }}"
         ports: "{{ params.ports }}"
         txport: "{{ params.txport }}"
         rxport: "{{ params.rxport }}"
@@ -162,6 +167,7 @@ operations:
         header_name: X-Session-Ref
         value_ref: <trex-no-auth>
       payload_template:
+        user_id: "{{ params.user_id }}"
         template: "{{ params.template }}"
     response:
       success_status:
@@ -173,4 +179,80 @@ operations:
       notes:
         - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
         - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_acquire_ports:
+    atom_ref: atoms/tg/tg_acquire_ports.yaml
+    intent: Build a TRex port acquire request that exclusively binds logical ports to a user_id under the explicit ownership model (force=False).
+    request:
+      method: POST
+      path: /api/v1/ops/tg_acquire_ports
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        ports: "{{ params.ports }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-acquire-ports-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - A RESOURCE_CONFLICT error_type means the port is already owned by another user_id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_release_ports:
+    atom_ref: atoms/tg/tg_release_ports.yaml
+    intent: Build a TRex port release request that frees ports previously acquired by a user_id; omit ports to release all ports held by the user_id.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_release_ports
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        ports: "{{ params.ports }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-release-ports-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - A RESOURCE_NOT_FOUND error_type means the user_id owns no matching ports.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_verify_ownership:
+    atom_ref: atoms/tg/tg_verify_ownership.yaml
+    intent: Build a TRex port ownership query that returns the trex-api internal ownership registry across all users.
+    request:
+      method: GET
+      path: /api/v1/ownership
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-ownership-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - This operation uses a dedicated GET /api/v1/ownership endpoint, not the POST /api/v1/ops/{op_id} dispatch endpoint.
+        - The response is a raw {count, ownerships} object, not an OperationEnvelope; HTTP 200 alone determines success.
         - ptm-atomic run can execute this request only when --execute is explicit.

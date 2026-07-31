@@ -4,6 +4,13 @@ device_type: tg
 description: Verify TRex port statistics against a maximum allowed traffic loss ratio.
 adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_verify_traffic_loss
 parameters:
+  user_id:
+    type: string
+    required: false
+    description: >-
+      TRex multi-user owner id. Defaults to "default" (legacy force mode).
+      Set to dev<ip-suffix>-<seq> (e.g. dev171-1) and pair with tg_acquire_ports
+      so loss verify reuses the acquired client without re-acquiring.
   ports:
     type: list
     required: true
