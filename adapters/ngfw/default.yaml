@@ -3743,3 +3743,143 @@ operations:
         - DELETE uses id as a query value and sends no JSON body.
         - id is the custom application-tag name_cn.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_neighbor:
+    atom_ref: atoms/fw/fw_config_neighbor.yaml
+    intent: Build a static neighbor (ARP) entry create request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/neighbor
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          interface: "{{ params.val.interface }}"
+          ipAddress: "{{ params.val.ipAddress }}"
+          physAddress: "{{ params.val.physAddress }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <neighbor-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The neighbor entry is identified by the triple interface + ipAddress + physAddress.
+        - POST returns {"msg":"success"} without an id field.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_neighbor:
+    atom_ref: atoms/fw/fw_update_neighbor.yaml
+    intent: Build a neighbor (ARP) entry update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/neighbor
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "0"
+        val:
+          interface: "{{ params.val.interface }}"
+          ipAddress: "{{ params.val.ipAddress }}"
+          physAddress: "{{ params.val.physAddress }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <neighbor-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT carries a fixed id "0" (placeholder); the backend identifies the entry by val fields.
+        - PUT returns {"msg":"success"} without an id field.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_neighbor:
+    atom_ref: atoms/fw/fw_verify_neighbor.yaml
+    intent: Build a paginated neighbor (ARP) table query request.
+    request:
+      method: GET
+      path: /api/v1/neighbor
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <neighbor-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page, size, keywords, is_linux (always false), and is_ip6 (false for IPv4 ARP).
+        - GET returns {"count": N, "vals": [...]} where each val has interface, ipAddress, physAddress, static, binded.
+        - GET requests send no JSON body.
+  fw_delete_neighbor:
+    atom_ref: atoms/fw/fw_delete_neighbor.yaml
+    intent: Build a single neighbor (ARP) entry delete request by interface, IP, and MAC address.
+    request:
+      method: DELETE
+      path: /api/v1/neighbor
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <neighbor-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses interface, ipAddress, and physAddress as query values and sends no JSON body.
+        - Both static and dynamic ARP entries can be deleted.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_neighbor:
+    atom_ref: atoms/fw/fw_delete_batch_neighbor.yaml
+    intent: Build a batch neighbor (ARP) entry delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/neighbor
+            body:
+              physAddress: "{{ params.batch[0].body.physAddress }}"
+              interface: "{{ params.batch[0].body.interface }}"
+              ipAddress: "{{ params.batch[0].body.ipAddress }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <neighbor-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch delete is independent from single-neighbor DELETE /api/v1/neighbor.
+        - Each batch item must be DELETE /api/v1/neighbor with body.physAddress, body.interface, and body.ipAddress as parallel arrays.
+        - Batch body arrays allow multiple values per field for bulk deletion.
+        - ptm-atomic run can execute this request only when --execute is explicit.

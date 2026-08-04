@@ -1,0 +1,79 @@
+schema_version: "1.1"
+op_id: fw_delete_neighbor
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_neighbor
+description: Delete a single NGFW neighbor (ARP) entry from /api/v1/neighbor.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be neighbor for this operation.
+  params:
+    type: json
+    required: true
+    description: Neighbor entry identifiers (interface, ipAddress, physAddress) passed as query parameters.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: neighbor
+  params:
+    val:
+      interface: GE0_2
+      ipAddress: 200.1.1.6
+      physAddress: "00:11:32:a7:7f:41"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: neighbor
+      applied_ref: "<neighbor-delete-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: medium
+  categories:
+    - configuration
+    - network
+gate:
+  required: false
+  reason: Deleting a static ARP entry is reversible by re-creating it.
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - The neighbor entry identified by interface, ipAddress, and physAddress exists.
+postconditions:
+  - The ARP entry is deleted and the result reference is available to the caller.
+tags:
+  - firewall
+  - network
+  - arp
+  - neighbor
+  - configuration
+aliases:
+  - arp
+  - delete-arp
+  - neighbor-table
+  - remove-arp
+since_version: "1.6.0"
