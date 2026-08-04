@@ -1,0 +1,54 @@
+schema_version: "1.1"
+op_id: fw_verify_neighbor
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_neighbor
+description: Query the NGFW neighbor (ARP) table from /api/v1/neighbor.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  query_domain:
+    type: string
+    required: true
+    description: Must be neighbor for this operation.
+inputs:
+  session_ref: "<session-ref>"
+  query_domain: neighbor
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<neighbor-state-ref>"
+    entries: "<neighbor-entries>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - All neighbor (ARP) table entries are available to the caller.
+tags:
+  - firewall
+  - network
+  - arp
+  - neighbor
+  - verification
+aliases:
+  - arp
+  - arp-table
+  - neighbor-table
+  - show-arp
+  - query-arp
+since_version: "1.6.0"

@@ -134,6 +134,13 @@ TIMEOBJECT_OPS = (
     "fw_delete_batch_timeobject",
     "fw_verify_timeobject",
 )
+NEIGHBOR_OPS = (
+    "fw_config_neighbor",
+    "fw_update_neighbor",
+    "fw_verify_neighbor",
+    "fw_delete_neighbor",
+    "fw_delete_batch_neighbor",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_config_object",
@@ -152,6 +159,7 @@ SUPPORTED_OPS = (
     *IPPOOL_GROUP_OPS,
     *IP6POOL_GROUP_OPS,
     *TIMEOBJECT_OPS,
+    *NEIGHBOR_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -217,6 +225,11 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_update_security_zone": ("security-zone", "update"),
     "fw_delete_security_zone": ("security-zone", "delete"),
     "fw_verify_security_zone": ("security-zone", "verify"),
+    "fw_config_neighbor": ("neighbor", "create"),
+    "fw_update_neighbor": ("neighbor", "update"),
+    "fw_verify_neighbor": ("neighbor", "verify"),
+    "fw_delete_neighbor": ("neighbor", "delete"),
+    "fw_delete_batch_neighbor": ("neighbor", "delete-batch"),
 }
 
 # 共享参数名列表（子命令通过 getattr 从父解析器结果中读取）
@@ -314,6 +327,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_reboot as run_reboot
     from atomic_ops.commands import run_ha as run_ha
     from atomic_ops.commands import run_trex as run_trex
+    from atomic_ops.commands import run_neighbor as run_neighbor
     from atomic_ops.commands import run_cli as run_cli
 
     return (
@@ -420,6 +434,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_reboot.build_subtree(),
         *run_ha.build_subtree(),
         *run_trex.build_subtree(),
+        *run_neighbor.build_subtree(),
         CommandGroup(
             name="cli",
             help="SSH/Telnet shell verification operations.",

@@ -1,0 +1,86 @@
+schema_version: "1.1"
+op_id: fw_update_neighbor
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_neighbor
+description: Update an existing NGFW neighbor (ARP) entry through /api/v1/neighbor.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be neighbor for this operation.
+  params:
+    type: json
+    required: true
+    description: Neighbor entry payload with id ("0"), val.interface, val.ipAddress, and val.physAddress.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: neighbor
+  params:
+    id: "0"
+    val:
+      interface: GE0_2
+      ipAddress: 200.1.1.6
+      physAddress: "00:11:32:a7:7f:41"
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: neighbor
+      applied_ref: "<neighbor-update-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: medium
+  categories:
+    - configuration
+    - network
+gate:
+  required: false
+  reason: Static ARP entry updates are low-risk and reversible.
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - An existing neighbor entry identified by interface, ipAddress, and physAddress exists.
+postconditions:
+  - The ARP entry is updated and the result reference is available to the caller.
+tags:
+  - firewall
+  - network
+  - arp
+  - neighbor
+  - configuration
+aliases:
+  - arp
+  - static-arp
+  - neighbor-table
+  - ip-mac-binding
+  - update-arp
+since_version: "1.6.0"
