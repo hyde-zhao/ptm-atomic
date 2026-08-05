@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Policy route create object. type must be ipv4 or ipv6; forwarding path requires next_hop_ip or outgoing_interface, and next_hop_ip must match the selected IP version when provided.
+    description: Policy route create object. type must be ipv4 or ipv6; forwarding path requires next_hop_ip or outgoing_interface, and next_hop_ip must match the selected IP version when provided. applist (list of {appname, appid}) and app_tag_name (list of tag names) are optional application match criteria; omit to match no application. ip_link_name is an optional IP-link object name; when provided, forwarding_paths[].health_check becomes {"type":"iplink","name":"<ip_link_name>"}.
   idempotency_key:
     type: string
     required: true
@@ -44,6 +44,12 @@ inputs:
     time_obj: ""
     action: 1
     config_source: 0
+    applist:
+      - appname: "UDP应用"
+        appid: "479"
+    app_tag_name:
+      - "限速应用"
+    ip_link_name: "13-96"
   idempotency_key: "<idempotency-key>"
 side_effect: state_mutation
 returns:

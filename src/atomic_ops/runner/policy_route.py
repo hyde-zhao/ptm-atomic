@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ipaddress import ip_address
 from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import urlencode
 
@@ -56,6 +57,9 @@ def build_policy_route_payload(
     active: bool = True,
     action: int = 1,
     config_source: int = 0,
+    applist: list[dict[str, Any]] | None = None,
+    app_tag_name: list[str] | None = None,
+    ip_link_name: str | None = None,
 ) -> dict[str, Any]:
     # 全 any 匹配场景：source_network / in_interface / dst_network 空串/None 统一归一化为 "any"。
     # NGFW 不接受空串（eObjParse "被引用对象不存在"），需显式 "any"。
@@ -96,6 +100,14 @@ def build_policy_route_payload(
             {"field": "weight", "weight": weight},
         )
     entry_id = _validate_non_negative_int("id", entry_id)
+    applist = _validate_applist(applist)
+    app_tag_name = _validate_app_tag_name(app_tag_name)
+    # ip-link 关联：设备通过 forwarding_paths[].health_check={type:"iplink",name:...} 表达
+    # 下一跳链路状态探测；省略时 health_check 保持空对象（不关联 ip-link）。
+    # 真相源：.input/capacity/特性测试/策略路由.py 的 config_ipv6_policy_route。
+    health_check: dict[str, Any] = {}
+    if ip_link_name:
+        health_check = {"type": "iplink", "name": ip_link_name}
 
     val: dict[str, Any] = {
         "type": route_type,
@@ -107,14 +119,14 @@ def build_policy_route_payload(
         "service": service,
         "service_is_group": service_is_group,
         "active": active,
-        "applist": [],
-        "app_tag_name": [],
+        "applist": applist,
+        "app_tag_name": app_tag_name,
         "forwarding_paths": [
             {
                 "next_hop_ip": next_hop_ip,
                 "outgoing_interface": outgoing_interface,
                 "weight": weight,
-                "health_check": {},
+                "health_check": health_check,
             }
         ],
         "time_obj": time_obj,
@@ -439,3 +451,235 @@ def _normalize_any(field: str, value: str | None) -> str:
     """
     normalized = (value or "").strip()
     return normalized or "any"
+
+
+def _validate_applist(applist: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """校验并返回策略路由应用匹配列表（applist）。
+
+    未提供时保持空数组（不匹配应用）；每项必须是含 appname/appid 的对象，
+    与界面「应用」选择器勾选后保存的请求体格式一致。
+    """
+    if not applist:
+        return []
+    for index, item in enumerate(applist):
+        if not isinstance(item, dict):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Policy-route applist items must be objects.",
+                {"field": "applist", "index": index},
+            )
+        for key in ("appname", "appid"):
+            if not isinstance(item.get(key), str) or not item[key].strip():
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "Policy-route applist items require non-empty appname and appid.",
+                    {"field": "applist", "index": index, "missing": key},
+                )
+    return applist
+
+
+def _validate_app_tag_name(app_tag_name: list[str] | None) -> list[str]:
+    """校验并返回策略路由应用标签名列表（app_tag_name）。
+
+    未提供时保持空数组（不匹配应用标签）；每项必须是非空字符串，
+    与界面「应用」标签勾选后保存的请求体格式一致。
+    """
+    if not app_tag_name:
+        return []
+    for index, item in enumerate(app_tag_name):
+        if not isinstance(item, str) or not item.strip():
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Policy-route app_tag_name items must be non-empty strings.",
+                {"field": "app_tag_name", "index": index},
+            )
+    return app_tag_name
+
+
+# config-batch 递增模式下参与编号的字符串参数键。applist/app_tag_name 引用
+# 已存在的应用/标签对象，不参与编号；weight/action/config_source 等数字与
+# is_group 布尔标志保持原值。
+INCREMENTABLE_KEYS = (
+    "source_network",
+    "dst_network",
+    "in_interface",
+    "outgoing_interface",
+    "next_hop_ip",
+    "service",
+    "time_obj",
+    "ip_link_name",
+)
+
+
+def increment_value(value: str, index: int) -> str:
+    """按批量创建序号递增字符串参数（index 从 1 开始）。
+
+    三种编号规则，按优先级匹配：
+    - IPv4 点分地址：主机位递增，超过 254 时向上段进位（1.1.1.254 -> 1.1.2.1）。
+    - 末尾含数字（GE0_1、2115:101:2::11）：末尾数字段递增并保留原宽度
+      （GE0_1 -> GE0_2；第 1 条保持原始值）。
+    - 无末尾数字（test）：追加 4 位补零序号，从 0001 开始（test0001）。
+    """
+    if _is_ipv4(value):
+        return _increment_ipv4(value, index)
+    trailing = _trailing_digits(value)
+    if trailing is not None:
+        prefix, digits = trailing
+        offset = index - 1
+        return f"{prefix}{int(digits) + offset:0{len(digits)}d}"
+    return f"{value}{index:04d}"
+
+
+def _is_ipv4(value: str) -> bool:
+    try:
+        return ip_address(value).version == 4
+    except ValueError:
+        return False
+
+
+def _increment_ipv4(value: str, index: int) -> str:
+    """IPv4 主机位递增，超过 254 时向网段位进位。
+
+    每段有效范围 1..254（0/255 保留）；第 1 条保持原始地址。
+    1.1.1.1 index=255 -> 1.1.2.1（主机位回绕、网段位 +1）。
+    """
+    parts = [int(p) for p in value.split(".")]
+    carry = index - 1
+    for pos in range(3, 0, -1):
+        digit = parts[pos] - 1 + carry
+        parts[pos] = (digit % 254) + 1
+        carry = digit // 254
+    digit = parts[0] - 1 + carry
+    parts[0] = (digit % 254) + 1
+    return ".".join(str(p) for p in parts)
+
+
+def _trailing_digits(value: str) -> tuple[str, str] | None:
+    match = re.search(r"(\d+)$", value)
+    if not match:
+        return None
+    return value[: match.start()], match.group(1)
+
+
+def build_policy_route_batch_config_payloads(
+    *,
+    count: int,
+    increment: bool = False,
+    **params: Any,
+) -> list[dict[str, Any]]:
+    """循环构造 count 条策略路由创建 payload（逐条 POST /api/v1/policyroute）。
+
+    increment=False（默认）：所有参数保持不变，生成 count 条相同路由。
+    increment=True：对 INCREMENTABLE_KEYS 中的字符串参数按序号递增，
+    其余参数保持原值。设备 /api/v1/batch 不支持创建，故只能循环逐条创建。
+    """
+    _validate_positive_int("count", count)
+    payloads: list[dict[str, Any]] = []
+    for index in range(1, count + 1):
+        entry_params = dict(params)
+        if increment:
+            for key in INCREMENTABLE_KEYS:
+                value = entry_params.get(key)
+                # 空串表示"未指定"（如 next_hop_ip 走 outgoing-interface 模式、
+                # time_obj/outgoing_interface 默认空），不参与编号，保持空值。
+                if isinstance(value, str) and value.strip():
+                    entry_params[key] = increment_value(value, index)
+        payloads.append(build_policy_route_payload(**entry_params))
+    return payloads
+
+
+def build_policy_route_batch_config_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    payloads: list[dict[str, Any]],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    """config-batch dry-run：展示首个请求模板与条数摘要。"""
+    first_payload = payloads[0] if payloads else None
+    return {
+        "op_id": "fw_config_policy_route",
+        "status": "dry_run",
+        "mode": "config_batch",
+        "execute_required": True,
+        "count": len(payloads),
+        "request": {
+            "method": "POST",
+            "url": f"{normalize_base_url(base_url)}/api/v1/policyroute",
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "content_type": "application/json",
+            "payload": first_payload,
+        },
+        "session_file": str(session_file),
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
+def execute_policy_route_batch_config(
+    *,
+    op_id: str,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    payloads: list[dict[str, Any]],
+    page: int,
+    size: int,
+    route_type: str,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    """逐条 POST /api/v1/policyroute 创建策略路由，汇总每条结果。
+
+    单条失败不中断：失败条目记录到 failed 列表，其余条目继续执行；
+    全部失败时整体状态置为 failed。
+    """
+    created: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for index, payload in enumerate(payloads, start=1):
+        try:
+            result = execute_policy_route(
+                op_id=op_id,
+                base_url=base_url,
+                session_file=session_file,
+                auth_header=auth_header,
+                payload=payload,
+                page=page,
+                size=size,
+                route_type=route_type,
+                verify_tls=verify_tls,
+                timeout=timeout,
+            )
+            created.append(
+                {
+                    "index": index,
+                    "status": "success",
+                    "policy_route_id": result.get("policy_route_id"),
+                    "status_code": result.get("status_code"),
+                }
+            )
+        except RunnerError as exc:
+            failed.append(
+                {
+                    "index": index,
+                    "status": "failed",
+                    "error_code": exc.error_code,
+                    "message": exc.message,
+                }
+            )
+    if payloads and len(failed) == len(payloads):
+        status = "failed"
+    else:
+        status = "success"
+    return {
+        "op_id": "fw_config_policy_route",
+        "status": status,
+        "mode": "config_batch",
+        "count": len(payloads),
+        "created_count": len(created),
+        "failed_count": len(failed),
+        "created": created,
+        "failed": failed,
+    }

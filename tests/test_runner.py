@@ -54,10 +54,13 @@ from atomic_ops.runner.ospfv3_bfd import (
     execute_ospfv3_bfd,
 )
 from atomic_ops.runner.policy_route import (
+    build_policy_route_batch_config_payloads,
     build_policy_route_batch_delete_payload,
     build_policy_route_delete_payload,
     build_policy_route_payload,
     build_policy_route_priority_payload,
+    execute_policy_route_batch_config,
+    increment_value,
     validate_policy_route_payload,
 )
 from atomic_ops.runner.session import read_session_file, write_session_file
@@ -352,6 +355,114 @@ class PolicyRoutePayloadTests(unittest.TestCase):
         self.assertEqual(payload["id"], 3)
         self.assertEqual(payload["val"]["id"], 3)
 
+    def test_build_policy_route_payload_with_applist_and_app_tag(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="2.2.2.2",
+            in_interface="any",
+            outgoing_interface="",
+            service="any",
+            weight=213,
+            time_obj="",
+            applist=[{"appname": "UDP应用", "appid": "479"}],
+            app_tag_name=["限速应用"],
+        )
+
+        self.assertEqual(payload["val"]["applist"], [{"appname": "UDP应用", "appid": "479"}])
+        self.assertEqual(payload["val"]["app_tag_name"], ["限速应用"])
+
+    def test_build_policy_route_payload_with_ip_link(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="",
+            in_interface="GE0_4",
+            outgoing_interface="tunnel64",
+            service="any",
+            weight=100,
+            time_obj="",
+            ip_link_name="13-96",
+        )
+
+        self.assertEqual(
+            payload["val"]["forwarding_paths"][0]["health_check"],
+            {"type": "iplink", "name": "13-96"},
+        )
+
+    def test_build_policy_route_payload_health_check_defaults_empty(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="1.1.1.1",
+            in_interface="GE0_12",
+            outgoing_interface="",
+            service="any",
+            weight=1,
+            time_obj="",
+        )
+
+        self.assertEqual(payload["val"]["forwarding_paths"][0]["health_check"], {})
+
+    def test_build_policy_route_payload_applist_defaults_empty(self) -> None:
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="1.1.1.1",
+            in_interface="GE0_12",
+            outgoing_interface="",
+            service="any",
+            weight=1,
+            time_obj="",
+        )
+
+        self.assertEqual(payload["val"]["applist"], [])
+        self.assertEqual(payload["val"]["app_tag_name"], [])
+
+    def test_rejects_policy_route_applist_missing_appid(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_policy_route_payload(
+                source_network="any",
+                source_network_is_group=False,
+                dst_network="any",
+                dst_network_is_group=False,
+                next_hop_ip="1.1.1.1",
+                in_interface="GE0_12",
+                outgoing_interface="",
+                service="any",
+                weight=1,
+                time_obj="",
+                applist=[{"appname": "UDP应用"}],
+            )
+
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_rejects_policy_route_app_tag_name_empty_item(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_policy_route_payload(
+                source_network="any",
+                source_network_is_group=False,
+                dst_network="any",
+                dst_network_is_group=False,
+                next_hop_ip="1.1.1.1",
+                in_interface="GE0_12",
+                outgoing_interface="",
+                service="any",
+                weight=1,
+                time_obj="",
+                app_tag_name=["限速应用", ""],
+            )
+
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
     def test_build_policy_route_priority_payload(self) -> None:
         payload = build_policy_route_priority_payload(
             targetsite="before",
@@ -482,6 +593,204 @@ class PolicyRoutePayloadTests(unittest.TestCase):
         summary = _extract_policy_route_summary("fw_update_policy_route", {"val": {"id": 5}})
         self.assertEqual(summary["policy_route_id"], 5)
         self.assertNotIn("created", summary)
+
+    def test_increment_value_trailing_digits(self) -> None:
+        self.assertEqual(increment_value("GE0_1", 1), "GE0_1")
+        self.assertEqual(increment_value("GE0_1", 2), "GE0_2")
+        self.assertEqual(increment_value("GE0_1", 10), "GE0_10")
+        self.assertEqual(increment_value("test001", 3), "test003")
+
+    def test_increment_value_padded_name(self) -> None:
+        self.assertEqual(increment_value("test", 1), "test0001")
+        self.assertEqual(increment_value("test", 2), "test0002")
+        self.assertEqual(increment_value("test", 12), "test0012")
+
+    def test_increment_value_ipv4_host_and_carry(self) -> None:
+        self.assertEqual(increment_value("1.1.1.1", 1), "1.1.1.1")
+        self.assertEqual(increment_value("1.1.1.1", 2), "1.1.1.2")
+        self.assertEqual(increment_value("1.1.1.1", 254), "1.1.1.254")
+        # 主机位超过 254 进位到网段位：1.1.1.254 -> 1.1.2.1
+        self.assertEqual(increment_value("1.1.1.1", 255), "1.1.2.1")
+
+    def test_build_policy_route_batch_config_payloads_unchanged(self) -> None:
+        payloads = build_policy_route_batch_config_payloads(
+            count=3,
+            source_network="srcNet",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="2.2.2.2",
+            in_interface="any",
+            outgoing_interface="",
+            service="any",
+            weight=100,
+            time_obj="",
+        )
+
+        self.assertEqual(len(payloads), 3)
+        self.assertEqual(payloads[0]["val"]["source_network"], "srcNet")
+        self.assertEqual(payloads[1]["val"]["source_network"], "srcNet")
+        self.assertEqual(payloads[2]["val"]["source_network"], "srcNet")
+        self.assertEqual(payloads[0]["id"], 0)
+
+    def test_build_policy_route_batch_config_payloads_increment(self) -> None:
+        payloads = build_policy_route_batch_config_payloads(
+            count=3,
+            increment=True,
+            source_network="srcNet",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="1.1.1.1",
+            in_interface="any",
+            outgoing_interface="",
+            service="any",
+            weight=100,
+            time_obj="",
+        )
+
+        self.assertEqual(len(payloads), 3)
+        self.assertEqual(payloads[0]["val"]["source_network"], "srcNet0001")
+        self.assertEqual(payloads[1]["val"]["source_network"], "srcNet0002")
+        self.assertEqual(payloads[2]["val"]["source_network"], "srcNet0003")
+        self.assertEqual(payloads[1]["val"]["forwarding_paths"][0]["next_hop_ip"], "1.1.1.2")
+
+    def test_build_policy_route_batch_config_payloads_rejects_non_positive_count(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_policy_route_batch_config_payloads(
+                count=0,
+                source_network="any",
+                source_network_is_group=False,
+                dst_network="any",
+                dst_network_is_group=False,
+                next_hop_ip="1.1.1.1",
+                in_interface="any",
+                outgoing_interface="",
+                service="any",
+                weight=1,
+                time_obj="",
+            )
+
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_build_policy_route_batch_config_payloads_keeps_empty_strings_unchanged(self) -> None:
+        payloads = build_policy_route_batch_config_payloads(
+            count=2,
+            increment=True,
+            source_network="srcNet",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="",
+            in_interface="GE0_4",
+            outgoing_interface="tunnel64",
+            service="any",
+            weight=100,
+            time_obj="",
+            ip_link_name="13-96",
+        )
+
+        self.assertEqual(len(payloads), 2)
+        self.assertEqual(payloads[0]["val"]["forwarding_paths"][0]["next_hop_ip"], "")
+        self.assertEqual(payloads[1]["val"]["forwarding_paths"][0]["next_hop_ip"], "")
+        # 非空字符串仍参与编号
+        self.assertEqual(
+            payloads[1]["val"]["forwarding_paths"][0]["health_check"],
+            {"type": "iplink", "name": "13-97"},
+        )
+
+    def test_execute_policy_route_batch_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            payloads = build_policy_route_batch_config_payloads(
+                count=2,
+                source_network="srcNet",
+                source_network_is_group=False,
+                dst_network="any",
+                dst_network_is_group=False,
+                next_hop_ip="1.1.1.1",
+                in_interface="any",
+                outgoing_interface="",
+                service="any",
+                weight=1,
+                time_obj="",
+            )
+            with patch(
+                "atomic_ops.runner.policy_route.request_json",
+                side_effect=[(200, {"val": {"id": 11}}, "{}"), (200, {"val": {"id": 12}}, "{}")],
+            ) as request:
+                result = execute_policy_route_batch_config(
+                    op_id="fw_config_policy_route",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payloads=payloads,
+                    page=1,
+                    size=40,
+                    route_type="ipv4",
+                    verify_tls=False,
+                    timeout=10,
+                )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["created_count"], 2)
+        self.assertEqual(result["failed_count"], 0)
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(result["created"][0]["policy_route_id"], 11)
+        self.assertEqual(result["created"][1]["policy_route_id"], 12)
+
+    def test_execute_policy_route_batch_config_partial_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            payloads = build_policy_route_batch_config_payloads(
+                count=2,
+                source_network="srcNet",
+                source_network_is_group=False,
+                dst_network="any",
+                dst_network_is_group=False,
+                next_hop_ip="1.1.1.1",
+                in_interface="any",
+                outgoing_interface="",
+                service="any",
+                weight=1,
+                time_obj="",
+            )
+            with patch(
+                "atomic_ops.runner.policy_route.request_json",
+                side_effect=[(200, {"val": {"id": 21}}, "{}"), (500, {"errCode": 1, "errMsg": "rejected"}, "{}")],
+            ) as request:
+                result = execute_policy_route_batch_config(
+                    op_id="fw_config_policy_route",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payloads=payloads,
+                    page=1,
+                    size=40,
+                    route_type="ipv4",
+                    verify_tls=False,
+                    timeout=10,
+                )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["created_count"], 1)
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(result["failed"][0]["index"], 2)
+        self.assertEqual(result["failed"][0]["error_code"], "RUNNER_CONFIG_REJECTED")
 
 
 class AddressObjectPayloadTests(unittest.TestCase):
