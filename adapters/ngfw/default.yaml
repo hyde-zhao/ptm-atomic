@@ -302,13 +302,13 @@ operations:
           service: "{{ params.service }}"
           service_is_group: "{{ params.service_is_group }}"
           active: "{{ params.active }}"
-          applist: []
-          app_tag_name: []
+          applist: "{{ params.applist }}"
+          app_tag_name: "{{ params.app_tag_name }}"
           forwarding_paths:
             - next_hop_ip: "{{ params.next_hop_ip }}"
               outgoing_interface: "{{ params.outgoing_interface }}"
               weight: "{{ params.weight }}"
-              health_check: {}
+              health_check: "{{ params.health_check }}"
           time_obj: "{{ params.time_obj }}"
           action: "{{ params.action }}"
           config_source: "{{ params.config_source }}"
@@ -326,6 +326,8 @@ operations:
         - type must be ipv4 or ipv6; forwarding_paths entries require next_hop_ip or outgoing_interface.
         - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - source_network and dst_network are address object names unless the matching is_group flag is true.
+        - applist and app_tag_name are optional application match criteria; omit to match no application.
+        - health_check is an empty object unless ip_link_name is provided, then it becomes {type: iplink, name: <ip_link_name>}.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_policy_route:
@@ -352,13 +354,13 @@ operations:
           service: "{{ params.service }}"
           service_is_group: "{{ params.service_is_group }}"
           active: "{{ params.active }}"
-          applist: []
-          app_tag_name: []
+          applist: "{{ params.applist }}"
+          app_tag_name: "{{ params.app_tag_name }}"
           forwarding_paths:
             - next_hop_ip: "{{ params.next_hop_ip }}"
               outgoing_interface: "{{ params.outgoing_interface }}"
               weight: "{{ params.weight }}"
-              health_check: {}
+              health_check: "{{ params.health_check }}"
           time_obj: "{{ params.time_obj }}"
           action: "{{ params.action }}"
           config_source: "{{ params.config_source }}"
@@ -375,6 +377,8 @@ operations:
         - PUT updates an existing policy-route id on /api/v1/policyroute.
         - type must be ipv4 or ipv6; forwarding_paths entries require next_hop_ip or outgoing_interface.
         - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
+        - applist and app_tag_name are optional application match criteria; omit to match no application.
+        - health_check is an empty object unless ip_link_name is provided, then it becomes {type: iplink, name: <ip_link_name>}.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_policy_route:
