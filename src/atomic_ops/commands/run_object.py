@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from typing import Any
 
 from atomic_ops.commands import CommandSpec
@@ -63,6 +64,14 @@ def _add_object_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ipaddr", required=True, help="IPv4 address or network address.")
     parser.add_argument("--mask", required=True, help="IPv4 mask length, for example 16 or 24.")
     parser.add_argument("--object-desc", help="Optional address-object description.")
+    parser.add_argument(
+        "--excl-ranges",
+        help='JSON list of excluded ranges, for example \'[{"s_start":1,"s_end":10}]\'.',
+    )
+    parser.add_argument(
+        "--excl-networks",
+        help='JSON list of excluded networks, for example \'[{"ipaddr":"192.168.0.5","mask":""}]\'.',
+    )
 
 
 def _add_delete_args(parser: argparse.ArgumentParser) -> None:
@@ -81,6 +90,25 @@ def _add_delete_batch_args(parser: argparse.ArgumentParser) -> None:
 def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="Paginated query page size.")
+
+
+def _parse_json_list(raw: str | None) -> list[dict[str, Any]] | None:
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "JSON list argument must be valid JSON.",
+            {"reason": exc.msg},
+        ) from exc
+    if not isinstance(parsed, list):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "JSON list argument must decode to a JSON array.",
+        )
+    return parsed
 
 
 def _run_object_config(args: argparse.Namespace) -> int:
@@ -134,6 +162,8 @@ def _run_object(args: argparse.Namespace, op_id: str) -> int:
                 ipaddr=getattr(args, "ipaddr"),
                 mask=getattr(args, "mask"),
                 object_desc=getattr(args, "object_desc"),
+                exclranges=_parse_json_list(getattr(args, "excl_ranges", None)),
+                exclnetworks=_parse_json_list(getattr(args, "excl_networks", None)),
             )
         elif op_id == "fw_update_object":
             payload = build_address_object_update_payload(
@@ -141,6 +171,8 @@ def _run_object(args: argparse.Namespace, op_id: str) -> int:
                 ipaddr=getattr(args, "ipaddr"),
                 mask=getattr(args, "mask"),
                 object_desc=getattr(args, "object_desc"),
+                exclranges=_parse_json_list(getattr(args, "excl_ranges", None)),
+                exclnetworks=_parse_json_list(getattr(args, "excl_networks", None)),
             )
         elif op_id == "fw_delete_object":
             payload = {"id": getattr(args, "object_name")}

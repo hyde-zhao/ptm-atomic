@@ -19,7 +19,9 @@ parameters:
   params:
     type: json
     required: true
-    description: Complete /api/v1/ippool payload for address-object update with id and val.name identifying the target.
+    description: >-
+      Complete /api/v1/ippool payload for address-object update with id and val.name
+      identifying the target, including optional exclranges and exclnetworks.
   idempotency_key:
     type: string
     required: true
@@ -38,6 +40,10 @@ inputs:
       networks:
         - ipaddr: 192.168.0.0
           mask: "16"
+      exclranges: []
+      exclnetworks:
+        - ipaddr: 192.168.0.5
+          mask: ""
   idempotency_key: "<idempotency-key>"
 side_effect: state_mutation
 returns:
