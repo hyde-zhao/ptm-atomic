@@ -1,7 +1,8 @@
 schema_version: "1.1"
 op_id: fw_delete_static_route
 device_type: fw
-description: Delete a static route by id on NGFW.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_static_route
+description: Delete an NGFW static route by id.
 parameters:
   state_ref:
     type: string
@@ -18,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Static route delete object with required id field.
+    description: Static route delete selector with id.
   idempotency_key:
     type: string
     required: true
@@ -30,20 +31,43 @@ inputs:
   params:
     id: "<route-id>"
   idempotency_key: "<idempotency-key>"
+side_effect: destructive
 returns:
   status: success
   data:
+    static_route_id: "<route-id>"
+    pre_snapshot_ref: "<static-route-pre-delete-snapshot-ref>"
     config_result:
       status: succeeded
       config_domain: static_route
-      deleted_id: "<route-id>"
+      applied_ref: "<static-route-delete-result-ref>"
     state_ref: "<state-ref>"
     state_status: valid
     expires_at: null
     manual_handling_ref: "<manual-handling-ref>"
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
-idempotent: true
+idempotent: false
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - id
+    - full_config
+  notes: Recreate the static route from the full pre-delete snapshot via POST /api/v1/route.
+pre_snapshot:
+  op_id: fw_verify_static_route
+  capture_fields:
+    - id
+    - full_config
+rollback_apply:
+  op_id: fw_config_static_route
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_static_route
+  expected_state: absent
+dry_run_supported: true
+risk_level: high
 timeout_ms: 30000
 error_types:
   - NONE
@@ -69,8 +93,10 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk configuration contract is used.
+  - DELETE must use id as a query parameter and must not send a JSON body.
 postconditions:
-  - Configuration result and diagnostic references are available to the caller.
+  - Static route deletion result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_static_route query can confirm the deleted route is absent.
 tags:
   - firewall
   - capacity

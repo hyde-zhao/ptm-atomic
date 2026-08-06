@@ -22,6 +22,13 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             handler=_run_login,
             add_args=_add_login_args,
         ),
+        CommandSpec(
+            name="logout",
+            help="Logout from NGFW web management and invalidate the session.",
+            description="Logout from NGFW web management via GET /api/v1/logout.",
+            handler=_run_logout,
+            add_args=_add_logout_args,
+        ),
     )
 
 
@@ -95,6 +102,50 @@ def _run_login(args: argparse.Namespace) -> int:
                 "status": "success",
                 "session": session_summary(session_file, session_payload),
             }
+        _write_output(_to_run_envelope(payload), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _add_logout_args(parser: argparse.ArgumentParser) -> None:
+    """Logout needs no extra args—session is read from --session-file."""
+
+
+def _run_logout(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ngfw_login import build_logout_dry_run, logout
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        if not ctx.get("verify_tls"):
+            write_warning(
+                {
+                    "warning_code": "TLS_VERIFY_DISABLED",
+                    "message": "Device TLS verification is disabled for this runner invocation.",
+                },
+                output_format,
+            )
+
+        session_file = resolve_session_file(ctx.get("session_file"))
+        if not ctx.get("execute"):
+            payload = build_logout_dry_run(
+                base_url=ctx["base_url"],
+                session_file=str(session_file),
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            payload = logout(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"),
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
         _write_output(_to_run_envelope(payload), output_format)
         return 0
     except RunnerError as exc:

@@ -1,7 +1,8 @@
 schema_version: "1.1"
 op_id: fw_update_static_route
 device_type: fw
-description: Update an existing static route on NGFW.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_static_route
+description: Update an existing NGFW static route by id.
 parameters:
   state_ref:
     type: string
@@ -18,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Static route update object with id and required domain fields.
+    description: Static route update object with id and all required domain fields. All fields must be provided; partial update is not supported.
   idempotency_key:
     type: string
     required: true
@@ -36,12 +37,16 @@ inputs:
     weight: 0
     outgoing_interface: ""
   idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
 returns:
   status: success
   data:
+    static_route_id: "<route-id>"
+    pre_snapshot_ref: "<static-route-pre-snapshot-ref>"
     config_result:
       status: succeeded
       config_domain: static_route
+      applied_ref: "<static-route-update-result-ref>"
     state_ref: "<state-ref>"
     state_status: valid
     expires_at: null
@@ -49,6 +54,26 @@ returns:
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - id
+    - full_config
+  notes: Restore the complete pre-change static-route object via PUT /api/v1/route.
+pre_snapshot:
+  op_id: fw_verify_static_route
+  capture_fields:
+    - id
+    - full_config
+rollback_apply:
+  op_id: fw_update_static_route
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_static_route
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
 timeout_ms: 30000
 error_types:
   - NONE
@@ -74,8 +99,10 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk configuration contract is used.
+  - The update request must carry the route id at both the top-level and val.id; all fields must be provided.
 postconditions:
   - Configuration result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_static_route query can confirm the device route state.
 tags:
   - firewall
   - capacity
