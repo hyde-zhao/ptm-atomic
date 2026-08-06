@@ -229,3 +229,57 @@ def _get_public_key(base_url: str, *, timeout: float, verify_tls: bool) -> str:
         )
     return public_key_pem
 
+
+def build_logout_dry_run(
+    *,
+    base_url: str,
+    session_file: str,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    normalized = normalize_base_url(base_url)
+    return {
+        "op_id": "fw_logout_web_management",
+        "status": "dry_run",
+        "execute_required": True,
+        "request": {
+            "method": "GET",
+            "path": "/api/v1/logout",
+        },
+        "base_url": normalized,
+        "session_file": session_file,
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
+def logout(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    from atomic_ops.runner.session import read_session_file
+
+    normalized = normalize_base_url(base_url)
+    session_payload = read_session_file(session_file)
+    session_value = str(session_payload["session_value"])
+    headers = {auth_header: f"Bearer {session_value}"}
+    status_code, result, _text = request_json(
+        "GET",
+        f"{normalized}/api/v1/logout",
+        headers=headers,
+        timeout=timeout,
+        verify_tls=verify_tls,
+    )
+    success = 200 <= status_code < 300
+    return {
+        "op_id": "fw_logout_web_management",
+        "status": "success" if success else "failed",
+        "status_code": status_code,
+        "logout": success,
+        "response": result,
+    }
+

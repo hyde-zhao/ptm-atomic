@@ -143,6 +143,7 @@ NEIGHBOR_OPS = (
 )
 SUPPORTED_OPS = (
     "fw_login_web_management",
+    "fw_logout_web_management",
     "fw_config_object",
     *POLICY_ROUTE_OPS,
     *STATIC_ROUTE_OPS,
@@ -166,6 +167,7 @@ SUPPORTED_OPS = (
 
 DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_login_web_management": ("auth", "login"),
+    "fw_logout_web_management": ("auth", "logout"),
     "fw_config_object": ("object", "config"),
     "fw_config_policy_route": ("policy-route", "config"),
     "fw_update_policy_route": ("policy-route", "update"),
@@ -494,6 +496,8 @@ def _dispatch_legacy(op_id: str, args: argparse.Namespace) -> int:
 
         if op_id == "fw_login_web_management":
             payload = _run_login_legacy(args)
+        elif op_id == "fw_logout_web_management":
+            payload = _run_logout_legacy(args)
         elif op_id == "fw_config_object":
             payload = _run_object_legacy(args)
         elif op_id in POLICY_ROUTE_OPS:
@@ -575,6 +579,26 @@ def _run_login_legacy(args: argparse.Namespace) -> dict[str, Any]:
         "status": "success",
         "session": session_summary(session_file, session_payload),
     }
+
+
+def _run_logout_legacy(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.ngfw_login import build_logout_dry_run, logout
+
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    if not getattr(args, "execute"):
+        return build_logout_dry_run(
+            base_url=getattr(args, "base_url"),
+            session_file=str(session_file),
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout", 10.0)),
+        )
+    return logout(
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header", "Authorization"),
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout", 10.0)),
+    )
 
 
 def _run_object_legacy(args: argparse.Namespace) -> dict[str, Any]:

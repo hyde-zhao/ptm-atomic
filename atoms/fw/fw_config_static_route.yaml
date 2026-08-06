@@ -1,7 +1,8 @@
 schema_version: "1.1"
 op_id: fw_config_static_route
 device_type: fw
-description: Define static route configuration contract for NGFW capacity operations.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_static_route
+description: Create an NGFW static route with destination network and next-hop.
 parameters:
   state_ref:
     type: string
@@ -18,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Static route configuration object with required domain fields.
+    description: Static route create object. dst_network is CIDR notation; next_hop_addr must be a valid IP matching the route type (IPv4/IPv6).
   idempotency_key:
     type: string
     required: true
@@ -28,14 +29,18 @@ inputs:
   session_ref: "<session-ref>"
   config_domain: static_route
   params:
-    route_ref: "<route-ref>"
-    destination_ref: "<destination-ref>"
-    next_hop_ref: "<next-hop-ref>"
-    metric: 10
+    dst_network: "1.1.1.0/24"
+    next_hop_addr: "1.1.1.1"
+    enable: true
+    preference: 1
+    weight: 0
+    outgoing_interface: ""
   idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
 returns:
   status: success
   data:
+    created: true
     config_result:
       status: succeeded
       config_domain: static_route
@@ -47,6 +52,25 @@ returns:
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_static_route
+  snapshot_required: false
+  required_inputs:
+    - id
+  id_source: verify
+  id_field: id
+  notes: Delete only when the create result is confirmed. The device returns no id on create; rollback resolves the id via fw_verify_static_route matching dst_network.
+pre_snapshot:
+  op_id: fw_verify_static_route
+  capture_fields:
+    - id
+    - existence
+post_verify:
+  op_id: fw_verify_static_route
+  expected_state: exists
+dry_run_supported: true
+risk_level: high
 timeout_ms: 30000
 error_types:
   - NONE
@@ -72,8 +96,10 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk configuration contract is used.
+  - dst_network must be valid CIDR notation; next_hop_addr must be a valid IP address.
 postconditions:
   - Configuration result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_static_route query can confirm the route exists on the device.
 tags:
   - firewall
   - capacity

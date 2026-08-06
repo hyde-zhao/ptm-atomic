@@ -1,37 +1,33 @@
 schema_version: "1.1"
 op_id: fw_verify_static_route
 device_type: fw
-description: Verify static route configuration contract result for NGFW capacity.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_static_route
+description: Query NGFW static routes.
 parameters:
-  config_result_ref:
+  session_ref:
     type: string
     required: false
-    description: Non-sensitive reference to the related configuration result.
-  config_result:
-    type: json
-    required: false
-    description: Inline non-sensitive configuration result envelope.
-  verification_rules:
-    type: list
-    required: true
-    description: Rules used to check static route configuration state.
-  expected_route_ref:
-    type: string
-    required: true
-    description: Expected route reference.
+    description: Non-sensitive session reference from an external orchestrator.
 inputs:
-  state_ref: "<state-ref>"
-  config_result_ref: "<static-route-config-result-ref>"
+  session_ref: "<session-ref>"
   config_domain: static_route
+side_effect: observation
 returns:
   status: success
   data:
     verification_summary_ref: "<static-route-verification-summary-ref>"
     verification_status: passed
+    existence: true
+    static_route_id: "<route-id>"
+    static_route_ids: "<route-id-list>"
+    count: 0
+    full_config: "<static-route-full-config-ref>"
     manual_handling_ref: "<manual-handling-ref>"
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
+dry_run_supported: true
+risk_level: low
 timeout_ms: 30000
 error_types:
   - NONE
@@ -42,15 +38,14 @@ error_types:
 verification:
   kind: capacity_domain
   rules:
-    - name: static_route_state_matches
-      input_ref: "<static-route-config-result-ref>"
-      expected_result: route, destination, next hop, and metric match
+    - name: static_route_query_returns_all_routes
+      input_ref: "<static-route-query-result-ref>"
+      expected_result: All static routes are returned with id, dst_network, next_hop_addr, enable, preference, weight, and outgoing_interface.
   summary_ref: "<static-route-verification-summary-ref>"
 preconditions:
-  - A related static route configuration result reference is available.
+  - External orchestration holds a valid session_ref.
 postconditions:
-  - Verification summary and diagnostic references are available to the caller.
-  - Any failed check is reported for manual handling.
+  - Static route query result and diagnostic references are available to the caller.
 tags:
   - firewall
   - capacity
