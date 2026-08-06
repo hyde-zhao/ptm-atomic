@@ -19,7 +19,9 @@ parameters:
   params:
     type: json
     required: true
-    description: IPv4 address object configuration with object name, ipaddr, and mask.
+    description: >-
+      IPv4 address object configuration with object name, ipaddr, mask, and optional
+      excluded ranges (exclranges) and excluded networks (exclnetworks).
   idempotency_key:
     type: string
     required: true
@@ -34,6 +36,10 @@ inputs:
     ipaddr: 192.168.0.0
     mask: "16"
     object_desc: atomicSrc1921680016
+    exclranges: []
+    exclnetworks:
+      - ipaddr: 192.168.0.5
+        mask: ""
   idempotency_key: "<idempotency-key>"
 returns:
   status: success

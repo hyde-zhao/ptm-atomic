@@ -1,0 +1,89 @@
+schema_version: "1.1"
+op_id: fw_verify_ip6pool_object
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ip6pool_object
+description: Query NGFW IPv6 address objects through /api/v1/ip6pool with pagination and type/keyword filters.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ip6pool_object for this operation.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the IPv6 address-object query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the IPv6 address-object query.
+  keywords:
+    type: string
+    required: false
+    description: Keyword filter for the IPv6 address-object query.
+  type:
+    type: string
+    required: false
+    description: Address object type filter (e.g. ANY, CUSTOM); may be repeated.
+  params:
+    type: json
+    required: true
+    description: IPv6 address-object query envelope; GET sends no JSON body and returns count and vals.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: ip6pool_object
+  page: 1
+  size: 40
+  keywords: ""
+  type: ""
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<ip6pool-object-state-ref>"
+    full_config_ref: "<ip6pool-object-full-config-ref>"
+    vals_ref: "<ip6pool-object-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: ip6pool_object_query_returns_object_list
+      input_ref: "<ip6pool-object-query-result-ref>"
+      expected_result: >-
+        the device returns count and vals with name, type, networks, desc and refcnt
+        fields; type filter may repeat as ANY and CUSTOM.
+  summary_ref: "<ip6pool-object-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - IPv6 address-object query result and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - ip6pool_object
+  - verification
+aliases:
+  - ip6pool-object
+  - ipv6-address-object
+  - ip6-pool
+  - ip6pool
+since_version: "1.10.0"

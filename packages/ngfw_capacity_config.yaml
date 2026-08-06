@@ -13,6 +13,10 @@ operations:
   - fw_update_object
   - fw_delete_object
   - fw_delete_batch_object
+  - fw_config_ip6pool_object
+  - fw_update_ip6pool_object
+  - fw_delete_ip6pool_object
+  - fw_delete_batch_ip6pool_object
   - fw_config_acl_policy
   - fw_update_acl_policy
   - fw_delete_acl_policy

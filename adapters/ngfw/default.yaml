@@ -136,6 +136,151 @@ operations:
         - Batch interface deletion is independent from single-interface DELETE /api/v1/intf.
         - Each batch item must be DELETE /api/v1/intf with body.id as a non-empty list.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_ip6pool_object:
+    atom_ref: atoms/fw/fw_config_ip6pool_object.yaml
+    intent: Build an IPv6 address-object configuration request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/ip6pool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.object_name }}"
+          desc: "{{ params.object_desc }}"
+          type: 4
+          ranges: []
+          networks:
+            - ipaddr: "{{ params.ipaddr }}"
+              mask: "{{ params.mask }}"
+          exclranges: "{{ params.exclranges }}"
+          exclnetworks: "{{ params.exclnetworks }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ip6pool-object-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - IPv6 address-object names are later referenced by policy route source_network or dst_network fields.
+        - CIDR input must be split into ipaddr and mask before calling this endpoint.
+        - exclranges and exclnetworks are optional; each exclnetworks entry carries ipaddr and mask where an empty mask excludes a single address.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_ip6pool_object:
+    atom_ref: atoms/fw/fw_update_ip6pool_object.yaml
+    intent: Build an IPv6 address-object update request by name.
+    request:
+      method: PUT
+      path: /api/v1/ip6pool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          name: "{{ params.val.name }}"
+          desc: "{{ params.val.desc }}"
+          type: 4
+          ranges: []
+          networks:
+            - ipaddr: "{{ params.val.networks[0].ipaddr }}"
+              mask: "{{ params.val.networks[0].mask }}"
+          exclranges: "{{ params.val.exclranges }}"
+          exclnetworks: "{{ params.val.exclnetworks }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ip6pool-object-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT carries top-level id (target name) and a val body mirroring the POST shape.
+        - id and val.name must identify the same IPv6 address object to update.
+        - exclranges and exclnetworks are optional and mirror the POST shape.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_ip6pool_object:
+    atom_ref: atoms/fw/fw_delete_ip6pool_object.yaml
+    intent: Build an IPv6 address-object delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/ip6pool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ip6pool-object-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE carries the object name as a query value (?id=<name>) and sends no JSON body.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ip6pool_object:
+    atom_ref: atoms/fw/fw_verify_ip6pool_object.yaml
+    intent: Build an IPv6 address-object query request with pagination and optional type/keyword filters.
+    request:
+      method: GET
+      path: /api/v1/ip6pool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ip6pool-object-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET returns all IPv6 address objects in vals; supports page, size, type and keywords query parameters.
+        - type filter may repeat as ANY and CUSTOM; GET requests send no JSON body.
+        - Each val entry carries name, type, networks, desc, and refcnt fields.
+  fw_delete_batch_ip6pool_object:
+    atom_ref: atoms/fw/fw_delete_batch_ip6pool_object.yaml
+    intent: Build a batch IPv6 address-object delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ip6pool-object-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/ip6pool items with an id list per item.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_object:
     atom_ref: atoms/fw/fw_config_object.yaml
     intent: Build an IPv4 address-object configuration request from a validated atom parameter set.
@@ -156,6 +301,8 @@ operations:
           networks:
             - ipaddr: "{{ params.ipaddr }}"
               mask: "{{ params.mask }}"
+          exclranges: "{{ params.exclranges }}"
+          exclnetworks: "{{ params.exclnetworks }}"
     response:
       success_status:
         - 200
@@ -168,6 +315,7 @@ operations:
       notes:
         - Address-object names are later referenced by policy route source_network or dst_network fields.
         - CIDR input must be split into ipaddr and mask before calling this endpoint.
+        - exclranges and exclnetworks are optional; each exclnetworks entry carries ipaddr and mask where an empty mask excludes a single address.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_object:
     atom_ref: atoms/fw/fw_update_object.yaml
@@ -190,6 +338,8 @@ operations:
           networks:
             - ipaddr: "{{ params.val.networks[0].ipaddr }}"
               mask: "{{ params.val.networks[0].mask }}"
+          exclranges: "{{ params.val.exclranges }}"
+          exclnetworks: "{{ params.val.exclnetworks }}"
     response:
       success_status:
         - 200
@@ -202,6 +352,7 @@ operations:
       notes:
         - PUT carries top-level id (target name) and a val body mirroring the POST shape.
         - id and val.name must identify the same address object to update.
+        - exclranges and exclnetworks are optional and mirror the POST shape.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_object:
@@ -327,7 +478,7 @@ operations:
         - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - source_network and dst_network are address object names unless the matching is_group flag is true.
         - applist and app_tag_name are optional application match criteria; omit to match no application.
-        - health_check is an empty object unless ip_link_name is provided, then it becomes {type: iplink, name: <ip_link_name>}.
+        - 'health_check is an empty object unless ip_link_name is provided, then it becomes {type: iplink, name: <ip_link_name>}.'
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_policy_route:
@@ -378,7 +529,7 @@ operations:
         - type must be ipv4 or ipv6; forwarding_paths entries require next_hop_ip or outgoing_interface.
         - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - applist and app_tag_name are optional application match criteria; omit to match no application.
-        - health_check is an empty object unless ip_link_name is provided, then it becomes {type: iplink, name: <ip_link_name>}.
+        - 'health_check is an empty object unless ip_link_name is provided, then it becomes {type: iplink, name: <ip_link_name>}.'
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_policy_route:
@@ -3827,7 +3978,7 @@ operations:
       runner_required: true
       notes:
         - Query values are page, size, keywords, is_linux (always false), and is_ip6 (false for IPv4 ARP).
-        - GET returns {"count": N, "vals": [...]} where each val has interface, ipAddress, physAddress, static, binded.
+        - 'GET returns {"count": N, "vals": [...]} where each val has interface, ipAddress, physAddress, static, binded.'
         - GET requests send no JSON body.
   fw_delete_neighbor:
     atom_ref: atoms/fw/fw_delete_neighbor.yaml

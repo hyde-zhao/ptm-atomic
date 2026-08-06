@@ -28,6 +28,7 @@ from atomic_ops.runner.iptun import (
 )
 from atomic_ops.runner.ngfw_login import login
 from atomic_ops.runner.object import (
+    IP6POOL_OBJECT_RESOURCE,
     build_address_object_payload,
     build_address_object_update_payload,
     build_object_batch_delete_payload,
@@ -855,6 +856,110 @@ class AddressObjectPayloadTests(unittest.TestCase):
                 mask="16",
                 object_desc=None,
             )
+
+    def test_build_ipv4_payload_with_excluded_networks(self) -> None:
+        payload = build_address_object_payload(
+            object_name="srcWithExcl",
+            ipaddr="192.168.0.0",
+            mask="16",
+            object_desc=None,
+            exclnetworks=[{"ipaddr": "192.168.0.5", "mask": ""}],
+        )
+        self.assertEqual(payload["val"]["exclranges"], [])
+        self.assertEqual(payload["val"]["exclnetworks"], [{"ipaddr": "192.168.0.5", "mask": ""}])
+
+    def test_build_ipv4_payload_with_excluded_ranges(self) -> None:
+        payload = build_address_object_payload(
+            object_name="srcWithExclRng",
+            ipaddr="192.168.0.0",
+            mask="16",
+            object_desc=None,
+            exclranges=[{"s_start": 1, "s_end": 10}],
+        )
+        self.assertEqual(payload["val"]["exclranges"], [{"s_start": 1, "s_end": 10}])
+        self.assertEqual(payload["val"]["exclnetworks"], [])
+
+    def test_build_ipv6_payload_with_excluded_networks(self) -> None:
+        payload = build_address_object_payload(
+            object_name="v6SrcWithExcl",
+            ipaddr="2001::",
+            mask="64",
+            object_desc=None,
+            ip_version=6,
+            exclnetworks=[{"ipaddr": "2001::1", "mask": ""}],
+        )
+        self.assertEqual(payload["val"]["networks"][0]["ipaddr"], "2001::")
+        self.assertEqual(payload["val"]["networks"][0]["mask"], "64")
+        self.assertEqual(payload["val"]["exclnetworks"], [{"ipaddr": "2001::1", "mask": ""}])
+
+    def test_rejects_ipv6_mask_beyond_128(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_address_object_payload(
+                object_name="v6BadMask",
+                ipaddr="2001::",
+                mask="129",
+                object_desc=None,
+                ip_version=6,
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_rejects_ipv4_ipaddr_for_ipv6_payload(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_address_object_payload(
+                object_name="v6WrongIp",
+                ipaddr="192.168.0.0",
+                mask="24",
+                object_desc=None,
+                ip_version=6,
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_rejects_exclnetworks_non_list(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_address_object_payload(
+                object_name="badExcl",
+                ipaddr="192.168.0.0",
+                mask="16",
+                object_desc=None,
+                exclnetworks="not-a-list",
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_rejects_exclnetworks_missing_ipaddr(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_address_object_payload(
+                object_name="badExcl",
+                ipaddr="192.168.0.0",
+                mask="16",
+                object_desc=None,
+                exclnetworks=[{"mask": "24"}],
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_rejects_exclnetworks_wrong_ip_version(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_address_object_payload(
+                object_name="badExcl",
+                ipaddr="192.168.0.0",
+                mask="16",
+                object_desc=None,
+                ip_version=6,
+                exclnetworks=[{"ipaddr": "192.168.0.5", "mask": ""}],
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_build_ipv6_update_payload(self) -> None:
+        payload = build_address_object_update_payload(
+            object_name="v6Src",
+            ipaddr="2001::",
+            mask="64",
+            object_desc=None,
+            ip_version=6,
+            exclnetworks=[{"ipaddr": "2001::1", "mask": ""}],
+        )
+        self.assertEqual(payload["id"], "v6Src")
+        self.assertEqual(payload["val"]["networks"][0]["ipaddr"], "2001::")
+        self.assertEqual(payload["val"]["exclnetworks"], [{"ipaddr": "2001::1", "mask": ""}])
 
 
 class Ospfv2PayloadTests(unittest.TestCase):
@@ -2743,6 +2848,82 @@ class ObjectDeleteVerifyTests(unittest.TestCase):
         self.assertIsNone(kwargs["json_payload"])
         self.assertEqual(kwargs["headers"]["AuthorizationToken"], "abc123")
 
+    def test_execute_verify_ip6pool_with_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.object.request_json", return_value=(200, {"count": 1, "vals": []}, "{}")) as request:
+                result = execute_object(
+                    op_id="fw_verify_ip6pool_object",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=None,
+                    page=1,
+                    size=40,
+                    keywords="v6test",
+                    types=["ANY", "CUSTOM"],
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["status"], "success")
+        request.assert_called_once()
+        args, kwargs = request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertTrue(
+            args[1].endswith("/api/v1/ip6pool?page=1&size=40&type=ANY&type=CUSTOM&keywords=v6test")
+        )
+        self.assertIsNone(kwargs["json_payload"])
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer abc123")
+
+    def test_execute_delete_ip6pool_uses_query_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.object.request_json", return_value=(200, {"ok": True}, "{}")) as request:
+                result = execute_object(
+                    op_id="fw_delete_ip6pool_object",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload={"id": "v6Src"},
+                    page=1,
+                    size=40,
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["status"], "success")
+        args, kwargs = request.call_args
+        self.assertEqual(args[0], "DELETE")
+        self.assertTrue(args[1].endswith("/api/v1/ip6pool?id=v6Src"))
+
+    def test_build_ip6pool_batch_delete_payload(self) -> None:
+        payload = build_object_batch_delete_payload(
+            entry_ids=["v6Obj1", "v6Obj2"],
+            resource=IP6POOL_OBJECT_RESOURCE,
+        )
+        self.assertEqual(
+            payload["batch"],
+            [
+                {"method": "DELETE", "resource": "/api/v1/ip6pool", "body": {"id": ["v6Obj1"]}},
+                {"method": "DELETE", "resource": "/api/v1/ip6pool", "body": {"id": ["v6Obj2"]}},
+            ],
+        )
+        validated = validate_object_payload(payload, op_id="fw_delete_batch_ip6pool_object")
+        self.assertEqual(validated["batch"][0]["resource"], "/api/v1/ip6pool")
+
     def test_rejects_delete_with_empty_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             session_file = Path(temp_dir) / "session.json"
@@ -2754,8 +2935,7 @@ class ObjectDeleteVerifyTests(unittest.TestCase):
                     auth_header="Authorization",
                     payload={"id": ""},
                     page=1,
-                    size=40,
-                    verify_tls=False,
+                    size=40,                    verify_tls=False,
                     timeout=10.0,
                 )
         self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")

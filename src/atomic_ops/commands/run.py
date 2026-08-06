@@ -308,6 +308,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     """构建 run 子命令树。每个操作族为一个 CommandGroup。"""
     from atomic_ops.commands import run_auth as run_auth
     from atomic_ops.commands import run_object as run_object
+    from atomic_ops.commands import run_ip6pool_object as run_ip6pool_object
     from atomic_ops.commands import run_customappobj as run_customappobj
     from atomic_ops.commands import run_customappobjtag as run_customappobjtag
     from atomic_ops.commands import run_servicepool as run_servicepool
@@ -344,6 +345,12 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="Address object operations.",
             description="Address object configuration operations.",
             children=run_object.build_subtree(),
+        ),
+        CommandGroup(
+            name="ip6pool-object",
+            help="IPv6 address object operations.",
+            description="IPv6 address object configuration, update, delete, batch-delete, and verify operations.",
+            children=run_ip6pool_object.build_subtree(),
         ),
         CommandGroup(
             name="app-obj",
