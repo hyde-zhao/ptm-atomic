@@ -95,8 +95,8 @@ def build_acl_policy_payload(
         "app_tag_name": [],
         "sec_obj_data": [],
     }
-    if entry_id:
-        entry_id = _validate_positive_int("id", entry_id)
+    if entry_id is not None:
+        entry_id = _validate_non_negative_int("id", entry_id)
         return {"id": entry_id, "val": val}
     return {"val": val}
 
@@ -420,6 +420,25 @@ def _validate_positive_int(field: str, value: int | str) -> int:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "Control-policy integer field must be positive.",
+            {"field": field, "value": parsed},
+        )
+    return parsed
+
+
+def _validate_non_negative_int(field: str, value: int | str) -> int:
+    # 允许 0（默认安全策略 id=0 需通过 update 修改其 action）
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Control-policy integer field is invalid.",
+            {"field": field, "value": value},
+        ) from exc
+    if parsed < 0:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Control-policy integer field must be non-negative.",
             {"field": field, "value": parsed},
         )
     return parsed

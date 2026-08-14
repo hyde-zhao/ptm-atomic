@@ -368,12 +368,8 @@ def _apply_sub(val: dict[str, Any], entry_id: str, parent_name: str | None, sub_
 
 
 def _apply_physical(val: dict[str, Any], entry_id: str) -> None:
-    if not PHYSICAL_ID_RE.match(entry_id):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Physical interface id must use GE<number>_<number> style.",
-            {"id": entry_id},
-        )
+    # 接口 ID 不做格式校验，直接透传；ID 不存在时由防火墙返回错误。
+    # 不同型号防火墙物理口命名不同（如 GE0_5 / TE0_9 / TTE0_1），不能在此限定前缀。
     val["type"] = 3
 
 
@@ -588,7 +584,8 @@ def _kind_from_payload(entry_id: str, val: dict[str, Any]) -> str:
         return "bvi"
     if SUB_ID_RE.match(entry_id) and "sub" in val:
         return "sub"
-    if PHYSICAL_ID_RE.match(entry_id):
+    if type_code == 3:
+        # 物理口按 type 代码判定，不校验 ID 前缀（不同型号防火墙命名不同：GE0_5 / TE0_9 / TTE0_1）
         return "physical"
     if BOND_ID_RE.match(entry_id) and "bond" in val:
         return "bond"

@@ -131,7 +131,7 @@ def _run_acl_policy(args: argparse.Namespace, op_id: str) -> int:
         payload: dict[str, Any] | None
 
         if op_id in {"fw_config_acl_policy", "fw_update_acl_policy"}:
-            entry_id = _single_arg(args, "id") if op_id == "fw_update_acl_policy" else 0
+            entry_id = _single_arg(args, "id") if op_id == "fw_update_acl_policy" else None
             payload = build_acl_policy_payload(
                 policy_type=policy_type,
                 name=getattr(args, "name"),
