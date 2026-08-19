@@ -256,3 +256,150 @@ operations:
         - This operation uses a dedicated GET /api/v1/ownership endpoint, not the POST /api/v1/ops/{op_id} dispatch endpoint.
         - The response is a raw {count, ownerships} object, not an OperationEnvelope; HTTP 200 alone determines success.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_config_stateful_interface:
+    atom_ref: atoms/tg/tg_config_stateful_interface.yaml
+    intent: Build an ASTF interface configuration request that sets port IPs, learns gateway MACs via ARP, and announces the template IP pool via gratuitous ARP.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_config_stateful_interface
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        interfaces: "{{ params.interfaces }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-config-stateful-interface-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - The template IP pool (interface IP plus the next 4 addresses) must stay DUT-routable; the DUT ARP cache ages in ~20 minutes so re-run this op before each test round.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_apply_stateful_template:
+    atom_ref: atoms/tg/tg_apply_stateful_template.yaml
+    intent: Build an ASTF template load request that finds and loads a pre-defined profile on the ASTF instance.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_apply_stateful_template
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        template: "{{ params.template }}"
+        tunables: "{{ params.tunables }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-apply-stateful-template-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_start_stateful_stream:
+    atom_ref: atoms/tg/tg_start_stateful_stream.yaml
+    intent: Build an ASTF traffic start request with CPS multiplier and duration.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_start_stateful_stream
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        mult: "{{ params.mult }}"
+        duration: "{{ params.duration }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-start-stateful-stream-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_verify_stateful_metrics:
+    atom_ref: atoms/tg/tg_verify_stateful_metrics.yaml
+    intent: Build an ASTF metrics verification request against an optional max loss ratio.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_verify_stateful_metrics
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        max_loss: "{{ params.max_loss }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-verify-stateful-metrics-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_stop_stateful_stream:
+    atom_ref: atoms/tg/tg_stop_stateful_stream.yaml
+    intent: Build an ASTF traffic stop request.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_stop_stateful_stream
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-stop-stateful-stream-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_delete_stateful_template:
+    atom_ref: atoms/tg/tg_delete_stateful_template.yaml
+    intent: Build an ASTF profile unload request.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_delete_stateful_template
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-delete-stateful-template-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - ptm-atomic run can execute this request only when --execute is explicit.

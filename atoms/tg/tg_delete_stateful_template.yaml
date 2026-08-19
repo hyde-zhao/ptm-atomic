@@ -1,0 +1,42 @@
+schema_version: "1.1"
+op_id: tg_delete_stateful_template
+device_type: tg
+description: Unload the ASTF profile from the TRex ASTF instance.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_delete_stateful_template
+parameters:
+  user_id:
+    type: string
+    required: false
+    description: TRex multi-user owner id. Defaults to "default".
+returns:
+  status: success
+  data:
+    user_id: default
+    cleared:
+      - dns-query
+    deleted: true
+  error_type: INVALID_PARAM
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: state_mutation
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - RESOURCE_CONFLICT
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - No stateful stream is running for the given user_id.
+  - A stateful template has been loaded.
+postconditions:
+  - The ASTF profile is unloaded from the TRex ASTF instance.
+tags:
+  - traffic
+  - trex
+  - stateful
+  - template
+since_version: "1.3.0"

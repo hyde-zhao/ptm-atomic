@@ -26,6 +26,15 @@ SUCCESS_STATUS = {200}
 TEMPLATE_RE = re.compile(r"^[a-z0-9_-]+$")
 RATE_RE = re.compile(r"^[1-9][0-9]*(pps|kbps|mbps|gbps)$", re.IGNORECASE)
 
+TREX_STATEFUL_OPS = {
+    "tg_config_stateful_interface",
+    "tg_apply_stateful_template",
+    "tg_start_stateful_stream",
+    "tg_verify_stateful_metrics",
+    "tg_stop_stateful_stream",
+    "tg_delete_stateful_template",
+}
+
 TREX_OPS: dict[str, tuple[str, str]] = {
     op_id: ("POST", f"/api/v1/ops/{op_id}")
     for op_id in (
@@ -41,6 +50,11 @@ TREX_OPS: dict[str, tuple[str, str]] = {
 }
 # ownership 走独立 GET 端点，非 /api/v1/ops/{op_id} 调度
 TREX_OPS["tg_verify_ownership"] = ("GET", "/api/v1/ownership")
+# Stateful (ASTF) operations
+TREX_OPS.update({
+    op_id: ("POST", f"/api/v1/ops/{op_id}")
+    for op_id in TREX_STATEFUL_OPS
+})
 
 # user_id 命名规范：default（兼容旧流程）或 dev<ip末段>-<序号>（如 dev172-1）
 USER_ID_RE = re.compile(r"^(default|dev\d{1,3}-\d+)$")
@@ -55,6 +69,8 @@ _USER_ID_FORWARD_OPS = {
     "tg_stop_traffic_stream",
     "tg_delete_traffic_template",
 }
+# Stateful (ASTF) ops also forward user_id
+_USER_ID_FORWARD_OPS.update(TREX_STATEFUL_OPS)
 
 # trex-api OperationEnvelope.error_type -> (CLI runner error_code, retryable)
 ERROR_TYPE_MAP: dict[str, tuple[str, bool]] = {
@@ -156,6 +172,36 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
             payload["max_loss"] = params.get("max_loss")
     elif op_id == "tg_delete_traffic_template":
         payload = {"template": params.get("template")}
+    elif op_id == "tg_apply_stateful_template":
+        payload = {
+            "template": params.get("template"),
+        }
+        tunables = params.get("tunables")
+        if tunables is not None:
+            payload["tunables"] = tunables
+    elif op_id == "tg_config_stateful_interface":
+        interfaces = params.get("interfaces")
+        if not isinstance(interfaces, list) or not interfaces:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "interfaces must be a non-empty list.",
+                {"field": "interfaces"},
+            )
+        payload: dict[str, Any] = {"interfaces": interfaces}
+    elif op_id == "tg_start_stateful_stream":
+        payload = {
+            "mult": params.get("mult", 1),
+            "duration": params.get("duration", -1),
+        }
+    elif op_id == "tg_verify_stateful_metrics":
+        payload = {}
+        max_loss = params.get("max_loss")
+        if max_loss is not None:
+            payload["max_loss"] = max_loss
+    elif op_id == "tg_stop_stateful_stream":
+        payload = {}
+    elif op_id == "tg_delete_stateful_template":
+        payload = {}
     elif op_id == "tg_verify_ownership":
         # GET 查询无请求体
         payload: dict[str, Any] = {}
@@ -273,6 +319,33 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
             payload["max_loss"] = float(max_loss)
     elif op_id == "tg_delete_traffic_template":
         _validate_template_name(payload.get("template"), field="template")
+    elif op_id == "tg_apply_stateful_template":
+        _validate_template_name(payload.get("template"), field="template")
+    elif op_id == "tg_config_stateful_interface":
+        interfaces = payload.get("interfaces")
+        if not isinstance(interfaces, list) or not interfaces:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "interfaces must be a non-empty list.",
+                {"field": "interfaces"},
+            )
+    elif op_id == "tg_start_stateful_stream":
+        mult = payload.get("mult", 1)
+        if not isinstance(mult, int) or mult < 1:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "mult must be a positive integer.",
+                {"field": "mult"},
+            )
+        duration = payload.get("duration", -1)
+        if not isinstance(duration, int) or (duration != -1 and duration <= 0):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "duration must be -1 (continuous) or a positive integer.",
+                {"field": "duration"},
+            )
+    elif op_id in {"tg_verify_stateful_metrics", "tg_stop_stateful_stream", "tg_delete_stateful_template"}:
+        pass  # no required fields beyond optional user_id
     elif op_id == "tg_verify_ownership":
         # GET 查询无请求体，无需校验
         pass

@@ -91,6 +91,48 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                             handler=_run_verify_ownership,
                             add_args=_add_verify_ownership_args,
                         ),
+                        CommandSpec(
+                            name="config-stateful-interface",
+                            help="Configure ASTF interfaces and learn gateway MACs.",
+                            description="Configure ASTF IPv4 or IPv6 interfaces (set_l3_mode) and learn gateway MAC addresses via ARP.",
+                            handler=_run_config_stateful_interface,
+                            add_args=_add_config_stateful_interface_args,
+                        ),
+                        CommandSpec(
+                            name="apply-stateful-template",
+                            help="Load a pre-defined ASTF template.",
+                            description="Load an ASTF profile template onto the TRex ASTF instance.",
+                            handler=_run_apply_stateful_template,
+                            add_args=_add_apply_stateful_template_args,
+                        ),
+                        CommandSpec(
+                            name="start-stateful-stream",
+                            help="Start ASTF stateful traffic.",
+                            description="Start ASTF stateful traffic from a loaded profile.",
+                            handler=_run_start_stateful_stream,
+                            add_args=_add_start_stateful_stream_args,
+                        ),
+                        CommandSpec(
+                            name="verify-stateful-metrics",
+                            help="Verify ASTF stateful metrics.",
+                            description="Query real-time ASTF statistics and optionally verify loss ratio.",
+                            handler=_run_verify_stateful_metrics,
+                            add_args=_add_verify_stateful_metrics_args,
+                        ),
+                        CommandSpec(
+                            name="stop-stateful-stream",
+                            help="Stop ASTF stateful traffic.",
+                            description="Stop ASTF stateful traffic and clear runtime state.",
+                            handler=_run_stop_stateful_stream,
+                            add_args=_add_stop_stateful_stream_args,
+                        ),
+                        CommandSpec(
+                            name="delete-stateful-template",
+                            help="Unload ASTF template.",
+                            description="Unload the ASTF profile from the TRex ASTF instance.",
+                            handler=_run_delete_stateful_template,
+                            add_args=_add_delete_stateful_template_args,
+                        ),
                     ),
                 ),
             ),
@@ -213,6 +255,59 @@ def _add_verify_ownership_args(parser: argparse.ArgumentParser) -> None:
     _add_payload_args(parser)
 
 
+def _add_config_stateful_interface_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    parser.add_argument(
+        "--interfaces",
+        required=True,
+        help="JSON array of interface objects: port, ip, gateway, and optional mac/peer-mac/vlan fields.",
+    )
+    _add_payload_args(parser)
+
+
+def _add_apply_stateful_template_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    parser.add_argument(
+        "--template",
+        required=True,
+        help="Pre-defined ASTF template name (http-simple, http-multi, dns-query, ftp-download).",
+    )
+    parser.add_argument(
+        "--tunables",
+        default=None,
+        help="JSON string of template-specific tunables (e.g. '{\"fsize\": 500}').",
+    )
+    _add_payload_args(parser)
+
+
+def _add_start_stateful_stream_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    parser.add_argument("--mult", type=int, default=1, help="CPS multiplier (default 1).")
+    parser.add_argument("--duration", type=int, default=-1, help="Duration in seconds (-1 = continuous).")
+    _add_payload_args(parser)
+
+
+def _add_verify_stateful_metrics_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    parser.add_argument(
+        "--max-loss",
+        type=float,
+        default=None,
+        help="Maximum allowed loss ratio. If omitted, only returns stats.",
+    )
+    _add_payload_args(parser)
+
+
+def _add_stop_stateful_stream_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    _add_payload_args(parser)
+
+
+def _add_delete_stateful_template_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    _add_payload_args(parser)
+
+
 # ── Handler 函数 ──────────────────────────────────────────
 
 
@@ -250,6 +345,30 @@ def _run_release_ports(args: argparse.Namespace) -> int:
 
 def _run_verify_ownership(args: argparse.Namespace) -> int:
     return _run_trex(args, "tg_verify_ownership")
+
+
+def _run_config_stateful_interface(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_config_stateful_interface")
+
+
+def _run_apply_stateful_template(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_apply_stateful_template")
+
+
+def _run_start_stateful_stream(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_start_stateful_stream")
+
+
+def _run_verify_stateful_metrics(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_verify_stateful_metrics")
+
+
+def _run_stop_stateful_stream(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_stop_stateful_stream")
+
+
+def _run_delete_stateful_template(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_delete_stateful_template")
 
 
 def _run_trex(args: argparse.Namespace, op_id: str) -> int:
@@ -349,6 +468,34 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
         return params
     if op_id == "tg_delete_traffic_template":
         return {"user_id": getattr(args, "user_id", "default"), "template": getattr(args, "template", None)}
+    if op_id == "tg_config_stateful_interface":
+        return {
+            "user_id": getattr(args, "user_id", "default"),
+            "interfaces": _parse_interfaces(getattr(args, "interfaces", "")),
+        }
+    if op_id == "tg_apply_stateful_template":
+        params: dict[str, Any] = {
+            "user_id": getattr(args, "user_id", "default"),
+            "template": getattr(args, "template", None),
+        }
+        tunables_str = getattr(args, "tunables", None)
+        if tunables_str:
+            params["tunables"] = json.loads(tunables_str)
+        return params
+    if op_id == "tg_start_stateful_stream":
+        return {
+            "user_id": getattr(args, "user_id", "default"),
+            "mult": getattr(args, "mult", 1),
+            "duration": getattr(args, "duration", -1),
+        }
+    if op_id == "tg_verify_stateful_metrics":
+        params = {"user_id": getattr(args, "user_id", "default")}
+        max_loss = getattr(args, "max_loss", None)
+        if max_loss is not None:
+            params["max_loss"] = max_loss
+        return params
+    if op_id in {"tg_stop_stateful_stream", "tg_delete_stateful_template"}:
+        return {"user_id": getattr(args, "user_id", "default")}
     return {}
 
 
