@@ -3552,5 +3552,70 @@ class NewModuleV2CliDryRunTests(unittest.TestCase):
         self.assertIn("/api/v1/customappobjtag?id=tag1", payload["data"]["request"]["url"])
 
 
+class StaticDnsPayloadTests(unittest.TestCase):
+    def test_config_payload_wraps_val_object(self) -> None:
+        from atomic_ops.runner.dns_static import build_static_dns_payload
+        payload = build_static_dns_payload(name="www.example.com", ip4addr="10.10.10.10")
+        self.assertEqual(payload, {"val": {"name": "www.example.com", "ip4addr": "10.10.10.10"}})
+
+    def test_config_payload_includes_optional_ip6addr(self) -> None:
+        from atomic_ops.runner.dns_static import build_static_dns_payload
+        payload = build_static_dns_payload(name="v6.example.com", ip4addr="10.10.10.11", ip6addr="2001:db8::1")
+        self.assertEqual(payload["val"]["ip6addr"], "2001:db8::1")
+
+    def test_validate_requires_name_and_ip4addr(self) -> None:
+        from atomic_ops.runner.dns_static import validate_static_dns_payload
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            validate_static_dns_payload({"val": {"name": "", "ip4addr": "10.10.10.10"}})
+        with self.assertRaises(RunnerError):
+            validate_static_dns_payload({"val": {"name": "www.example.com"}})
+        with self.assertRaises(RunnerError):
+            validate_static_dns_payload({"val": None})
+
+    def test_delete_payload_requires_id(self) -> None:
+        from atomic_ops.runner.dns_static import build_static_dns_dry_run
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            build_static_dns_dry_run(
+                op_id="fw_delete_static_dns", base_url="https://192.0.2.1",
+                session_file=Path("x"), auth_header="Authorization", payload=None,
+                verify_tls=False, timeout=10.0,
+            )
+
+
+class StaticDnsCliTests(unittest.TestCase):
+    def test_cli_static_dns_config_posts_val_body(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "static-dns-config", "--name", "www.example.com", "--ip4addr", "10.10.10.10"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_static_dns")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/cache"))
+        self.assertEqual(
+            payload["data"]["request"]["payload"],
+            {"val": {"name": "www.example.com", "ip4addr": "10.10.10.10"}},
+        )
+
+    def test_cli_static_dns_delete_uses_query_id_and_no_body(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "static-dns-delete", "--id", "www.example.com"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_static_dns")
+        self.assertEqual(payload["data"]["request"]["method"], "DELETE")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/cache?id=www.example.com"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+
 if __name__ == "__main__":
     unittest.main()

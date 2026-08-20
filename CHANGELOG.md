@@ -11,6 +11,7 @@ The two streams are intentionally separate. A schema or operation-library change
 
 ### Added
 
+- Add static DNS entry atom specs and adapter profile mappings for `fw_config_static_dns` (POST /api/v1/dns/cache) and `fw_delete_static_dns` (DELETE /api/v1/dns/cache?id=<domain>), with the `run dns static-dns-config` / `static-dns-delete` subcommands backed by `runner/dns_static.py` and the default HTTP runner (dry-run by default, `--execute` for live device requests).
 - Add the initial atomic operation schema contract in `schemas/atomic-op.schema.yaml`.
 - Add the schema field reference in `docs/schema-field-reference.md`.
 - Add the naming convention baseline in `docs/naming-convention.md`.

@@ -330,6 +330,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_reboot as run_reboot
     from atomic_ops.commands import run_ha as run_ha
     from atomic_ops.commands import run_trex as run_trex
+    from atomic_ops.commands import run_dns as run_dns
     from atomic_ops.commands import run_neighbor as run_neighbor
     from atomic_ops.commands import run_cli as run_cli
 
@@ -442,6 +443,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_config_transfer.build_subtree(),
         *run_reboot.build_subtree(),
         *run_ha.build_subtree(),
+        *run_dns.build_subtree(),
         *run_trex.build_subtree(),
         *run_neighbor.build_subtree(),
         CommandGroup(

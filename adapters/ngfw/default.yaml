@@ -4038,3 +4038,55 @@ operations:
         - Each batch item must be DELETE /api/v1/neighbor with body.physAddress, body.interface, and body.ipAddress as parallel arrays.
         - Batch body arrays allow multiple values per field for bulk deletion.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_static_dns:
+    atom_ref: atoms/fw/fw_config_static_dns.yaml
+    intent: Build a static DNS entry create request by domain name and address.
+    request:
+      method: POST
+      path: /api/v1/dns/cache
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <static-dns-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST /api/v1/dns/cache carries val.name and val.ip4addr (ip6addr optional) as the static entry body.
+        - A duplicate name overwrites the existing static entry.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_static_dns:
+    atom_ref: atoms/fw/fw_delete_static_dns.yaml
+    intent: Build a static DNS entry delete request by domain name.
+    request:
+      method: DELETE
+      path: /api/v1/dns/cache
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <static-dns-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE sends the domain name as ?id=<domain> and sends no JSON body.
+        - Deleting an absent domain returns success per device behavior.
+        - ptm-atomic run can execute this request only when --execute is explicit.
