@@ -1,0 +1,88 @@
+schema_version: "1.1"
+op_id: fw_config_dns_diag
+device_type: fw
+transport: ssh
+description: Run DNS resolution diagnostics (ping -c 3 or traceroute) for a domain over SSH.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_dns_diag
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when the SSH target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  domain:
+    type: string
+    required: true
+    description: Domain name resolved from the firewall, e.g. www.baidu.com.
+  mode:
+    type: string
+    required: true
+    description: Diagnostic command mode; one of ping (ping -c 3 <domain>) or traceroute (<domain>).
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  domain: www.baidu.com
+  mode: ping
+side_effect: observation
+returns:
+  status: success
+  data:
+    mode: ping
+    domain: www.baidu.com
+    diag_output: "<dns-diag-output-ref>"
+    resolution_ok: true
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+risk:
+  level: high
+  categories:
+    - dns
+    - diagnostic
+gate:
+  required: true
+  reason: The diagnostic runs commands as root on the firewall and requires review before execution.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+verification:
+  kind: capacity_domain
+  rules:
+    - name: dns_resolution_diag_succeeds
+      input_ref: "<dns-diag-output-ref>"
+      expected_result: ping returns a reply line with bytes from the resolved address, or traceroute starts with a resolved hop list.
+  summary_ref: "<dns-diag-verification-summary-ref>"
+preconditions:
+  - Device management SSH service is reachable with a root-capable credential via the runner credential env var.
+  - A default route to the public switch (next hop <GATEWAY_IP>), public access rights for the management IP, and a system DNS server (<DNS_SERVER_IP> or <DNS_SERVER_IP>) are configured.
+postconditions:
+  - The diagnostic output is captured in diag_snapshot_ref; nothing is written to the repo.
+tags:
+  - firewall
+  - dns
+  - diagnostic
+  - cli
+aliases:
+  - dns-diag
+  - dns-resolution-check
+  - local-resolution-verify
+since_version: "1.9.0"

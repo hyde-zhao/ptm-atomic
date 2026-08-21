@@ -3946,5 +3946,147 @@ class DnsSysCliTests(unittest.TestCase):
         self.assertIsNone(payload["data"]["request"]["payload"])
 
 
+class PppoeCliTests(unittest.TestCase):
+    def test_cli_pppoe_config_dry_run_builds_interface_body_with_placeholder(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "interface", "pppoe-config", "--id", "TE0_21", "--username", "user01"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_pppoe")
+        self.assertEqual(payload["data"]["request"]["method"], "PUT")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/intf"))
+        request_payload = payload["data"]["request"]["payload"]
+        self.assertEqual(request_payload["id"], "TE0_21")
+        self.assertEqual(request_payload["val"]["type"], 3)
+        self.assertEqual(request_payload["val"]["pppoe"]["username"], "user01")
+        self.assertEqual(request_payload["val"]["pppoe"]["password"], "<encrypted-at-execute>")
+
+    def test_cli_pppoe_config_dry_run_never_leaks_password(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "interface", "pppoe-config", "--id", "TE0_21", "--username", "user01"]
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Pass@123", stdout.getvalue())
+
+    def test_execute_pppoe_config_requires_password_env(self) -> None:
+        from atomic_ops.runner.pppoe import execute_pppoe_config
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError) as context:
+            execute_pppoe_config(
+                base_url="https://192.0.2.1", session_file=Path("x"),
+                auth_header="Authorization", intf_id="TE0_21", username="user01",
+                password_env="PTM_PPPOE_PASSWORD_UNSET", verify_tls=False, timeout=10.0,
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_CREDENTIAL_MISSING")
+
+    def test_pppoe_payload_requires_nonempty_fields(self) -> None:
+        from atomic_ops.runner.pppoe import build_pppoe_config_dry_run
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            build_pppoe_config_dry_run(
+                base_url="https://192.0.2.1", session_file=Path("x"),
+                auth_header="Authorization", intf_id="", username="user01",
+                verify_tls=False, timeout=10.0,
+            )
+
+
+class SshDnsOpsCliTests(unittest.TestCase):
+    def test_cli_verify_process_state_dry_run_builds_anchored_pgrep(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cli", "verify-process-state", "--process", "vpp"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_process_state")
+        self.assertIn("pgrep -f", payload["data"]["request"]["command"])
+        self.assertIn("^/opt/dbappsecurity/bin/vpp -c /appdata/etc/vpp/startup.conf", payload["data"]["request"]["command"])
+        self.assertEqual(payload["data"]["request"]["success_pattern"], "\\d+")
+
+    def test_cli_verify_process_state_dnsmasq_uses_anchored_pattern(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cli", "verify-process-state", "--process", "dnsmasq"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertIn("^/opt/dbappsecurity/bin/dnsmasq -k -C /appdata/etc/dns/dnsmasq.conf", payload["data"]["request"]["command"])
+
+    def test_cli_kill_process_dry_run_builds_escaped_kill(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cli", "kill-process", "--process", "vpp", "--pid", "2249"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_kill_process")
+        self.assertEqual(payload["data"]["request"]["command"], "kill -9 2249")
+
+    def test_kill_pid_is_shell_escaped(self) -> None:
+        from atomic_ops.runner.ssh import build_kill_process_dry_run
+        result = build_kill_process_dry_run(
+            base_url="https://192.0.2.1", session_file=Path("x"), transport="ssh",
+            host=None, port=None, process="vpp", pid="2249; rm -rf /", timeout=10.0,
+        )
+        command = result["request"]["command"]
+        self.assertEqual(command, "kill -9 '2249; rm -rf /'")
+
+    def test_cli_config_dns_diag_ping_mode(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cli", "config-dns-diag", "--domain", "www.baidu.com", "--mode", "ping"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_dns_diag")
+        self.assertEqual(payload["data"]["request"]["command"], "ping -c 3 www.baidu.com")
+        self.assertEqual(payload["data"]["request"]["success_pattern"], "\\d+ bytes from")
+
+    def test_cli_config_dns_diag_traceroute_mode(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cli", "config-dns-diag", "--domain", "www.baidu.com", "--mode", "traceroute"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["command"], "traceroute www.baidu.com")
+        self.assertEqual(payload["data"]["request"]["success_pattern"], "\\d+ hops max")
+
+    def test_unsupported_process_raises_validation_error(self) -> None:
+        from atomic_ops.runner.ssh import build_verify_process_state_dry_run
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            build_verify_process_state_dry_run(
+                base_url="https://192.0.2.1", session_file=Path("x"), transport="ssh",
+                host=None, port=None, process="unknown", timeout=10.0,
+            )
+
+    def test_unsupported_diag_mode_raises_validation_error(self) -> None:
+        from atomic_ops.runner.ssh import build_dns_diag_dry_run
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            build_dns_diag_dry_run(
+                base_url="https://192.0.2.1", session_file=Path("x"), transport="ssh",
+                host=None, port=None, domain="www.baidu.com", mode="nslookup", timeout=10.0,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

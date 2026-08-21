@@ -124,3 +124,5 @@ operations:
   - fw_config_dns_proxy_server
   - fw_delete_dns_proxy_server
   - fw_delete_batch_dns_proxy_server
+  - fw_config_pppoe
+  - fw_config_dns_diag

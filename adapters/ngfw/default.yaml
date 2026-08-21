@@ -4369,3 +4369,110 @@ operations:
       notes:
         - Each batch item must be DELETE /api/v1/dns/globalserver with body.id as a non-empty list.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_pppoe:
+    atom_ref: atoms/fw/fw_config_pppoe.yaml
+    intent: Build a PPPoE dial interface configuration request.
+    request:
+      method: PUT
+      path: /api/v1/intf
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          linkType: 0
+          name: "{{ params.id }}"
+          type: 3
+          enabled: true
+          vltype: VPP
+          mode: Route
+          service:
+            https: false
+            ssh: false
+            ping: false
+          sip: []
+          smac: []
+          ipv4_address_mode_config:
+            address_mode: 2
+          ipv6_address_mode_config:
+            dhcp_client_setting: {}
+            address_mode: 0
+            install_default_route: false
+          ip_addresses: []
+          mtus:
+            - 1500
+            - 0
+            - 0
+            - 0
+          desc: ""
+          level: 100
+          tag_rw_option: 0
+          pppoe:
+            username: "{{ params.username }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <pppoe-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner RSA-encrypts the PPPoE dial credential with the login public key (PKCS1v15) at execute time and injects it into the pppoe block; the profile carries no credential field and plaintext never leaves the environment variable.
+        - PUT /api/v1/intf carries the fixed PPPoE interface shape with type 3, address_mode 2, and the pppoe username.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_process_state:
+    atom_ref: atoms/fw/fw_verify_process_state.yaml
+    intent: Check the vpp/dnsmasq/agent process state by pgrep over SSH or Telnet.
+    transport: ssh
+    shell:
+      command_template: "pgrep -f \"^{{process_pattern}}\""
+      success_pattern: "\\d+"
+      prompt_timeout_ms: 30000
+      privilege_level: user
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Read-only observation; a numeric pid in stdout means the process is running.
+        - The runner substitutes the exact process command-line pattern for vpp, dnsmasq, or agent, anchored with ^.
+        - Session output is captured into diag_snapshot_ref and never written to the repo.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_kill_process:
+    atom_ref: atoms/fw/fw_kill_process.yaml
+    intent: Kill the vpp/dnsmasq/agent process by pid with kill -9 over SSH or Telnet.
+    transport: ssh
+    shell:
+      command_template: "kill -9 {{pid}}"
+      success_pattern: "\\A\\z"
+      prompt_timeout_ms: 30000
+      privilege_level: user
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Destructive command; exit code 0 with empty stdout means the kill succeeded.
+        - The killed process is restarted automatically by the device supervisor (vpp and agent immediately; dnsmasq after the global DNS proxy is enabled).
+        - The runner MUST shell-escape the pid placeholder before executing.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_config_dns_diag:
+    atom_ref: atoms/fw/fw_config_dns_diag.yaml
+    intent: Run DNS resolution diagnostics (ping or traceroute) for a domain over SSH or Telnet.
+    transport: ssh
+    shell:
+      command_template: "{{diag_command}}"
+      success_pattern: "\\d+ (bytes from|hops max)"
+      prompt_timeout_ms: 30000
+      privilege_level: user
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - ping -c 3 <domain> succeeds when a reply line with bytes from the resolved address appears; traceroute <domain> succeeds when the resolved hop list starts.
+        - Requires a default route, public access rights for the management IP, and a configured system DNS server.
+        - Session output is captured into diag_snapshot_ref and never written to the repo.
+        - ptm-atomic run can execute this command only when --execute is explicit.

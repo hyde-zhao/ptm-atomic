@@ -1,0 +1,70 @@
+schema_version: "1.1"
+op_id: fw_verify_process_state
+device_type: fw
+transport: ssh
+description: Check the vpp/dnsmasq/agent process state by pgrep over SSH.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_process_state
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when the SSH target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  process:
+    type: string
+    required: true
+    description: Process to inspect; one of vpp, dnsmasq, or agent.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  process: vpp
+side_effect: observation
+returns:
+  status: success
+  data:
+    process: vpp
+    pid: "<pid>"
+    running: true
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: process_pgrep_returns_pid
+      input_ref: "<process-state-ref>"
+      expected_result: the device returns a numeric pid for the process command line, meaning the process is running.
+  summary_ref: "<process-state-verification-summary-ref>"
+preconditions:
+  - Device management SSH service is reachable with a root-capable credential via the runner credential env var.
+  - The dnsmasq process exists when the global DNS proxy is enabled; vpp and agent are created at device startup.
+postconditions:
+  - Process state output is captured in diag_snapshot_ref; nothing is written to the repo.
+tags:
+  - firewall
+  - dns
+  - process
+  - verification
+  - cli
+aliases:
+  - process-state
+  - pgrep-process
+  - dns-process-check
+since_version: "1.9.0"
