@@ -1,0 +1,77 @@
+schema_version: "1.1"
+op_id: fw_delete_batch_dns_proxy_server
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_batch_dns_proxy_server
+description: Batch-delete DNS proxy servers through POST /api/v1/batch DELETE /api/v1/dns/globalserver items.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dns-proxy-server for this operation.
+  params:
+    type: json
+    required: true
+    description: Batch delete object with one DELETE /api/v1/dns/globalserver item per server address.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: dns-proxy-server
+  params:
+    batch:
+      - method: DELETE
+        resource: /api/v1/dns/globalserver
+        body:
+          id:
+            - <DNS_SERVER_IP>
+            - <DNS_SERVER_IP>
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: dns-proxy-server
+      applied_ref: "<dns-proxy-server-batch-delete-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+side_effect: destructive
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - dns
+    - destructive
+gate:
+  required: true
+  reason: Batch deletion disrupts proxied DNS resolution for every removed server and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - Each batch item body.id carries the address of an existing DNS proxy server.
+postconditions:
+  - DNS proxy server batch deletion result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_dns_proxy_server can confirm the servers are gone.
+tags:
+  - firewall
+  - dns
+  - dns-proxy
+  - destructive
+aliases:
+  - dns-proxy-server-delete-batch
+  - global-dns-server-clear
+  - proxy-server-purge
+since_version: "1.9.0"

@@ -3749,5 +3749,202 @@ class StaticDnsGroup1Tests(unittest.TestCase):
             )
 
 
+class DnsSysPayloadTests(unittest.TestCase):
+    def test_dns_server_payload_puts_id_zero_and_serveraddr(self) -> None:
+        from atomic_ops.runner.dns_sys import build_dns_server_payload
+        payload = build_dns_server_payload(["11.11.11.11", "12.12.12.12"])
+        self.assertEqual(payload, {"id": 0, "val": {"serveraddr": ["11.11.11.11", "12.12.12.12"]}})
+
+    def test_dns_proxy_payload_puts_dns_server_id_and_enable(self) -> None:
+        from atomic_ops.runner.dns_sys import build_dns_proxy_payload
+        self.assertEqual(build_dns_proxy_payload(True), {"id": "dnsServer", "val": {"enable": True}})
+        self.assertEqual(build_dns_proxy_payload(False), {"id": "dnsServer", "val": {"enable": False}})
+
+    def test_dns_proxy_server_payload_wraps_addr_entries(self) -> None:
+        from atomic_ops.runner.dns_sys import build_dns_proxy_server_payload
+        payload = build_dns_proxy_server_payload(["<DNS_SERVER_IP>", "<DNS_SERVER_IP>"])
+        self.assertEqual(
+            payload,
+            {"val": {"servers": [{"addr": "<DNS_SERVER_IP>"}, {"addr": "<DNS_SERVER_IP>"}]}},
+        )
+
+    def test_dns_proxy_server_batch_payload_builds_one_item_per_addr(self) -> None:
+        from atomic_ops.runner.dns_sys import build_dns_proxy_server_batch_delete_payload
+        payload = build_dns_proxy_server_batch_delete_payload(["<DNS_SERVER_IP>", "<DNS_SERVER_IP>"])
+        self.assertEqual(len(payload["batch"]), 2)
+        self.assertEqual(
+            payload["batch"][0],
+            {"method": "DELETE", "resource": "/api/v1/dns/globalserver", "body": {"id": ["<DNS_SERVER_IP>"]}},
+        )
+
+    def test_validate_dns_server_requires_id_zero_and_nonempty_list(self) -> None:
+        from atomic_ops.runner.dns_sys import validate_dns_server_payload
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            validate_dns_server_payload({"id": 1, "val": {"serveraddr": ["11.11.11.11"]}})
+        with self.assertRaises(RunnerError):
+            validate_dns_server_payload({"id": 0, "val": {"serveraddr": []}})
+        with self.assertRaises(RunnerError):
+            validate_dns_server_payload({"id": 0, "val": {"serveraddr": [""]}})
+
+    def test_validate_dns_proxy_requires_boolean_enable(self) -> None:
+        from atomic_ops.runner.dns_sys import validate_dns_proxy_payload
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            validate_dns_proxy_payload({"id": "dnsServer", "val": {"enable": "yes"}})
+        with self.assertRaises(RunnerError):
+            validate_dns_proxy_payload({"id": "other", "val": {"enable": True}})
+
+    def test_validate_proxy_server_requires_addr_entries(self) -> None:
+        from atomic_ops.runner.dns_sys import validate_dns_proxy_server_payload
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            validate_dns_proxy_server_payload({"val": {"servers": []}})
+        with self.assertRaises(RunnerError):
+            validate_dns_proxy_server_payload({"val": {"servers": [{"addr": ""}]}})
+
+    def test_validate_batch_rejects_bad_item(self) -> None:
+        from atomic_ops.runner.dns_sys import validate_dns_proxy_server_batch_payload
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            validate_dns_proxy_server_batch_payload(
+                {"batch": [{"method": "DELETE", "resource": "/api/v1/dns/cache", "body": {"id": ["x"]}}]}
+            )
+        with self.assertRaises(RunnerError):
+            validate_dns_proxy_server_batch_payload({"batch": [{"method": "DELETE", "resource": "/api/v1/dns/globalserver", "body": {"id": []}}]})
+
+    def test_delete_dry_run_builds_query_url_no_body(self) -> None:
+        from atomic_ops.runner.dns_sys import build_dns_sys_dry_run
+        result = build_dns_sys_dry_run(
+            op_id="fw_delete_dns_proxy_server", base_url="https://192.0.2.1",
+            session_file=Path("x"), auth_header="Authorization", payload={"id": "<DNS_SERVER_IP>"},
+            verify_tls=False, timeout=10.0,
+        )
+        self.assertTrue(result["request"]["url"].endswith("/api/v1/dns/globalserver?id=<DNS_SERVER_IP>"))
+        self.assertIsNone(result["request"]["payload"])
+
+    def test_verify_dry_run_builds_plain_url_no_body(self) -> None:
+        from atomic_ops.runner.dns_sys import build_dns_sys_dry_run
+        for op_id in ("fw_verify_dns_server", "fw_verify_dns_proxy_server"):
+            result = build_dns_sys_dry_run(
+                op_id=op_id, base_url="https://192.0.2.1",
+                session_file=Path("x"), auth_header="Authorization", payload=None,
+                verify_tls=False, timeout=10.0,
+            )
+            self.assertTrue(result["request"]["url"].endswith("/api/v1/sysdns" if op_id == "fw_verify_dns_server" else "/api/v1/dns/globalserver"))
+            self.assertIsNone(result["request"]["payload"])
+
+
+class DnsSysCliTests(unittest.TestCase):
+    def test_cli_dns_server_config_puts_id_zero_and_serveraddr(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "dns-server-config", "--serveraddr", "11.11.11.11", "--serveraddr", "12.12.12.12"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_dns_server")
+        self.assertEqual(payload["data"]["request"]["method"], "PUT")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/sysdns"))
+        self.assertEqual(
+            payload["data"]["request"]["payload"],
+            {"id": 0, "val": {"serveraddr": ["11.11.11.11", "12.12.12.12"]}},
+        )
+
+    def test_cli_dns_proxy_config_parses_enable(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "dns-proxy-config", "--enable", "true"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_dns_proxy")
+        self.assertEqual(
+            payload["data"]["request"]["payload"],
+            {"id": "dnsServer", "val": {"enable": True}},
+        )
+
+    def test_cli_dns_proxy_server_config_posts_val_servers(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "dns-proxy-server-config", "--addr", "<DNS_SERVER_IP>"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_dns_proxy_server")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/globalserver"))
+        self.assertEqual(
+            payload["data"]["request"]["payload"],
+            {"val": {"servers": [{"addr": "<DNS_SERVER_IP>"}]}},
+        )
+
+    def test_cli_dns_proxy_server_delete_uses_query_id_and_no_body(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "dns-proxy-server-delete", "--id", "<DNS_SERVER_IP>"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_dns_proxy_server")
+        self.assertEqual(payload["data"]["request"]["method"], "DELETE")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/globalserver?id=<DNS_SERVER_IP>"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_dns_proxy_server_delete_batch_posts_batch_body(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "dns-proxy-server-delete-batch", "--id", "<DNS_SERVER_IP>", "--id", "<DNS_SERVER_IP>"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_batch_dns_proxy_server")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/batch"))
+        self.assertEqual(
+            payload["data"]["request"]["payload"],
+            {"batch": [
+                {"method": "DELETE", "resource": "/api/v1/dns/globalserver", "body": {"id": ["<DNS_SERVER_IP>"]}},
+                {"method": "DELETE", "resource": "/api/v1/dns/globalserver", "body": {"id": ["<DNS_SERVER_IP>"]}},
+            ]},
+        )
+
+    def test_cli_dns_server_verify_uses_plain_get_no_payload(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "dns-server-verify"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_dns_server")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/sysdns"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_dns_proxy_server_verify_uses_plain_get_no_payload(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "dns-proxy-server-verify"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_dns_proxy_server")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/globalserver"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+
 if __name__ == "__main__":
     unittest.main()

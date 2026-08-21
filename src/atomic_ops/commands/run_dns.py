@@ -32,6 +32,13 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                 CommandSpec(name="static-dns-delete-batch", help="Batch-delete static DNS entries.", description="Batch DELETE /api/v1/dns/cache.", handler=_run_static_dns_delete_batch, add_args=_add_delete_args),
                 CommandSpec(name="static-dns-verify", help="Verify static DNS entries.", description="GET /api/v1/dns/cache?type=static.", handler=_run_static_dns_verify, add_args=None),
                 CommandSpec(name="dynamic-cache-verify", help="Verify dynamic DNS cache entries.", description="GET /api/v1/dns/cache?page=&size=&type=dynamic.", handler=_run_dynamic_cache_verify, add_args=_add_paged_verify_args),
+                CommandSpec(name="dns-server-config", help="Configure system DNS servers.", description="PUT /api/v1/sysdns.", handler=_run_dns_server_config, add_args=_add_dns_server_args),
+                CommandSpec(name="dns-server-verify", help="Verify system DNS servers.", description="GET /api/v1/sysdns.", handler=_run_dns_server_verify, add_args=None),
+                CommandSpec(name="dns-proxy-config", help="Toggle the global DNS proxy.", description="PUT /api/v1/dns/global.", handler=_run_dns_proxy_config, add_args=_add_dns_proxy_args),
+                CommandSpec(name="dns-proxy-server-config", help="Create DNS proxy servers.", description="POST /api/v1/dns/globalserver.", handler=_run_dns_proxy_server_config, add_args=_add_proxy_server_args),
+                CommandSpec(name="dns-proxy-server-delete", help="Delete a DNS proxy server.", description="DELETE /api/v1/dns/globalserver?id=<addr>.", handler=_run_dns_proxy_server_delete, add_args=_add_delete_args),
+                CommandSpec(name="dns-proxy-server-verify", help="Verify DNS proxy servers.", description="GET /api/v1/dns/globalserver.", handler=_run_dns_proxy_server_verify, add_args=None),
+                CommandSpec(name="dns-proxy-server-delete-batch", help="Batch-delete DNS proxy servers.", description="Batch DELETE /api/v1/dns/globalserver.", handler=_run_dns_proxy_server_delete_batch, add_args=_add_delete_args),
             ),
         ),
     )
@@ -66,6 +73,24 @@ def _add_static_dns_update_args(parser: argparse.ArgumentParser) -> None:
 def _add_paged_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="Paginated query page size.")
+
+
+def _add_dns_server_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--serveraddr", action="append", required=True, help="System DNS server IPv4 address; repeat for primary and backup (first is primary).")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_dns_proxy_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--enable", required=True, choices=("true", "false"), help="true enables the global DNS proxy, false disables it.")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_proxy_server_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--addr", action="append", required=True, help="DNS proxy server IPv4 address; repeatable.")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
 
 
 # ── handlers ───────────────────────────────────────────────
@@ -116,10 +141,59 @@ def _run_dynamic_cache_verify(args: argparse.Namespace) -> int:
     )
 
 
+def _run_dns_server_config(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.dns_sys import build_dns_server_payload, validate_dns_server_payload
+    def _build():
+        return build_dns_server_payload(serveraddrs=_arg_list(args, "serveraddr"))
+    return _run_dns_op(args, "fw_config_dns_server", _build, validate_via=validate_dns_server_payload)
+
+
+def _run_dns_server_verify(args: argparse.Namespace) -> int:
+    return _run_dns_op(args, "fw_verify_dns_server", payload_builder=None)
+
+
+def _run_dns_proxy_config(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.dns_sys import build_dns_proxy_payload, validate_dns_proxy_payload
+    def _build():
+        return build_dns_proxy_payload(enable=str(getattr(args, "enable")).lower() == "true")
+    return _run_dns_op(args, "fw_config_dns_proxy", _build, validate_via=validate_dns_proxy_payload)
+
+
+def _run_dns_proxy_server_config(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.dns_sys import build_dns_proxy_server_payload, validate_dns_proxy_server_payload
+    def _build():
+        return build_dns_proxy_server_payload(addrs=_arg_list(args, "addr"))
+    return _run_dns_op(args, "fw_config_dns_proxy_server", _build, validate_via=validate_dns_proxy_server_payload)
+
+
+def _run_dns_proxy_server_delete(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.dns_sys import build_dns_proxy_server_delete_payload, validate_dns_proxy_server_delete_payload
+    _require_arg(args, "id")
+    return _run_dns_op(
+        args, "fw_delete_dns_proxy_server",
+        payload_builder=lambda: build_dns_proxy_server_delete_payload(addr=_single_arg(args, "id")),
+        validate_via=validate_dns_proxy_server_delete_payload,
+    )
+
+
+def _run_dns_proxy_server_verify(args: argparse.Namespace) -> int:
+    return _run_dns_op(args, "fw_verify_dns_proxy_server", payload_builder=None)
+
+
+def _run_dns_proxy_server_delete_batch(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.dns_sys import build_dns_proxy_server_batch_delete_payload, validate_dns_proxy_server_batch_payload
+    return _run_dns_op(
+        args, "fw_delete_batch_dns_proxy_server",
+        payload_builder=lambda: build_dns_proxy_server_batch_delete_payload(addrs=_arg_list(args, "id")),
+        validate_via=validate_dns_proxy_server_batch_payload,
+    )
+
+
 # ── dispatcher ─────────────────────────────────────────────
 
 
 def _run_dns_op(args: argparse.Namespace, op_id: str, payload_builder, *, validate_via=None) -> int:
+    from atomic_ops.runner.dns_sys import DNS_SYS_OP_IDS, build_dns_sys_dry_run, execute_dns_sys
     from atomic_ops.runner.dns_static import build_static_dns_dry_run, execute_static_dns, load_json_payload  # type: ignore
 
     ctx = resolve_run_context(args)
@@ -137,14 +211,15 @@ def _run_dns_op(args: argparse.Namespace, op_id: str, payload_builder, *, valida
         if validate_via is not None and payload is not None:
             payload = validate_via(payload)
 
+        dry_run_fn, execute_fn = (build_dns_sys_dry_run, execute_dns_sys) if op_id in DNS_SYS_OP_IDS else (build_static_dns_dry_run, execute_static_dns)
         if not ctx.get("execute"):
-            result = build_static_dns_dry_run(
+            result = dry_run_fn(
                 op_id=op_id, base_url=ctx["base_url"], session_file=session_file,
                 auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
                 verify_tls=bool(ctx.get("verify_tls")), timeout=float(ctx.get("timeout", 10.0)),
             )
         else:
-            result = execute_static_dns(
+            result = execute_fn(
                 op_id=op_id, base_url=ctx["base_url"], session_file=session_file,
                 auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
                 verify_tls=bool(ctx.get("verify_tls")), timeout=float(ctx.get("timeout", 10.0)),

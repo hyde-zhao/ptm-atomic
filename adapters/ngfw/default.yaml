@@ -4191,3 +4191,181 @@ operations:
         - GET sends ?page=<page>&size=<size>&type=dynamic and no JSON body; entries come back in vals with name, ip4addr, cname, and ttl.
         - The runner builds page/size/type as query parameters; this profile carries no query field.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_dns_server:
+    atom_ref: atoms/fw/fw_config_dns_server.yaml
+    intent: Build a system DNS server configuration request.
+    request:
+      method: PUT
+      path: /api/v1/sysdns
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: 0
+        val:
+          serveraddr: "{{ params.serveraddr }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <sysdns-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/sysdns carries id 0 and val.serveraddr; the first address is the primary DNS server and the second is the backup.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_dns_server:
+    atom_ref: atoms/fw/fw_verify_dns_server.yaml
+    intent: Build a system DNS server query request.
+    request:
+      method: GET
+      path: /api/v1/sysdns
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <sysdns-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET /api/v1/sysdns sends no JSON body; servers come back in data[].serveraddr with the primary first.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_dns_proxy:
+    atom_ref: atoms/fw/fw_config_dns_proxy.yaml
+    intent: Build a global DNS proxy toggle request.
+    request:
+      method: PUT
+      path: /api/v1/dns/global
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: dnsServer
+        val:
+          enable: "{{ params.enable }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dns-global-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/dns/global carries id dnsServer and val.enable as a boolean switch.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_dns_proxy_server:
+    atom_ref: atoms/fw/fw_config_dns_proxy_server.yaml
+    intent: Build a DNS proxy server creation request.
+    request:
+      method: POST
+      path: /api/v1/dns/globalserver
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          servers: "{{ params.servers }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dns-proxy-server-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST /api/v1/dns/globalserver carries val.servers with one addr per entry.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_dns_proxy_server:
+    atom_ref: atoms/fw/fw_delete_dns_proxy_server.yaml
+    intent: Build a DNS proxy server delete request by address.
+    request:
+      method: DELETE
+      path: /api/v1/dns/globalserver
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dns-proxy-server-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE sends the server address as ?id=<addr> and sends no JSON body.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_dns_proxy_server:
+    atom_ref: atoms/fw/fw_verify_dns_proxy_server.yaml
+    intent: Build a DNS proxy server query request.
+    request:
+      method: GET
+      path: /api/v1/dns/globalserver
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <dns-proxy-server-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET /api/v1/dns/globalserver sends no JSON body; servers come back in vals[].servers[].addr.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_dns_proxy_server:
+    atom_ref: atoms/fw/fw_delete_batch_dns_proxy_server.yaml
+    intent: Build a batch request that deletes multiple DNS proxy servers.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/dns/globalserver
+            body:
+              id: "{{ params.batch[0].body.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dns-proxy-server-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Each batch item must be DELETE /api/v1/dns/globalserver with body.id as a non-empty list.
+        - ptm-atomic run can execute this request only when --execute is explicit.
