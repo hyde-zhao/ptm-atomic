@@ -4090,3 +4090,104 @@ operations:
         - DELETE sends the domain name as ?id=<domain> and sends no JSON body.
         - Deleting an absent domain returns success per device behavior.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_static_dns:
+    atom_ref: atoms/fw/fw_update_static_dns.yaml
+    intent: Build a static DNS entry update request located by the current domain id.
+    request:
+      method: PUT
+      path: /api/v1/dns/cache
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <static-dns-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT carries id as the current domain name; val.name may rename the entry.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_static_dns:
+    atom_ref: atoms/fw/fw_delete_batch_static_dns.yaml
+    intent: Build a batch request that deletes multiple static DNS entries.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/dns/cache
+            body:
+              id: "{{ params.batch[0].body.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <static-dns-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch static DNS deletion is independent from single-domain DELETE /api/v1/dns/cache.
+        - Each batch item must be DELETE /api/v1/dns/cache with body.id as a non-empty list.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_static_dns:
+    atom_ref: atoms/fw/fw_verify_static_dns.yaml
+    intent: Build a static DNS table query request.
+    request:
+      method: GET
+      path: /api/v1/dns/cache
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <static-dns-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET sends ?type=static and no JSON body; entries come back in vals with name and ip4addr.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_dns_cache_entry:
+    atom_ref: atoms/fw/fw_verify_dns_cache_entry.yaml
+    intent: Build a dynamic DNS cache query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/dns/cache
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <dns-cache-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET sends ?page=<page>&size=<size>&type=dynamic and no JSON body; entries come back in vals with name, ip4addr, cname, and ttl.
+        - The runner builds page/size/type as query parameters; this profile carries no query field.
+        - ptm-atomic run can execute this request only when --execute is explicit.

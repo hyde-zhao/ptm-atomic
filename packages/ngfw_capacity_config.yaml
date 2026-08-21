@@ -117,3 +117,5 @@ operations:
   - fw_delete_customappobjtag
   - fw_config_static_dns
   - fw_delete_static_dns
+  - fw_update_static_dns
+  - fw_delete_batch_static_dns

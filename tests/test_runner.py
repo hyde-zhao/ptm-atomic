@@ -3616,6 +3616,138 @@ class StaticDnsCliTests(unittest.TestCase):
         self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/cache?id=www.example.com"))
         self.assertIsNone(payload["data"]["request"]["payload"])
 
+    def test_cli_static_dns_update_puts_id_and_val_body(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "static-dns-update", "--id", "old.example.com",
+                 "--name", "new.example.com", "--ip4addr", "10.10.10.20"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_update_static_dns")
+        self.assertEqual(payload["data"]["request"]["method"], "PUT")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/cache"))
+        self.assertEqual(
+            payload["data"]["request"]["payload"],
+            {"id": "old.example.com", "val": {"name": "new.example.com", "ip4addr": "10.10.10.20"}},
+        )
+
+    def test_cli_static_dns_delete_batch_posts_batch_body(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "static-dns-delete-batch", "--id", "a.example.com", "--id", "b.example.com"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_batch_static_dns")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/batch"))
+        self.assertEqual(
+            payload["data"]["request"]["payload"],
+            {"batch": [
+                {"method": "DELETE", "resource": "/api/v1/dns/cache", "body": {"id": ["a.example.com"]}},
+                {"method": "DELETE", "resource": "/api/v1/dns/cache", "body": {"id": ["b.example.com"]}},
+            ]},
+        )
+
+    def test_cli_static_dns_verify_uses_static_query_no_payload(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "static-dns-verify"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_static_dns")
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/cache?type=static"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_dynamic_cache_verify_uses_paged_dynamic_query_no_payload(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "dns", "dynamic-cache-verify", "--page", "2", "--size", "20"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_dns_cache_entry")
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/dns/cache?page=2&size=20&type=dynamic"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+
+class StaticDnsGroup1Tests(unittest.TestCase):
+    def test_update_payload_wraps_id_and_val(self) -> None:
+        from atomic_ops.runner.dns_static import build_static_dns_update_payload
+        payload = build_static_dns_update_payload(
+            entry_id="old.example.com", name="new.example.com", ip4addr="10.10.10.20"
+        )
+        self.assertEqual(
+            payload,
+            {"id": "old.example.com", "val": {"name": "new.example.com", "ip4addr": "10.10.10.20"}},
+        )
+
+    def test_update_payload_includes_optional_ip6addr(self) -> None:
+        from atomic_ops.runner.dns_static import build_static_dns_update_payload
+        payload = build_static_dns_update_payload(
+            entry_id="v6.example.com", name="v6.example.com", ip4addr="10.10.10.21", ip6addr="2001:db8::2"
+        )
+        self.assertEqual(payload["val"]["ip6addr"], "2001:db8::2")
+
+    def test_validate_update_requires_id(self) -> None:
+        from atomic_ops.runner.dns_static import validate_static_dns_update_payload
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            validate_static_dns_update_payload(
+                {"val": {"name": "new.example.com", "ip4addr": "10.10.10.20"}}
+            )
+
+    def test_batch_delete_payload_builds_one_item_per_domain(self) -> None:
+        from atomic_ops.runner.dns_static import build_static_dns_batch_delete_payload
+        payload = build_static_dns_batch_delete_payload(["a.example.com", "b.example.com"])
+        self.assertEqual(len(payload["batch"]), 2)
+        self.assertEqual(
+            payload["batch"][0],
+            {"method": "DELETE", "resource": "/api/v1/dns/cache", "body": {"id": ["a.example.com"]}},
+        )
+
+    def test_validate_batch_rejects_bad_item(self) -> None:
+        from atomic_ops.runner.dns_static import validate_batch_payload
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            validate_batch_payload({"batch": [{"method": "GET", "resource": "/api/v1/dns/cache", "body": {"id": ["x"]}}]})
+        with self.assertRaises(RunnerError):
+            validate_batch_payload({"batch": [{"method": "DELETE", "resource": "/api/v1/dns/cache", "body": {"id": []}}]})
+        with self.assertRaises(RunnerError):
+            validate_batch_payload({"batch": []})
+
+    def test_dynamic_verify_dry_run_builds_paged_url(self) -> None:
+        from atomic_ops.runner.dns_static import build_static_dns_dry_run
+        result = build_static_dns_dry_run(
+            op_id="fw_verify_dns_cache_entry", base_url="https://192.0.2.1",
+            session_file=Path("x"), auth_header="Authorization", payload={"page": 2, "size": 20},
+            verify_tls=False, timeout=10.0,
+        )
+        self.assertTrue(result["request"]["url"].endswith("/api/v1/dns/cache?page=2&size=20&type=dynamic"))
+        self.assertIsNone(result["request"]["payload"])
+
+    def test_dynamic_verify_rejects_non_positive_paging(self) -> None:
+        from atomic_ops.runner.dns_static import build_static_dns_dry_run
+        from atomic_ops.runner.errors import RunnerError
+        with self.assertRaises(RunnerError):
+            build_static_dns_dry_run(
+                op_id="fw_verify_dns_cache_entry", base_url="https://192.0.2.1",
+                session_file=Path("x"), auth_header="Authorization", payload={"page": 0, "size": 20},
+                verify_tls=False, timeout=10.0,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
