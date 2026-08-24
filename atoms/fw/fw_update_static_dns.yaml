@@ -1,0 +1,73 @@
+schema_version: "1.1"
+op_id: fw_update_static_dns
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_static_dns
+description: Update a static DNS entry (domain to IPv4/IPv6 address) through PUT /api/v1/dns/cache.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be static-dns for this operation.
+  params:
+    type: json
+    required: true
+    description: Static DNS update object with id (current domain name) and val (new name/ip4addr; ip6addr optional).
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: static-dns
+  params:
+    id: www.example.com
+    val:
+      name: www.example.com
+      ip4addr: 10.10.10.101
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: static-dns
+      applied_ref: "<static-dns-update-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+side_effect: state_mutation
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - dns
+gate:
+  required: true
+  reason: Changing a static DNS entry can alter local and proxied DNS resolution and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - The id field is the current domain name of an existing static entry; val.name may rename the entry.
+postconditions:
+  - Static DNS entry update result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_static_dns can confirm the updated entry is effective.
+tags:
+  - firewall
+  - dns
+  - static-dns
+  - configuration
+aliases:
+  - static-dns-update
+  - dns-entry-update
+  - domain-mapping-update
+since_version: "1.9.0"

@@ -115,3 +115,14 @@ operations:
   - fw_delete_servicepool_group
   - fw_delete_customappobj
   - fw_delete_customappobjtag
+  - fw_config_static_dns
+  - fw_delete_static_dns
+  - fw_update_static_dns
+  - fw_delete_batch_static_dns
+  - fw_config_dns_server
+  - fw_config_dns_proxy
+  - fw_config_dns_proxy_server
+  - fw_delete_dns_proxy_server
+  - fw_delete_batch_dns_proxy_server
+  - fw_config_pppoe
+  - fw_config_dns_diag

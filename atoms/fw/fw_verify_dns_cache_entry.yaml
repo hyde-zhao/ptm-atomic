@@ -1,0 +1,64 @@
+schema_version: "1.1"
+op_id: fw_verify_dns_cache_entry
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_dns_cache_entry
+description: Query dynamic DNS cache entries through GET /api/v1/dns/cache?page=<page>&size=<size>&type=dynamic.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dns-cache for this operation.
+  params:
+    type: json
+    required: false
+    description: Optional pagination object with page and size (defaults 1 and 40).
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: dns-cache
+  params:
+    page: 1
+    size: 40
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<dns-cache-state-ref>"
+    vals_ref: "<dns-cache-vals-ref>"
+    count: 0
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+verification:
+  kind: capacity_domain
+  rules:
+    - name: dynamic_cache_query_returns_vals
+      input_ref: "<dns-cache-query-result-ref>"
+      expected_result: the device returns dynamic cache entries in vals with name, ip4addr, cname, and ttl.
+  summary_ref: "<dns-cache-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - DNS proxy is enabled so dynamic cache entries exist to observe.
+postconditions:
+  - Dynamic DNS cache contents and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - dns
+  - dns-cache
+  - verification
+aliases:
+  - dns-cache-verify
+  - dynamic-cache-query
+  - cache-entry-query
+since_version: "1.9.0"

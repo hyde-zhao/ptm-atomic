@@ -1,0 +1,72 @@
+schema_version: "1.1"
+op_id: fw_config_dns_server
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_dns_server
+description: Configure system DNS servers (primary and optional backup) through PUT /api/v1/sysdns.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be sysdns for this operation.
+  params:
+    type: json
+    required: true
+    description: System DNS server object with serveraddr list; the first entry is the primary server, the second is the backup.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: sysdns
+  params:
+    serveraddr:
+      - 11.11.11.11
+      - 12.12.12.12
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: sysdns
+      applied_ref: "<sysdns-config-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+side_effect: state_mutation
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - dns
+gate:
+  required: true
+  reason: System DNS servers resolve device-originated queries and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - The server addresses are valid reachable DNS servers; at most two (primary and backup) are configured.
+postconditions:
+  - System DNS configuration result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_dns_server can confirm the configured servers are effective.
+tags:
+  - firewall
+  - dns
+  - sysdns
+  - configuration
+aliases:
+  - dns-server-config
+  - sysdns-config
+  - system-dns-server-set
+since_version: "1.9.0"

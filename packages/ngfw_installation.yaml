@@ -11,3 +11,4 @@ operations:
   - fw_check_login_state
   - fw_verify_ngfw_health
   - fw_config_reboot
+  - fw_kill_process

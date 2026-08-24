@@ -26,6 +26,7 @@ def build_subtree() -> tuple[CommandSpec, ...]:
         CommandSpec(name="delete", help="Delete a network interface.", description="Delete a single NGFW network interface.", handler=_run_delete, add_args=_add_delete_args),
         CommandSpec(name="delete-batch", help="Delete multiple network interfaces.", description="Batch-delete NGFW network interfaces.", handler=_run_delete_batch, add_args=_add_delete_args),
         CommandSpec(name="verify", help="Verify a network interface.", description="Verify a NGFW network interface.", handler=_run_verify, add_args=_add_verify_args),
+        CommandSpec(name="pppoe-config", help="Configure a PPPoE dial interface.", description="PUT /api/v1/intf with an RSA-encrypted PPPoE password.", handler=_run_pppoe_config, add_args=_add_pppoe_args),
     )
 
 
@@ -68,6 +69,56 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", action="append", help="Entry id.")
+
+
+def _add_pppoe_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", required=True, help="PPPoE interface id, e.g. TE0_21.")
+    parser.add_argument("--username", required=True, help="PPPoE dial username.")
+    parser.add_argument("--password-env", help="Name of the environment variable holding the PPPoE password. Required for --execute.")
+
+
+def _run_pppoe_config(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.pppoe import build_pppoe_config_dry_run, execute_pppoe_config
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        if not ctx.get("verify_tls"):
+            write_warning({"warning_code": "TLS_VERIFY_DISABLED", "message": "Device TLS verification is disabled."}, output_format)
+
+        session_file = resolve_session_file(ctx.get("session_file"))
+        intf_id = getattr(args, "id")
+        username = getattr(args, "username")
+        if not ctx.get("execute"):
+            result = build_pppoe_config_dry_run(
+                base_url=ctx["base_url"], session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"),
+                intf_id=intf_id, username=username,
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            password_env = getattr(args, "password_env", None)
+            if not password_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--password-env is required when using --execute.",
+                    {"missing": "password_env"},
+                )
+            result = execute_pppoe_config(
+                base_url=ctx["base_url"], session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"),
+                intf_id=intf_id, username=username, password_env=password_env,
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
 
 
 def _run_create(args: argparse.Namespace) -> int:

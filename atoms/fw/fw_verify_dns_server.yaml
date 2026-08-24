@@ -1,0 +1,56 @@
+schema_version: "1.1"
+op_id: fw_verify_dns_server
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_dns_server
+description: Query system DNS servers through GET /api/v1/sysdns.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be sysdns for this operation.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: sysdns
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<sysdns-state-ref>"
+    vals_ref: "<sysdns-vals-ref>"
+    count: 0
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+verification:
+  kind: capacity_domain
+  rules:
+    - name: sysdns_query_returns_serveraddr
+      input_ref: "<sysdns-query-result-ref>"
+      expected_result: the device returns the system DNS server addresses in data[].serveraddr with the primary first.
+  summary_ref: "<sysdns-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - System DNS server contents and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - dns
+  - sysdns
+  - verification
+aliases:
+  - dns-server-verify
+  - sysdns-query
+  - system-dns-server-list
+since_version: "1.9.0"
