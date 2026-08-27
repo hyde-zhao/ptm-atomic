@@ -4088,5 +4088,390 @@ class SshDnsOpsCliTests(unittest.TestCase):
             )
 
 
+class UesPayloadTests(unittest.TestCase):
+    """UES 原子操作 runner 载荷构造测试（期望值对齐 UESAPI.txt 录制请求体）。"""
+
+    def test_access_payload_matches_recording(self) -> None:
+        from atomic_ops.runner.ues import build_ues_access_payload
+        payload = build_ues_access_payload(
+            uesswitch=True,
+            uesip="<UES_IP>",
+            port="53443",
+            securitykey="",
+            thirdpartycode="tgfw",
+        )
+        self.assertEqual(payload["id"], "uesaccess")
+        self.assertEqual(
+            payload["val"],
+            {"uesswitch": True, "uesip": "<UES_IP>", "port": "53443",
+             "securitykey": "", "thirdpartycode": "tgfw"},
+        )
+
+    def test_connection_payload_matches_recording(self) -> None:
+        from atomic_ops.runner.ues import build_ues_connection_payload
+        payload = build_ues_connection_payload(
+            uesip="<UES_IP>",
+            port="53443",
+            securitykey="",
+            thirdpartycode="tgfw",
+        )
+        self.assertEqual(payload["id"], "ues")
+        self.assertEqual(payload["val"]["uesip"], "<UES_IP>")
+        self.assertEqual(payload["val"]["port"], "53443")
+
+    def test_global_payload_matches_recording(self) -> None:
+        from atomic_ops.runner.ues import build_ues_global_payload
+        payload = build_ues_global_payload(
+            httpdstport=[80],
+            httpsdstport=[443],
+            blackadd=True,
+            blocktime=300,
+            hashadd=True,
+            uesurl="https://<UES_IP>:53443/publish/index.html?language=zh-CN",
+            notipstate=True,
+            open_service=["DNS", "DHCP"],
+        )
+        self.assertEqual(payload["id"], "uesglobal")
+        self.assertEqual(payload["val"]["httpdstport"], [80])
+        self.assertEqual(payload["val"]["httpsdstport"], [443])
+        self.assertEqual(payload["val"]["blocktime"], 300)
+        self.assertEqual(payload["val"]["open_service"], ["DNS", "DHCP"])
+
+    def test_ip_policy_create_payload_matches_recording(self) -> None:
+        from atomic_ops.runner.ues import build_ues_ip_policy_payload
+        payload = build_ues_ip_policy_payload(
+            entry_id=0,
+            name="hh",
+            enable=True,
+            action=0,
+            log=False,
+            cycletime=0,
+            desc="",
+            srcip="any",
+            srcipisgroup=False,
+            dstip="any",
+            dstipisgroup=False,
+        )
+        self.assertEqual(payload["id"], 0)
+        self.assertNotIn("id", payload["val"])  # 新建时不携带 val.id
+        self.assertEqual(payload["val"]["name"], "hh")
+        self.assertEqual(payload["val"]["action"], 0)
+        self.assertFalse(payload["val"]["log"])
+
+    def test_ip_policy_update_payload_carries_val_id(self) -> None:
+        from atomic_ops.runner.ues import build_ues_ip_policy_payload
+        payload = build_ues_ip_policy_payload(
+            entry_id=1,
+            name="zyz",
+            enable=True,
+            action=2,
+            log=True,
+            cycletime=1,
+            desc="",
+            srcip="any",
+            srcipisgroup=False,
+            dstip="any",
+            dstipisgroup=False,
+        )
+        self.assertEqual(payload["id"], 1)
+        self.assertEqual(payload["val"]["id"], 1)
+        self.assertEqual(payload["val"]["action"], 2)
+        self.assertEqual(payload["val"]["cycletime"], 1)
+
+    def test_ip_policy_srcip_dstip_empty_normalized_to_any(self) -> None:
+        from atomic_ops.runner.ues import build_ues_ip_policy_payload
+        payload = build_ues_ip_policy_payload(
+            entry_id=0,
+            name="n",
+            enable=True,
+            action=0,
+            log=False,
+            cycletime=0,
+            desc="",
+            srcip="",
+            srcipisgroup=False,
+            dstip=None,
+            dstipisgroup=False,
+        )
+        self.assertEqual(payload["val"]["srcip"], "any")
+        self.assertEqual(payload["val"]["dstip"], "any")
+
+    def test_delete_payload(self) -> None:
+        from atomic_ops.runner.ues import build_ues_delete_payload
+        self.assertEqual(build_ues_delete_payload(entry_id=2), {"id": 2})
+
+    def test_priority_payload_matches_recording_without_targetid(self) -> None:
+        from atomic_ops.runner.ues import build_ues_priority_payload
+        payload = build_ues_priority_payload(targetsite="first", moveid=1, targetid=None)
+        self.assertEqual(payload, {"val": {"targetsite": "first", "moveid": 1}})
+        self.assertNotIn("targetid", payload["val"])
+
+    def test_priority_payload_includes_targetid_when_provided(self) -> None:
+        from atomic_ops.runner.ues import build_ues_priority_payload
+        payload = build_ues_priority_payload(targetsite="before", moveid=3, targetid=1)
+        self.assertEqual(payload["val"]["targetid"], 1)
+
+    def test_action_out_of_range_rejected(self) -> None:
+        from atomic_ops.runner.ues import build_ues_ip_policy_payload
+        with self.assertRaises(RunnerError):
+            build_ues_ip_policy_payload(
+                entry_id=0, name="n", enable=True, action=3, log=False,
+                cycletime=0, desc="", srcip="any", srcipisgroup=False,
+                dstip="any", dstipisgroup=False,
+            )
+
+    def test_required_fields_rejected(self) -> None:
+        from atomic_ops.runner.ues import (
+            build_ues_access_payload,
+            build_ues_global_payload,
+            build_ues_ip_policy_payload,
+        )
+        with self.assertRaises(RunnerError):
+            build_ues_access_payload(uesswitch=True, uesip="", port="53443", securitykey="", thirdpartycode="tgfw")
+        with self.assertRaises(RunnerError):
+            build_ues_access_payload(uesswitch=True, uesip="10.0.0.1", port="", securitykey="", thirdpartycode="tgfw")
+        with self.assertRaises(RunnerError):
+            build_ues_global_payload(httpdstport=[], httpsdstport=[443], blackadd=True, blocktime=300, hashadd=True,
+                                     uesurl="https://x/y", notipstate=True, open_service=["DNS"])
+        with self.assertRaises(RunnerError):
+            build_ues_global_payload(httpdstport=[80], httpsdstport=[70000], blackadd=True, blocktime=300, hashadd=True,
+                                     uesurl="https://x/y", notipstate=True, open_service=["DNS"])
+        with self.assertRaises(RunnerError):
+            build_ues_ip_policy_payload(
+                entry_id=0, name="", enable=True, action=0, log=False,
+                cycletime=0, desc="", srcip="any", srcipisgroup=False,
+                dstip="any", dstipisgroup=False,
+            )
+        with self.assertRaises(RunnerError):
+            build_ues_ip_policy_payload(
+                entry_id=-1, name="n", enable=True, action=0, log=False,
+                cycletime=0, desc="", srcip="any", srcipisgroup=False,
+                dstip="any", dstipisgroup=False,
+            )
+
+    def test_unsupported_targetsite_rejected(self) -> None:
+        from atomic_ops.runner.ues import build_ues_priority_payload
+        with self.assertRaises(RunnerError):
+            build_ues_priority_payload(targetsite="middle", moveid=1, targetid=None)
+
+    def test_priority_moveid_must_be_positive(self) -> None:
+        from atomic_ops.runner.ues import build_ues_priority_payload
+        with self.assertRaises(RunnerError):
+            build_ues_priority_payload(targetsite="first", moveid=0, targetid=None)
+
+
+class UesSummaryExtractionTests(unittest.TestCase):
+    """响应摘要提取（returns.data 契约兑现）测试。"""
+
+    def setUp(self) -> None:
+        from atomic_ops.runner.ues import _extract_ues_summary
+        self._extract = _extract_ues_summary
+
+    def test_verify_ip_policy_extracts_ids_count_hitcount(self) -> None:
+        response = {"count": 2, "vals": [
+            {"id": 1, "name": "zyz", "hitcount": "0", "action": 2},
+            {"id": 2, "name": "hh", "hitcount": "5", "action": 0},
+        ]}
+        summary = self._extract("fw_verify_ues_ip_policy", None, response)
+        self.assertEqual(summary["count"], 2)
+        self.assertEqual(summary["ip_policy_ids"], [1, 2])
+        self.assertEqual(summary["hitcount"], "0")
+
+    def test_verify_order_extracts_ordered_ids(self) -> None:
+        response = {"count": 1, "page": 1, "size": 300, "vals": [1]}
+        summary = self._extract("fw_verify_ues_ip_policy_order", None, response)
+        self.assertEqual(summary["count"], 1)
+        self.assertEqual(summary["policy_order_ids"], [1])
+
+    def test_verify_access_global_existence(self) -> None:
+        self.assertTrue(self._extract("fw_verify_ues_access", None, {"uesswitch": True})["existence"])
+        self.assertFalse(self._extract("fw_verify_ues_global", None, {})["existence"])
+
+    def test_config_ip_policy_created_flag(self) -> None:
+        summary = self._extract("fw_config_ues_ip_policy", {"id": 0, "val": {}}, {"msg": "success"})
+        self.assertTrue(summary["created"])
+        self.assertNotIn("ip_policy_id", summary)
+
+    def test_update_and_delete_carry_ip_policy_id(self) -> None:
+        summary = self._extract("fw_update_ues_ip_policy", {"id": 1, "val": {}}, {"msg": "success"})
+        self.assertEqual(summary["ip_policy_id"], 1)
+        self.assertNotIn("created", summary)
+        summary = self._extract("fw_delete_ues_ip_policy", {"id": 2}, {"msg": "success"})
+        self.assertEqual(summary["ip_policy_id"], 2)
+
+
+class UesRequestUrlTests(unittest.TestCase):
+    """请求 URL 构造测试。"""
+
+    def test_verify_ip_policy_url_with_page_size(self) -> None:
+        from atomic_ops.runner.ues import _request_url
+        url = _request_url("https://192.0.2.1", "fw_verify_ues_ip_policy", page=1, size=40, config_source=0)
+        self.assertEqual(url, "https://192.0.2.1/api/v1/uesippolicy?page=1&size=40")
+
+    def test_verify_order_url_with_config_source(self) -> None:
+        from atomic_ops.runner.ues import _request_url
+        url = _request_url("https://192.0.2.1", "fw_verify_ues_ip_policy_order", page=1, size=300, config_source=0)
+        self.assertEqual(url, "https://192.0.2.1/api/v1/uesippolicyorder?page=1&size=300&config_source=0")
+
+    def test_delete_url_with_id(self) -> None:
+        from atomic_ops.runner.ues import _request_url
+        url = _request_url("https://192.0.2.1", "fw_delete_ues_ip_policy", page=1, size=40, config_source=0, payload={"id": 2})
+        self.assertEqual(url, "https://192.0.2.1/api/v1/uesippolicy?id=2")
+
+    def test_flat_verify_ops_have_no_query(self) -> None:
+        from atomic_ops.runner.ues import _request_url
+        url = _request_url("https://192.0.2.1", "fw_verify_ues_access", page=1, size=40, config_source=0)
+        self.assertEqual(url, "https://192.0.2.1/api/v1/uesaccess")
+
+    def test_unsupported_op_rejected(self) -> None:
+        from atomic_ops.runner.ues import _request_url
+        with self.assertRaises(RunnerError):
+            _request_url("https://192.0.2.1", "fw_config_nat", page=1, size=40, config_source=0)
+
+
+class UesCliTests(unittest.TestCase):
+    """run ues 命令族 dry-run CLI 测试。"""
+
+    def test_cli_access_puts_uesaccess_body(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "access", "--ues-ip", "<UES_IP>", "--ues-port", "53443"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_ues_access")
+        self.assertEqual(payload["data"]["request"]["method"], "PUT")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/uesaccess"))
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], "uesaccess")
+
+    def test_cli_connection_posts_ues_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "connection", "--ues-ip", "<UES_IP>", "--ues-port", "53443"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_check_ues_connection")
+        self.assertEqual(payload["data"]["request"]["method"], "POST")
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], "ues")
+
+    def test_cli_policy_creates_with_id_zero(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "policy", "--name", "hh", "--action", "2", "--cycletime", "1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_ues_ip_policy")
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], 0)
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["action"], 2)
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["cycletime"], 1)
+
+    def test_cli_policy_update_requires_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "policy-update", "--id", "1", "--name", "zyz", "--action", "0"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_update_ues_ip_policy")
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], 1)
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["id"], 1)
+
+    def test_cli_policy_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "policy-delete", "--id", "2"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_ues_ip_policy")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/uesippolicy?id=2"))
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_policy_verify_queries_page_size(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "policy-verify", "--page", "1", "--size", "40"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_ues_ip_policy")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/uesippolicy?page=1&size=40"))
+
+    def test_cli_global_puts_uesglobal_body(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "global", "--ues-url", "https://<UES_IP>:53443/publish/index.html?language=zh-CN"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_ues_global")
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], "uesglobal")
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["httpdstport"], [80])
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["open_service"], ["DNS", "DHCP"])
+
+    def test_cli_priority_posts_move_payload(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "priority", "--targetsite", "first", "--moveid", "1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_update_ues_ip_policy_priority")
+        self.assertEqual(payload["data"]["request"]["payload"], {"val": {"targetsite": "first", "moveid": 1}})
+
+    def test_cli_order_queries_with_config_source(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "order"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_ues_ip_policy_order")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/uesippolicyorder?page=1&size=40&config_source=0"))
+
+    def test_cli_verify_access_flat_get(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "access-verify"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_verify_ues_access")
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+
+    def test_cli_invalid_action_returns_validation_error(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "ues", "policy", "--name", "hh", "--action", "9"]
+            )
+        self.assertEqual(exit_code, 49)  # ERROR_RUNNER_VALIDATION_FAILED 退出码
+        payload = json.loads(stderr.getvalue().splitlines()[-1])
+        self.assertEqual(payload["error_code"], "RUNNER_VALIDATION_FAILED")
+
+
 if __name__ == "__main__":
     unittest.main()
