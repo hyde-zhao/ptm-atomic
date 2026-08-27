@@ -11,6 +11,7 @@ The two streams are intentionally separate. A schema or operation-library change
 
 ### Added
 
+- Add UES (unified experience system) atom specs and adapter profile mappings for access config (`fw_verify_ues_access` / `fw_config_ues_access` GET/PUT /api/v1/uesaccess), connection test (`fw_check_ues_connection` POST /api/v1/uesaccess/state), global config (`fw_verify_ues_global` / `fw_config_ues_global` GET/PUT /api/v1/uesglobal), promotion policy CRUD (`fw_verify_ues_ip_policy` / `fw_config_ues_ip_policy` / `fw_update_ues_ip_policy` / `fw_delete_ues_ip_policy` GET/POST/PUT/DELETE /api/v1/uesippolicy), and priority order (`fw_verify_ues_ip_policy_order` / `fw_update_ues_ip_policy_priority` GET/POST /api/v1/uesippolicyorder), with the `run ues` command family backed by `runner/ues.py` and the default HTTP runner (dry-run by default, `--execute` for live device requests). New-policy id is resolved by name query because the create response only returns {"msg":"success"}.
 - Add static DNS entry atom specs and adapter profile mappings for `fw_config_static_dns` (POST /api/v1/dns/cache) and `fw_delete_static_dns` (DELETE /api/v1/dns/cache?id=<domain>), with the `run dns static-dns-config` / `static-dns-delete` subcommands backed by `runner/dns_static.py` and the default HTTP runner (dry-run by default, `--execute` for live device requests).
 - Add the initial atomic operation schema contract in `schemas/atomic-op.schema.yaml`.
 - Add the schema field reference in `docs/schema-field-reference.md`.

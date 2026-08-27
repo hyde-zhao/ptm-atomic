@@ -1,0 +1,119 @@
+schema_version: "1.1"
+op_id: fw_update_ues_ip_policy
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_ues_ip_policy
+description: Update an NGFW UES IP promotion policy by id.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ues_ip_policy for this operation.
+  params:
+    type: json
+    required: true
+    description: UES IP promotion-policy update object with top-level id selecting the policy; the val may carry the full policy object or only changed fields because partial updates are accepted. action maps to 0=permit, 1=permit and log, 2=permit and push promotion; enable toggles the policy; cycletime is the push interval.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: ues_ip_policy
+  params:
+    id: 1
+    name: "zyz"
+    enable: true
+    action: 1
+    log: true
+    cycletime: 0
+    desc: ""
+    srcip: "any"
+    srcipisgroup: false
+    dstip: "any"
+    dstipisgroup: false
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    ip_policy_id: 1
+    pre_snapshot_ref: "<ues-ip-policy-pre-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: ues_ip_policy
+      applied_ref: "<ues-ip-policy-update-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - ip_policy_id
+    - full_config
+  notes: Restore the complete pre-change UES IP promotion-policy object, not only the modified fields.
+pre_snapshot:
+  op_id: fw_verify_ues_ip_policy
+  capture_fields:
+    - ip_policy_id
+    - full_config
+rollback_apply:
+  op_id: fw_update_ues_ip_policy
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_ues_ip_policy
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - ues_integration
+gate:
+  required: true
+  reason: UES promotion-policy updates change user-facing traffic behavior and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk configuration contract is used.
+  - The update request must carry the policy id in the top-level id field; val.id is optional because partial updates are accepted.
+postconditions:
+  - UES promotion-policy update result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_ues_ip_policy query can confirm the policy state.
+tags:
+  - firewall
+  - ues
+  - ip_policy
+  - configuration
+aliases:
+  - ues-promotion-policy
+  - promotion-policy
+  - ues-ippolicy
+since_version: "1.7.0"

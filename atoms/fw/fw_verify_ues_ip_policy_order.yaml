@@ -1,0 +1,72 @@
+schema_version: "1.1"
+op_id: fw_verify_ues_ip_policy_order
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ues_ip_policy_order
+description: Query the NGFW UES IP promotion-policy priority order.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: true
+    description: Query page number.
+  size:
+    type: int
+    required: true
+    description: Query page size.
+  config_source:
+    type: int
+    required: true
+    description: Configuration source selector; 0 queries the local configuration.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: ues_ip_policy_order
+  page: 1
+  size: 300
+  config_source: 0
+side_effect: observation
+returns:
+  status: success
+  data:
+    verification_summary_ref: "<ues-ip-policy-order-verification-summary-ref>"
+    verification_status: passed
+    existence: true
+    count: 1
+    policy_order_ids: [1]
+    full_config: "<ues-ip-policy-order-full-config-ref>"
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: ues_ip_policy_order_query_returns_priority_list
+      input_ref: "<ues-ip-policy-order-query-result-ref>"
+      expected_result: vals is the policy id array in current priority order (first entry has highest priority)
+  summary_ref: "<ues-ip-policy-order-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - UES promotion-policy order query result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - ues
+  - ip_policy
+  - verification
+aliases:
+  - ues-policy-order
+  - ues-priority
+  - ues-ippolicy-order
+since_version: "1.7.0"

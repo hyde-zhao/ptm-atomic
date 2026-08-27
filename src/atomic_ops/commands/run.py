@@ -332,6 +332,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_trex as run_trex
     from atomic_ops.commands import run_dns as run_dns
     from atomic_ops.commands import run_neighbor as run_neighbor
+    from atomic_ops.commands import run_ues as run_ues
     from atomic_ops.commands import run_cli as run_cli
 
     return (
@@ -446,6 +447,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_dns.build_subtree(),
         *run_trex.build_subtree(),
         *run_neighbor.build_subtree(),
+        *run_ues.build_subtree(),
         CommandGroup(
             name="cli",
             help="SSH/Telnet shell verification operations.",
