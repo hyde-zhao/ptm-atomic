@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -1138,6 +1139,7 @@ class Ospfv3BfdPayloadTests(unittest.TestCase):
 
 
 class SessionFileTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "Windows ACL 模型下 Unix 权限位无意义，仅 Linux/macOS 验证")
     def test_write_and_read_session_file_with_private_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "session.json"
@@ -1153,6 +1155,7 @@ class SessionFileTests(unittest.TestCase):
             payload = read_session_file(path)
             self.assertEqual(payload["session_value"], "abc123")
 
+    @unittest.skipIf(sys.platform == "win32", "Windows ACL 模型下 Unix 权限位无意义，仅 Linux/macOS 验证")
     def test_rejects_broad_session_file_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "session.json"

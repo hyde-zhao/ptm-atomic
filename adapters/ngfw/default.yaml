@@ -764,8 +764,7 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      query_params:
-        id: "{{ params.id }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -775,7 +774,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - DELETE /api/v1/route?id=<id> removes an existing static route by id.
+        - DELETE uses id as a query value (?id=<id>) and sends no JSON body.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_static_route:
     atom_ref: atoms/fw/fw_verify_static_route.yaml
@@ -788,10 +787,7 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      query_params:
-        page: "{{ params.page }}"
-        size: "{{ params.size }}"
-        is_ip6: "{{ params.is_ip6 }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -800,7 +796,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - GET /api/v1/route?page=1&size=40&is_ip6=false queries the static route list.
+        - Query values are page, size, and is_ip6; GET requests send no JSON body.
         - is_ip6=false queries IPv4 static routes; is_ip6=true queries IPv6 static routes.
   fw_config_ospfv2_global:
     atom_ref: atoms/fw/fw_config_ospfv2_global.yaml
@@ -3526,7 +3522,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.
+        - 'GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.'
         - GET requests send no JSON body.
         - Each val entry carries name, desc, ippools and refcnt fields.
   fw_config_ip6pool_group:
@@ -3659,7 +3655,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.
+        - 'GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.'
         - GET requests send no JSON body.
         - Each val entry carries name, desc, ip6pools and refcnt fields.
   fw_config_timeobject:
@@ -4804,3 +4800,111 @@ operations:
         - Writes respond {"msg":"success"}.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
+
+  fw_config_security_zone:
+    atom_ref: atoms/fw/fw_config_security_zone.yaml
+    intent: Build a security-zone create request.
+    request:
+      method: POST
+      path: /api/v1/sfarea
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          interfaces: "{{ params.interfaces }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <security-zone-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST creates a security zone; name is 1-31 chars and must not start with IDMC-.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_security_zone:
+    atom_ref: atoms/fw/fw_update_security_zone.yaml
+    intent: Build a security-zone update request by name.
+    request:
+      method: PUT
+      path: /api/v1/sfarea
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.name }}"
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          interfaces: "{{ params.interfaces }}"
+          refcnt: "{{ params.refcnt }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <security-zone-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT updates the zone identified by name; refcnt is echoed from the current query.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_security_zone:
+    atom_ref: atoms/fw/fw_delete_security_zone.yaml
+    intent: Build a security-zone delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/sfarea
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <security-zone-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses name as the id query value (?id=<zone-name>) and sends no JSON body.
+        - The zone must have refcnt equal to 0 before deletion.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_security_zone:
+    atom_ref: atoms/fw/fw_verify_security_zone.yaml
+    intent: Build a security-zone query request.
+    request:
+      method: GET
+      path: /api/v1/sfarea
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <security-zone-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body; returns all zones with name, desc, interfaces, and refcnt.

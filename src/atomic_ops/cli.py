@@ -186,9 +186,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     # run 命令 execute 模式：绑定 run 上下文供 exec-log 记录（dry-run 不记）。
     from atomic_ops.runner.exec_log import bind_run_context, generate_run_id, reset_run_context
 
-    token = None
+    token = None  # security-gate: ok — contextvars.Token（exec-log run 上下文），非凭据
     if getattr(args, "execute", False):
-        token = bind_run_context(generate_run_id(), "execute")
+        token = bind_run_context(generate_run_id(), "execute")  # security-gate: ok — contextvars.Token，非凭据
     try:
         return handler(args)
     finally:

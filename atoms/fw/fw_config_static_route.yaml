@@ -58,8 +58,11 @@ rollback_strategy:
   snapshot_required: false
   required_inputs:
     - id
-  id_source: verify
+  id_source: query
   id_field: id
+  query_op: fw_verify_static_route
+  query_match: dst_network
+  query_match_source: args
   notes: Delete only when the create result is confirmed. The device returns no id on create; rollback resolves the id via fw_verify_static_route matching dst_network.
 pre_snapshot:
   op_id: fw_verify_static_route

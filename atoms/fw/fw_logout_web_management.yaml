@@ -11,15 +11,12 @@ parameters:
     type: string
     required: true
     description: Non-sensitive session reference to invalidate.
-credential_ref:
-  kind: external_session_ref
-  ref: "<session-ref>"
 returns:
   status: success
   data:
     logout_status: invalidated
     session_ref: "<session-ref>"
-    state_status: logged_out
+    state_status: invalid
   error_type: LOGOUT_FAILED
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
@@ -39,9 +36,10 @@ gate:
   required: false
   reason: Web management logout invalidates an existing session reference; low-risk and does not require approval.
   approver_role: none
-  evidence_required: []
+  evidence_required:
+    - state_reference
 verification:
-  kind: session_state
+  kind: login_state
   rules:
     - name: session_reference_invalidated
       input_ref: "<session-ref>"
