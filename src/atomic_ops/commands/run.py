@@ -66,6 +66,9 @@ POLICY_ROUTE_OPS = (
     "fw_verify_policy_route",
     "fw_update_policy_route_priority",
 )
+SESSION_OPS = (
+    "fw_verify_session",
+)
 STATIC_ROUTE_OPS = (
     "fw_config_static_route",
     "fw_update_static_route",
@@ -146,6 +149,7 @@ SUPPORTED_OPS = (
     "fw_logout_web_management",
     "fw_config_object",
     *POLICY_ROUTE_OPS,
+    *SESSION_OPS,
     *STATIC_ROUTE_OPS,
     *INTERFACE_OPS,
     *OSPFV2_OPS,
@@ -174,6 +178,7 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_delete_policy_route": ("policy-route", "delete"),
     "fw_verify_policy_route": ("policy-route", "verify"),
     "fw_update_policy_route_priority": ("policy-route", "priority"),
+    "fw_verify_session": ("session", "verify"),
     "fw_config_static_route": ("static-route", "config"),
     "fw_update_static_route": ("static-route", "update"),
     "fw_delete_static_route": ("static-route", "delete"),
@@ -316,6 +321,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_ip6pool_group as run_ip6pool_group
     from atomic_ops.commands import run_timeobject as run_timeobject
     from atomic_ops.commands import run_policy_route as run_policy_route
+    from atomic_ops.commands import run_session as run_session
     from atomic_ops.commands import run_static_route as run_static_route
     from atomic_ops.commands import run_security_zone as run_security_zone
     from atomic_ops.commands import run_acl_policy as run_acl_policy
@@ -396,6 +402,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             description="Policy-route configuration, update, delete, verify, and priority operations.",
             children=run_policy_route.build_subtree(),
         ),
+        *run_session.build_subtree(),
         CommandGroup(
             name="static-route",
             help="Static route operations.",
@@ -513,6 +520,8 @@ def _dispatch_legacy(op_id: str, args: argparse.Namespace) -> int:
             payload = _run_object_legacy(args)
         elif op_id in POLICY_ROUTE_OPS:
             payload = _run_policy_route_legacy(args)
+        elif op_id in SESSION_OPS:
+            payload = _run_session_legacy(args)
         elif op_id in STATIC_ROUTE_OPS:
             payload = _run_static_route_legacy(args)
         elif op_id in INTERFACE_OPS:
@@ -905,6 +914,55 @@ def _run_security_zone_legacy(args: argparse.Namespace) -> dict[str, Any]:
         session_file=session_file,
         auth_header=getattr(args, "auth_header"),
         payload=payload,
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout")),
+    )
+
+
+def _run_session_legacy(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.session_table import (
+        build_session_filters,
+        build_session_verify_dry_run,
+        execute_session_verify,
+    )
+
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    filters = build_session_filters(
+        args={
+            "proto": getattr(args, "proto", "ANY"),
+            "src_addr": getattr(args, "src_addr", "0:0::0"),
+            "dst_addr": getattr(args, "dst_addr", "0:0::0"),
+            "src_port": getattr(args, "src_port", 0),
+            "dst_port": getattr(args, "dst_port", 0),
+            "rxZone": getattr(args, "rx_zone", ""),
+            "txZone": getattr(args, "tx_zone", ""),
+            "rxIf": getattr(args, "rx_if", ""),
+            "txIf": getattr(args, "tx_if", ""),
+            "action": getattr(args, "action", ""),
+            "policyId": getattr(args, "policy_id", ""),
+            "appName": getattr(args, "app_name", ""),
+        }
+    )
+    if not getattr(args, "execute"):
+        return build_session_verify_dry_run(
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            page=int(getattr(args, "page", 1)),
+            size=int(getattr(args, "size", 40)),
+            is_ip6=bool(getattr(args, "is_ip6", False)),
+            filters=filters,
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout")),
+        )
+    return execute_session_verify(
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        page=int(getattr(args, "page", 1)),
+        size=int(getattr(args, "size", 40)),
+        is_ip6=bool(getattr(args, "is_ip6", False)),
+        filters=filters,
         verify_tls=bool(getattr(args, "verify_tls")),
         timeout=float(getattr(args, "timeout")),
     )

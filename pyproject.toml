@@ -12,7 +12,7 @@ dependencies = [
     "jsonschema",
     "requests",
     "cryptography",
-    "paramiko",
+    "paramiko>=5.0.0",
 ]
 
 [project.scripts]
