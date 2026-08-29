@@ -46,6 +46,16 @@ PAGINATED_OPS = GET_OPS
 SERVICEPOOL_RESOURCE = "/api/v1/servicepool"
 SERVICEPOOL_GROUP_RESOURCE = "/api/v1/servicepool/group"
 
+# Preset service search: CLI preset_query field name -> device query parameter.
+# Kept as a single mapping so device probing can adjust names without touching
+# the command or dry-run/execute plumbing.
+PRESET_QUERY_FIELD_MAP = {
+    "keywords": "keywords",
+    "src_port": "sport",
+    "dst_port": "dport",
+    "protocol": "protocol",
+}
+
 
 def build_servicepool_payload(
     *,
@@ -172,6 +182,7 @@ def build_servicepool_dry_run(
     page: int,
     size: int,
     keywords: str,
+    preset_query: dict[str, Any] | None = None,
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
@@ -182,7 +193,15 @@ def build_servicepool_dry_run(
         "execute_required": True,
         "request": {
             "method": method,
-            "url": _request_url(base_url, op_id, page=page, size=size, keywords=keywords, payload=payload),
+            "url": _request_url(
+                base_url,
+                op_id,
+                page=page,
+                size=size,
+                keywords=keywords,
+                preset_query=preset_query,
+                payload=payload,
+            ),
             "auth": {"name": auth_header, "value": "<session-ref>"},
             "content_type": "application/json",
             "payload": None if op_id in NO_BODY_OPS else payload,
@@ -203,6 +222,7 @@ def execute_servicepool(
     page: int,
     size: int,
     keywords: str,
+    preset_query: dict[str, Any] | None = None,
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
@@ -213,7 +233,15 @@ def execute_servicepool(
     headers = {"Content-Type": "application/json", auth_header: header_value}
     status_code, response_payload, _text = request_json(
         method,
-        _request_url(base_url, op_id, page=page, size=size, keywords=keywords, payload=payload),
+        _request_url(
+            base_url,
+            op_id,
+            page=page,
+            size=size,
+            keywords=keywords,
+            preset_query=preset_query,
+            payload=payload,
+        ),
         headers=headers,
         json_payload=None if op_id in NO_BODY_OPS else payload,
         timeout=timeout,
@@ -252,6 +280,7 @@ def _request_url(
     page: int,
     size: int,
     keywords: str,
+    preset_query: dict[str, Any] | None,
     payload: dict[str, Any] | None,
 ) -> str:
     _method, path = _method_path(op_id)
@@ -265,6 +294,10 @@ def _request_url(
                 query["keywords"] = keywords
         elif op_id == "fw_verify_servicepool_preset":
             query["type"] = "PRESET"
+            for cli_field, value in (preset_query or {}).items():
+                device_field = PRESET_QUERY_FIELD_MAP.get(cli_field)
+                if device_field and value not in (None, ""):
+                    query[device_field] = value
         elif op_id == "fw_verify_servicepool_group":
             if keywords:
                 query["keywords"] = keywords

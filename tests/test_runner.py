@@ -111,6 +111,7 @@ from atomic_ops.runner.servicepool import (
     build_servicepool_group_update_payload,
     build_servicepool_batch_delete_payload,
     build_servicepool_group_batch_delete_payload,
+    build_servicepool_dry_run,
     validate_servicepool_payload,
 )
 from atomic_ops.runner.ippool_group import (
@@ -3191,6 +3192,68 @@ class ServicePoolPayloadTests(unittest.TestCase):
         payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/servicepool", "body": {"id": ["g1"]}}]}
         with self.assertRaises(RunnerError):
             validate_servicepool_payload(payload, op_id="fw_delete_batch_servicepool_group")
+
+    def test_verify_preset_dry_run_without_filters_only_type_preset(self) -> None:
+        # 无搜索参数时保持既有行为：只带 type=PRESET，不出现关键字/端口
+        dry = build_servicepool_dry_run(
+            op_id="fw_verify_servicepool_preset",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            keywords="",
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertIn("type=PRESET", url)
+        self.assertNotIn("keywords", url)
+        self.assertNotIn("sport", url)
+
+    def test_verify_preset_dry_run_maps_search_params(self) -> None:
+        # preset_query 的 CLI 字段经 PRESET_QUERY_FIELD_MAP 映射为设备查询参数
+        dry = build_servicepool_dry_run(
+            op_id="fw_verify_servicepool_preset",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            keywords="",
+            preset_query={"keywords": "http", "src_port": "80", "dst_port": "8080", "protocol": "6"},
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertIn("type=PRESET", url)
+        self.assertIn("keywords=http", url)
+        self.assertIn("sport=80", url)
+        self.assertIn("dport=8080", url)
+        self.assertIn("protocol=6", url)
+
+    def test_verify_preset_dry_run_drops_empty_fields(self) -> None:
+        # 空值字段不进入 URL；未知字段被映射跳过
+        dry = build_servicepool_dry_run(
+            op_id="fw_verify_servicepool_preset",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            keywords="",
+            preset_query={"keywords": "ssh", "src_port": "", "dst_port": "22", "protocol": "", "bogus_field": "x"},
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertIn("keywords=ssh", url)
+        self.assertIn("dport=22", url)
+        self.assertNotIn("sport=", url)
+        self.assertNotIn("bogus_field", url)
 
 
 class LoadJsonPayloadTests(unittest.TestCase):
