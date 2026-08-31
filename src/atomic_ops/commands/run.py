@@ -141,6 +141,39 @@ NEIGHBOR_OPS = (
     "fw_delete_neighbor",
     "fw_delete_batch_neighbor",
 )
+MACPOOL_OPS = (
+    "fw_config_macpool",
+    "fw_update_macpool",
+    "fw_delete_macpool",
+    "fw_delete_batch_macpool",
+    "fw_verify_macpool",
+)
+DOMAINPOOL_OPS = (
+    "fw_config_domainpool",
+    "fw_update_domainpool",
+    "fw_delete_domainpool",
+    "fw_delete_batch_domainpool",
+    "fw_verify_domainpool",
+)
+FILETYPE_OPS = (
+    "fw_config_filetype",
+    "fw_update_filetype",
+    "fw_delete_filetype",
+    "fw_config_filetypeobj",
+    "fw_update_filetypeobj",
+    "fw_verify_filetypeobj",
+    "fw_delete_batch_filetypeobj",
+)
+CERT_OPS = (
+    "fw_config_localcert",
+    "fw_update_localcert",
+    "fw_delete_localcert",
+    "fw_delete_batch_localcert",
+    "fw_verify_localcert",
+    "fw_config_localcacert",
+    "fw_verify_localcacert",
+    "fw_delete_batch_localcacert",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
@@ -161,6 +194,10 @@ SUPPORTED_OPS = (
     *IP6POOL_GROUP_OPS,
     *TIMEOBJECT_OPS,
     *NEIGHBOR_OPS,
+    *MACPOOL_OPS,
+    *DOMAINPOOL_OPS,
+    *FILETYPE_OPS,
+    *CERT_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -333,6 +370,10 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_dns as run_dns
     from atomic_ops.commands import run_neighbor as run_neighbor
     from atomic_ops.commands import run_cli as run_cli
+    from atomic_ops.commands import run_macpool as run_macpool
+    from atomic_ops.commands import run_domainpool as run_domainpool
+    from atomic_ops.commands import run_filetype as run_filetype
+    from atomic_ops.commands import run_cert as run_cert
 
     return (
         CommandGroup(
@@ -446,6 +487,30 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_dns.build_subtree(),
         *run_trex.build_subtree(),
         *run_neighbor.build_subtree(),
+        CommandGroup(
+            name="mac-pool",
+            help="MAC address object operations.",
+            description="MAC address object configuration, update, delete, batch-delete, and verify operations.",
+            children=run_macpool.build_subtree(),
+        ),
+        CommandGroup(
+            name="domain-pool",
+            help="Domain name object operations.",
+            description="Domain name object configuration, update, delete, batch-delete, and verify operations.",
+            children=run_domainpool.build_subtree(),
+        ),
+        CommandGroup(
+            name="filetype",
+            help="File type and file type group operations.",
+            description="Custom file type config/update/delete and file type group config/update/verify/batch-delete operations.",
+            children=run_filetype.build_subtree(),
+        ),
+        CommandGroup(
+            name="cert",
+            help="Certificate operations.",
+            description="Local certificate and local CA certificate create, update/issue, delete, batch-delete, and verify operations.",
+            children=run_cert.build_subtree(),
+        ),
         CommandGroup(
             name="cli",
             help="SSH/Telnet shell verification operations.",

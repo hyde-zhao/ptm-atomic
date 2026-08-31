@@ -1,0 +1,83 @@
+schema_version: "1.1"
+op_id: fw_delete_batch_macpool
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_batch_macpool
+description: Delete multiple NGFW MAC address objects through /api/v1/batch.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be macpool for this operation.
+  params:
+    type: json
+    required: true
+    description: Batch delete request with DELETE /api/v1/macpool items.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: macpool
+  params:
+    batch:
+      - method: DELETE
+        resource: /api/v1/macpool
+        body:
+          id:
+            - macObj1
+      - method: DELETE
+        resource: /api/v1/macpool
+        body:
+          id:
+            - macObj2
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: macpool
+      applied_ref: "<macpool-batch-delete-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+timeout_ms: 60000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - BATCH_PARTIAL_FAILED
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+    - batch_configuration
+gate:
+  required: true
+  reason: Batch MAC address-object deletion can remove multiple referenced capacity objects and affect policy matching; requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+    - concurrency_review
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - Batch body contains only DELETE /api/v1/macpool items.
+postconditions:
+  - Batch MAC address-object deletion result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - macpool
+  - batch_configuration
+aliases:
+  - mac-pool
+  - mac-address-object
+  - macaddr
+  - bulk
+since_version: "1.11.0"
