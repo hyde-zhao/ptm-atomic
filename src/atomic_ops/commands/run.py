@@ -177,6 +177,13 @@ CERT_OPS = (
     "fw_verify_localcacert",
     "fw_delete_batch_localcacert",
 )
+GEOIP_OPS = (
+    "fw_config_geoip",
+    "fw_update_geoip",
+    "fw_delete_geoip",
+    "fw_delete_batch_geoip",
+    "fw_verify_geoip",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
@@ -202,6 +209,7 @@ SUPPORTED_OPS = (
     *DOMAINPOOL_OPS,
     *FILETYPE_OPS,
     *CERT_OPS,
+    *GEOIP_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -381,6 +389,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_domainpool as run_domainpool
     from atomic_ops.commands import run_filetype as run_filetype
     from atomic_ops.commands import run_cert as run_cert
+    from atomic_ops.commands import run_geoip as run_geoip
 
     return (
         CommandGroup(
@@ -519,6 +528,12 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="Certificate operations.",
             description="Local certificate and local CA certificate create, update/issue, delete, batch-delete, and verify operations.",
             children=run_cert.build_subtree(),
+        ),
+        CommandGroup(
+            name="geoip",
+            help="Custom geoip region object operations.",
+            description="Custom geoip region object config, update, delete, batch-delete, and verify operations.",
+            children=run_geoip.build_subtree(),
         ),
         CommandGroup(
             name="cli",

@@ -1,13 +1,20 @@
-"""NGFW geoip (region/address) object runner — SKELETON.
+"""NGFW geoip (custom region object) runner.
 
-Endpoint is UNCONFIRMED for this family (see probe16_record.json: geoip
-endpoints could not be discovered on the device; the /api/v1/ippool type
-domain has no region type). This module reserves the op_id namespace and the
-runner shape so that only GEOIP_ENDPOINTS / GEOIP_RESOURCE and the member keys
-need to be filled once the endpoint is confirmed.
+Custom region objects map an IP range to a geographic location
+(country/province/city). Unlike the name-keyed object families, a geoip
+object has no name: it is identified by a numeric id returned on create and
+queried by IP. Shapes are confirmed against the device (probe17_record.json):
 
-This family is intentionally NOT registered in SUPPORTED_OPS and NOT listed in
-any package manifest until the endpoint is confirmed.
+  POST   /api/v1/geoip/custom   {"val":{accuracy,desc,ip,country,province,city}} -> {id,msg}
+  PUT    /api/v1/geoip/custom   {"id":N,"val":{...}}
+  DELETE /api/v1/geoip/custom?id=<numeric id>
+  POST   /api/v1/batch          {"batch":[{"method":"DELETE","resource":"/api/v1/geoip/custom","body":{"id":[<string id>]}}]}
+  GET    /api/v1/geoip/custom?page=&size=&keywords= -> {count,page,size,vals}
+
+The verify (list) endpoint is the paginated GET used by the web UI. The
+geoip.txt "query" endpoint (/api/v1/geoip/query?ip=) performs an IP-to-region
+lookup; it is a functional query, not an object-management listing, so it is
+not exposed as a separate atomic op.
 """
 
 from __future__ import annotations
@@ -25,9 +32,7 @@ from atomic_ops.runner.session import read_session_file
 SUCCESS_STATUS = {200, 201, 202}
 GET_SUCCESS_STATUS = {200}
 
-# TODO(geoip): replace with the confirmed endpoint once discovered.
-# `/geoip` is a schema-valid placeholder; the adapter entry notes flag it as unconfirmed.
-GEOIP_RESOURCE = "/geoip"
+GEOIP_RESOURCE = "/api/v1/geoip/custom"
 GEOIP_ENDPOINTS = {
     "fw_config_geoip": ("POST", GEOIP_RESOURCE),
     "fw_update_geoip": ("PUT", GEOIP_RESOURCE),
@@ -41,31 +46,62 @@ BATCH_OPS = {"fw_delete_batch_geoip"}
 NO_BODY_OPS = GET_OPS | DELETE_OPS
 PAGINATED_OPS = GET_OPS
 
+# Default geographic precision for a custom region object. accuracy 2 pins the
+# mapping to the full country/province/city level (device-confirmed).
+DEFAULT_ACCURACY = 2
+COUNTRY_FIELDS = ("country", "province", "city")
+
 
 def build_geoip_payload(
     *,
-    name: str,
+    ip: str = "",
+    country: str = "",
+    province: str = "",
+    city: str = "",
+    accuracy: int = DEFAULT_ACCURACY,
     desc: str = "",
-    # TODO(geoip): confirm the member key (e.g. regions/geoips/areas).
-    members: list[str] | None = None,
 ) -> dict[str, Any]:
-    _validate_non_empty("name", name)
-    # TODO(geoip): member field name is unconfirmed; the macpool/domainpool
-    # families use a nested list of objects (e.g. [{"mac": ...}]).
-    val: dict[str, Any] = {"name": name, "desc": desc}
+    _validate_non_empty("ip", ip)
+    _validate_non_empty("country", country)
+    # The device requires province and city and validates them against its
+    # region database; omitting them is rejected with eRequestParam.
+    _validate_non_empty("province", province)
+    _validate_non_empty("city", city)
+    _validate_accuracy(accuracy)
+    val: dict[str, Any] = {
+        "accuracy": accuracy,
+        "desc": desc,
+        "ip": ip,
+        "country": country,
+        "province": province,
+        "city": city,
+    }
     return {"val": val}
 
 
 def build_geoip_update_payload(
     *,
     entry_id: str,
-    name: str,
+    ip: str = "",
+    country: str = "",
+    province: str = "",
+    city: str = "",
+    accuracy: int = DEFAULT_ACCURACY,
     desc: str = "",
-    members: list[str] | None = None,
 ) -> dict[str, Any]:
     _validate_non_empty("id", entry_id)
-    config_payload = build_geoip_payload(name=name, desc=desc, members=members)
-    return {"id": entry_id, "val": config_payload["val"]}
+    config_payload = build_geoip_payload(
+        ip=ip, country=country, province=province, city=city, accuracy=accuracy, desc=desc
+    )
+    # The device requires the unique identifier both at the top level and
+    # inside val (probe-confirmed: val without id -> "unique identifier"
+    # eRequestParam; missing top-level id -> "body has no id field").
+    return {"id": entry_id, "val": {**config_payload["val"], "id": entry_id}}
+
+
+def build_geoip_delete_payload(*, entry_id: str) -> dict[str, Any]:
+    _validate_non_empty("id", entry_id)
+    return {"id": entry_id}
 
 
 def build_geoip_batch_delete_payload(*, entry_ids: list[str]) -> dict[str, Any]:
@@ -77,8 +113,22 @@ def build_geoip_batch_delete_payload(*, entry_ids: list[str]) -> dict[str, Any]:
         )
     batch: list[dict[str, Any]] = []
     for entry_id in entry_ids:
-        _validate_non_empty("id", entry_id)
-        batch.append({"method": "DELETE", "resource": GEOIP_RESOURCE, "body": {"id": [entry_id]}})
+        if entry_id is None or (isinstance(entry_id, str) and not entry_id.strip()):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Geoip object id is required and must be non-empty.",
+                {"field": "id"},
+            )
+        # The device batch layer accepts geoip ids as strings (probe-confirmed);
+        # numeric ids are stringified to match the documented delete body.
+        entry_id_str = str(entry_id)
+        batch.append(
+            {
+                "method": "DELETE",
+                "resource": GEOIP_RESOURCE,
+                "body": {"id": [entry_id_str]},
+            }
+        )
     return {"batch": batch}
 
 
@@ -248,6 +298,24 @@ def _validate_non_empty(field: str, value: str) -> None:
             "Geoip object field is required and must be non-empty.",
             {"field": field},
         )
+
+
+def _validate_accuracy(accuracy: int) -> int:
+    try:
+        parsed = int(accuracy)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Geoip object accuracy must be a non-negative integer.",
+            {"field": "accuracy"},
+        ) from exc
+    if parsed < 0:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Geoip object accuracy must be a non-negative integer.",
+            {"field": "accuracy", "value": accuracy},
+        )
+    return parsed
 
 
 def _validate_positive_int(field: str, value: int | str) -> int:

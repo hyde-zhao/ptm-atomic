@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_config_geoip
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_geoip
-description: Define a geoip/region object configuration contract for NGFW capacity. Endpoint unconfirmed (skeleton).
+description: Define a custom geoip region object mapping an IP range to a country/province/city.
 parameters:
   state_ref:
     type: string
@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Geoip object configuration with object name and description.
+    description: Geoip region configuration with ip range, country, province, city, accuracy and description; province and city are required and validated by the device region database.
   idempotency_key:
     type: string
     required: true
@@ -29,8 +29,12 @@ inputs:
   session_ref: "<session-ref>"
   config_domain: geoip
   params:
-    name: atomicGeoip
+    accuracy: 2
     desc: atomic geoip object
+    ip: 192.0.2.1-192.0.2.9
+    country: CN
+    province: Hunan
+    city: Changsha
   idempotency_key: "<idempotency-key>"
 returns:
   status: success
@@ -52,14 +56,16 @@ rollback_strategy:
   op_id: fw_delete_geoip
   snapshot_required: false
   required_inputs:
-    - name
-  id_source: args
-  id_field: name
-  notes: The geoip object id is its name; rollback deletes it. Endpoint not yet confirmed on the device.
+    - ip
+  id_source: query
+  query_op: fw_verify_geoip
+  query_match: desc
+  id_field: id
+  notes: The geoip object has no name; its numeric id is returned on create and also resolved via fw_verify_geoip by description, then deleted.
 pre_snapshot:
   op_id: fw_verify_geoip
   capture_fields:
-    - name
+    - desc
     - existence
 post_verify:
   op_id: fw_verify_geoip
@@ -80,7 +86,7 @@ risk:
     - capacity_domain
 gate:
   required: true
-  reason: Geoip object changes can affect policy matching and require review.
+  reason: Geoip region object changes can affect geo-location policy matching and require review.
   approver_role: change_reviewer
   evidence_required:
     - approved_change_record
@@ -100,4 +106,5 @@ aliases:
   - geoip
   - geo-ip-object
   - region-object
+  - custom-region
 since_version: "1.11.0"

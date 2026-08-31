@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_update_geoip
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_geoip
-description: Update an NGFW geoip/region object. Endpoint unconfirmed (skeleton).
+description: Update a custom geoip region object by numeric id.
 parameters:
   state_ref:
     type: string
@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Complete geoip payload for update with id and val.name identifying the target.
+    description: Complete geoip payload for update with id and val carrying the ip range and region fields; province and city are required and validated by the device region database.
   idempotency_key:
     type: string
     required: true
@@ -29,10 +29,15 @@ inputs:
   session_ref: "<session-ref>"
   config_domain: geoip
   params:
-    id: atomicGeoip
+    id: "4"
     val:
-      name: atomicGeoip
+      accuracy: 2
       desc: atomic geoip object updated
+      ip: 192.0.2.1-192.0.2.10
+      country: CN
+      province: Hunan
+      city: Changsha
+      id: "4"
   idempotency_key: "<idempotency-key>"
 side_effect: state_mutation
 returns:
@@ -54,13 +59,13 @@ rollback_strategy:
   type: restore_snapshot
   snapshot_required: true
   required_inputs:
-    - name
+    - ip
     - full_config
-  notes: Restore the original geoip object definition from the pre-update snapshot.
+  notes: Restore the original geoip region definition from the pre-update snapshot.
 pre_snapshot:
   op_id: fw_verify_geoip
   capture_fields:
-    - name
+    - ip
     - full_config
 rollback_apply:
   op_id: fw_update_geoip
@@ -86,7 +91,7 @@ risk:
     - capacity_domain
 gate:
   required: true
-  reason: Geoip object updates can change policy matching and require review.
+  reason: Geoip region object updates can change geo-location policy matching and require review.
   approver_role: change_reviewer
   evidence_required:
     - approved_change_record
@@ -106,4 +111,5 @@ aliases:
   - geoip
   - geo-ip-object
   - region-object
+  - custom-region
 since_version: "1.11.0"

@@ -161,6 +161,13 @@ from atomic_ops.runner.cert import (
     build_cert_batch_delete_payload,
     validate_cert_payload,
 )
+from atomic_ops.runner.geoip import (
+    build_geoip_payload,
+    build_geoip_update_payload,
+    build_geoip_delete_payload,
+    build_geoip_batch_delete_payload,
+    validate_geoip_payload,
+)
 
 
 class InterfacePayloadTests(unittest.TestCase):
@@ -4079,6 +4086,164 @@ class NewModuleV6CliDryRunTests(unittest.TestCase):
         url = payload["data"]["request"]["url"]
         self.assertIn("/api/v1/cert/localcacert?", url)
         self.assertIn("keywords=ca1", url)
+
+
+class GeoipPayloadTests(unittest.TestCase):
+    def test_config_payload_has_region_fields(self) -> None:
+        payload = build_geoip_payload(
+            ip="FEC0::2-FEC0::3", country="CN", province="Hunan", city="Changsha", desc="d"
+        )
+        self.assertEqual(payload["val"]["accuracy"], 2)
+        self.assertEqual(payload["val"]["ip"], "FEC0::2-FEC0::3")
+        self.assertEqual(payload["val"]["country"], "CN")
+        self.assertEqual(payload["val"]["province"], "Hunan")
+        self.assertEqual(payload["val"]["city"], "Changsha")
+        self.assertEqual(payload["val"]["desc"], "d")
+
+    def test_config_payload_requires_ip_and_country(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_geoip_payload(country="CN")
+        with self.assertRaises(RunnerError):
+            build_geoip_payload(ip="FEC0::2-FEC0::3")
+
+    def test_config_payload_rejects_negative_accuracy(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_geoip_payload(ip="FEC0::2", country="CN", accuracy=-1)
+
+    def test_update_payload_includes_id_and_val(self) -> None:
+        payload = build_geoip_update_payload(
+            entry_id="4", ip="FEC0::2-FEC0::4", country="CN", province="Hunan", city="Changsha", desc="upd"
+        )
+        self.assertEqual(payload["id"], "4")
+        self.assertEqual(payload["val"]["ip"], "FEC0::2-FEC0::4")
+        self.assertEqual(payload["val"]["desc"], "upd")
+        # Device requires the unique id both at top level and inside val.
+        self.assertEqual(payload["val"]["id"], "4")
+
+    def test_config_payload_requires_province_and_city(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_geoip_payload(ip="FEC0::2", country="CN")
+        with self.assertRaises(RunnerError):
+            build_geoip_payload(ip="FEC0::2", country="CN", province="Hunan")
+
+    def test_delete_payload_carries_numeric_id(self) -> None:
+        payload = build_geoip_delete_payload(entry_id="4")
+        self.assertEqual(payload, {"id": "4"})
+
+    def test_batch_delete_casts_ids_to_string_and_uses_custom_resource(self) -> None:
+        payload = build_geoip_batch_delete_payload(entry_ids=[4, "5"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/geoip/custom")
+        self.assertEqual(payload["batch"][0]["body"]["id"], ["4"])
+        self.assertEqual(payload["batch"][1]["body"]["id"], ["5"])
+
+    def test_validate_batch_rejects_wrong_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/geoip", "body": {"id": ["4"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_geoip_payload(payload, op_id="fw_delete_batch_geoip")
+
+    def test_delete_dry_run_uses_query_id(self) -> None:
+        from atomic_ops.runner.geoip import build_geoip_dry_run
+        dry = build_geoip_dry_run(
+            op_id="fw_delete_geoip",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload={"id": "4"},
+            page=1,
+            size=40,
+            keywords="",
+            verify_tls=False,
+            timeout=10.0,
+        )
+        self.assertIn("/api/v1/geoip/custom?id=4", dry["request"]["url"])
+        self.assertIsNone(dry["request"]["payload"])
+
+
+class NewModuleV7CliDryRunTests(unittest.TestCase):
+    def test_cli_geoip_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "geoip", "config", "--ip", "FEC0::2-FEC0::3", "--country", "CN",
+                 "--province", "Hunan", "--city", "Changsha", "--desc", "d"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_geoip")
+        self.assertIn("/api/v1/geoip/custom", payload["data"]["request"]["url"])
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["ip"], "FEC0::2-FEC0::3")
+        self.assertEqual(val["country"], "CN")
+        self.assertEqual(val["accuracy"], 2)
+
+    def test_cli_geoip_update_dry_run_includes_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "geoip", "update", "--id", "4", "--ip", "FEC0::2-FEC0::4",
+                 "--country", "CN", "--province", "Hunan", "--city", "Changsha"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_update_geoip")
+        self.assertIn("/api/v1/geoip/custom", payload["data"]["request"]["url"])
+        req = payload["data"]["request"]["payload"]
+        self.assertEqual(req["id"], "4")
+        self.assertEqual(req["val"]["ip"], "FEC0::2-FEC0::4")
+        self.assertEqual(req["val"]["id"], "4")
+
+    def test_cli_geoip_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "geoip", "delete", "--id", "4"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_geoip")
+        self.assertIn("/api/v1/geoip/custom?id=4", payload["data"]["request"]["url"])
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_geoip_delete_batch_uses_string_ids(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "geoip", "delete-batch", "--id", "4", "--id", "5"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_batch_geoip")
+        self.assertIn("/api/v1/batch", payload["data"]["request"]["url"])
+        batch = payload["data"]["request"]["payload"]["batch"]
+        self.assertEqual(batch[0]["resource"], "/api/v1/geoip/custom")
+        self.assertEqual(batch[0]["body"]["id"], ["4"])
+        self.assertEqual(batch[1]["body"]["id"], ["5"])
+
+    def test_cli_geoip_verify_url_has_pagination(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "geoip", "verify", "--keywords", "d", "--page", "1", "--size", "40"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/geoip/custom?", url)
+        self.assertIn("keywords=d", url)
+
+    def test_cli_geoip_config_requires_ip(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "geoip", "config", "--country", "CN"]
+            )
+        self.assertNotEqual(exit_code, 0)
 
 
 class StaticDnsPayloadTests(unittest.TestCase):

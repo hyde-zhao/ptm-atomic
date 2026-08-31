@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_verify_geoip
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_geoip
-description: Query NGFW geoip/region objects with pagination. Endpoint unconfirmed (skeleton).
+description: Query custom geoip region objects with pagination through /api/v1/geoip/custom.
 parameters:
   session_ref:
     type: string
@@ -23,7 +23,7 @@ parameters:
   keywords:
     type: string
     required: false
-    description: Keyword filter for the geoip object query.
+    description: Keyword filter for the geoip object query (e.g. a description fragment).
   params:
     type: json
     required: true
@@ -62,7 +62,7 @@ verification:
   rules:
     - name: geoip_query_returns_list
       input_ref: "<geoip-query-result-ref>"
-      expected_result: the device returns count and vals for geoip region objects.
+      expected_result: the device returns count and vals for custom geoip region objects; each entry carries accuracy, ip, country, province, city, desc, id and config_source.
   summary_ref: "<geoip-verification-summary-ref>"
 preconditions:
   - External orchestration holds a valid session_ref or runner session file.
@@ -78,4 +78,5 @@ aliases:
   - geoip
   - geo-ip-object
   - region-object
+  - custom-region
 since_version: "1.11.0"

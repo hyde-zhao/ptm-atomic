@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_delete_batch_geoip
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_batch_geoip
-description: Delete multiple NGFW geoip objects through /api/v1/batch. Endpoint unconfirmed (skeleton).
+description: Delete multiple custom geoip region objects through /api/v1/batch with string ids.
 parameters:
   session_ref:
     type: string
@@ -15,22 +15,22 @@ parameters:
   params:
     type: json
     required: true
-    description: Batch delete request with DELETE geoip resource items.
+    description: Batch delete request with DELETE /api/v1/geoip/custom items carrying string ids.
 inputs:
   session_ref: "<session-ref>"
   config_domain: geoip
   params:
     batch:
       - method: DELETE
-        resource: <TBD>
+        resource: /api/v1/geoip/custom
         body:
           id:
-            - geoipObj1
+            - "4"
       - method: DELETE
-        resource: <TBD>
+        resource: /api/v1/geoip/custom
         body:
           id:
-            - geoipObj2
+            - "5"
 returns:
   status: success
   data:
@@ -58,7 +58,7 @@ risk:
     - batch_configuration
 gate:
   required: true
-  reason: Batch geoip object deletion can remove multiple referenced capacity objects and affect policy matching; requires review.
+  reason: Batch geoip region object deletion can remove multiple geo-location mappings and affect policy matching; requires review.
   approver_role: change_reviewer
   evidence_required:
     - approved_change_record
@@ -67,7 +67,7 @@ gate:
     - concurrency_review
 preconditions:
   - External orchestration holds a valid session_ref or runner session file.
-  - Batch body contains only DELETE geoip resource items.
+  - Batch body contains only DELETE /api/v1/geoip/custom items with string ids.
 postconditions:
   - Batch geoip object deletion result and diagnostic references are available to the caller.
 tags:
@@ -79,5 +79,6 @@ aliases:
   - geoip
   - geo-ip-object
   - region-object
+  - custom-region
   - bulk
 since_version: "1.11.0"

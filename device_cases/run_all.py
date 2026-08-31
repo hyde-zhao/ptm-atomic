@@ -146,7 +146,11 @@ def _print_case(result: CaseResult) -> None:
     print(f"[{tag}] {result.case_id} {result.title} ({result.duration_s:.2f}s)")
     for check in result.checks:
         mark = "ok  " if check.ok else "FAIL"
-        print(f"       {mark} {check.name}: {check.detail}")
+        # Device bodies may carry GBK bytes decoded to replacement chars that
+        # a legacy GBK console cannot encode; degrade instead of crashing.
+        line = f"       {mark} {check.name}: {check.detail}"
+        enc = sys.stdout.encoding or "utf-8"
+        print(line.encode(enc, "replace").decode(enc, "replace"))
 
 
 def sweep(ctx: CaseContext) -> int:

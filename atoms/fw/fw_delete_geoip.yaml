@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_delete_geoip
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_geoip
-description: Delete an NGFW geoip/region object. Endpoint unconfirmed (skeleton).
+description: Delete a custom geoip region object by numeric id through /api/v1/geoip/custom.
 parameters:
   state_ref:
     type: string
@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Geoip object delete selector with id query value; DELETE sends no JSON body.
+    description: Geoip object delete selector with numeric id query value; DELETE sends no JSON body.
   idempotency_key:
     type: string
     required: true
@@ -29,7 +29,7 @@ inputs:
   session_ref: "<session-ref>"
   config_domain: geoip
   params:
-    id: atomicGeoip
+    id: "4"
   idempotency_key: "<idempotency-key>"
 side_effect: destructive
 returns:
@@ -52,20 +52,20 @@ rollback_strategy:
   type: restore_snapshot
   snapshot_required: true
   required_inputs:
-    - name
+    - ip
     - full_config
-  notes: Recreate the geoip object from the full pre-delete snapshot.
+  notes: Recreate the geoip region object from the full pre-delete snapshot.
 pre_snapshot:
   op_id: fw_verify_geoip
   capture_fields:
-    - name
+    - ip
     - full_config
 rollback_apply:
   op_id: fw_config_geoip
   input_from: pre_snapshot.full_config
 post_verify:
   op_id: fw_verify_geoip
-  expected_state: exists
+  expected_state: absent
 dry_run_supported: true
 risk_level: high
 timeout_ms: 30000
@@ -84,7 +84,7 @@ risk:
     - capacity_domain
 gate:
   required: true
-  reason: Geoip object deletion removes a referenced capacity object and may affect policy matching; requires review.
+  reason: Geoip region object deletion removes a geo-location mapping and may affect policy matching; requires review.
   approver_role: change_reviewer
   evidence_required:
     - approved_change_record
@@ -106,4 +106,5 @@ aliases:
   - geoip
   - geo-ip-object
   - region-object
+  - custom-region
 since_version: "1.11.0"

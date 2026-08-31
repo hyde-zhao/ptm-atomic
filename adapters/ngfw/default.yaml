@@ -4335,10 +4335,10 @@ operations:
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_geoip:
     atom_ref: atoms/fw/fw_config_geoip.yaml
-    intent: Build a geoip object create request (endpoint unconfirmed).
+    intent: Build a custom geoip region object create request.
     request:
       method: POST
-      path: /geoip
+      path: /api/v1/geoip/custom
       content_type: application/json
       auth:
         mode: external_session_ref
@@ -4346,8 +4346,12 @@ operations:
         value_ref: <session-ref>
       payload_template:
         val:
-          name: "{{ params.name }}"
+          accuracy: "{{ params.accuracy }}"
           desc: "{{ params.desc }}"
+          ip: "{{ params.ip }}"
+          country: "{{ params.country }}"
+          province: "{{ params.province }}"
+          city: "{{ params.city }}"
     response:
       success_status:
         - 200
@@ -4358,13 +4362,16 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - Endpoint unconfirmed on the device; skeleton contract only.
+        - A geoip region object maps an ip range to a country/province/city; it has no name.
+        - province and city are required and validated by the device region database.
+        - Create returns a numeric id used for later update and delete.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_geoip:
     atom_ref: atoms/fw/fw_update_geoip.yaml
-    intent: Build a geoip object update request (endpoint unconfirmed).
+    intent: Build a custom geoip region object update request by numeric id.
     request:
       method: PUT
-      path: /geoip
+      path: /api/v1/geoip/custom
       content_type: application/json
       auth:
         mode: external_session_ref
@@ -4383,13 +4390,14 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - Endpoint unconfirmed on the device; skeleton contract only.
+        - Update requires the numeric id returned on create, both at the top level and inside val (the device rejects val without the id).
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_geoip:
     atom_ref: atoms/fw/fw_delete_geoip.yaml
-    intent: Build a geoip object delete request (endpoint unconfirmed).
+    intent: Build a custom geoip region object delete request by numeric id.
     request:
       method: DELETE
-      path: /geoip
+      path: /api/v1/geoip/custom
       content_type: application/json
       auth:
         mode: external_session_ref
@@ -4406,10 +4414,12 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - Endpoint unconfirmed on the device; skeleton contract only.
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the numeric id returned on create.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_batch_geoip:
     atom_ref: atoms/fw/fw_delete_batch_geoip.yaml
-    intent: Build a batch geoip object delete request (endpoint unconfirmed).
+    intent: Build a batch custom geoip region object delete request.
     request:
       method: POST
       path: /api/v1/batch
@@ -4421,7 +4431,7 @@ operations:
       payload_template:
         batch:
           - method: DELETE
-            resource: <TBD>
+            resource: /api/v1/geoip/custom
             body:
               id:
                 - "{{ params.id }}"
@@ -4435,13 +4445,15 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - Endpoint unconfirmed on the device; skeleton contract only.
+        - Batch body contains only DELETE /api/v1/geoip/custom items.
+        - Each body.id is a single-element list holding the object id as a string.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_geoip:
     atom_ref: atoms/fw/fw_verify_geoip.yaml
-    intent: Build a geoip object query request (endpoint unconfirmed).
+    intent: Build a custom geoip region object query request with pagination.
     request:
       method: GET
-      path: /geoip
+      path: /api/v1/geoip/custom
       content_type: application/json
       auth:
         mode: external_session_ref
@@ -4456,7 +4468,9 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - Endpoint unconfirmed on the device; skeleton contract only.
+        - GET takes page, size and optional keywords query parameters and returns count and vals.
+        - GET requests send no JSON body.
+        - Each val entry carries accuracy, ip, country, province, city, desc, id and config_source.
   fw_config_timeobject:
     atom_ref: atoms/fw/fw_config_timeobject.yaml
     intent: Build a time object create request.
