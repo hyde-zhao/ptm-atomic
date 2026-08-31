@@ -456,8 +456,9 @@ def _normalize_any(field: str, value: str | None) -> str:
 def _validate_applist(applist: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """校验并返回策略路由应用匹配列表（applist）。
 
-    未提供时保持空数组（不匹配应用）；每项必须是含 appname/appid 的对象，
-    与界面「应用」选择器勾选后保存的请求体格式一致。
+    未提供时保持空数组（不匹配应用）；每项必须是对象且 appname 非空。
+    appid 不作强制（透传原则：DUT 实测 2026-08-19 接受仅含 appname 的项，
+    如 {"appname":"HTTP"}；强制 appid 会拒绝 DUT 合法请求）。
     """
     if not applist:
         return []
@@ -468,13 +469,13 @@ def _validate_applist(applist: list[dict[str, Any]] | None) -> list[dict[str, An
                 "Policy-route applist items must be objects.",
                 {"field": "applist", "index": index},
             )
-        for key in ("appname", "appid"):
-            if not isinstance(item.get(key), str) or not item[key].strip():
-                raise RunnerError(
-                    "RUNNER_VALIDATION_FAILED",
-                    "Policy-route applist items require non-empty appname and appid.",
-                    {"field": "applist", "index": index, "missing": key},
-                )
+        appname = item.get("appname")
+        if not isinstance(appname, str) or not appname.strip():
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Policy-route applist items require non-empty appname.",
+                {"field": "applist", "index": index, "missing": "appname"},
+            )
     return applist
 
 
