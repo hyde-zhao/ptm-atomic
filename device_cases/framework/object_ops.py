@@ -303,6 +303,65 @@ def run_deliver_failure(
     )
 
 
+def run_excl_reject(
+    ctx: CaseContext,
+    result: CaseResult,
+    *,
+    family: Family,
+    name: str,
+    valid_kwargs: dict[str, Any],
+    bad_excl_networks: str,
+    label: str,
+    bad_kwargs: dict[str, Any] | None = None,
+) -> None:
+    """A valid object is created; then a create and an update carrying a
+    device-invalid exclusion list (duplicate entries, or more entries than the
+    per-object exclusion capacity) are both rejected and recorded in the
+    operation log. The rejected list passes client-side validation — only the
+    device rejects it. Mirror of case 263478. ``bad_kwargs`` overrides the
+    rejected create's address fields when the case wants a distinct network.
+    """
+    window_start = int(time.time()) - 300
+    bad_name = f"{name}-bad"
+    bad_create_kwargs = {**valid_kwargs, **(bad_kwargs or {})}
+
+    create = _run_create(ctx, family, name=name, **valid_kwargs)
+    result.record(op_succeeded(create, ctx=ctx, label=f"{label}-base-create-ok"))
+
+    bad = _run_create(ctx, family, name=bad_name, excl_networks=bad_excl_networks, **bad_create_kwargs)
+    result.record(op_rejected(bad, ctx=ctx, label=f"{label}-bad-create-rejected"))
+
+    # check2: editing the valid object into the invalid exclusion state.
+    if ctx.execute and create.success:
+        upd = _run_update(ctx, family, name=name, excl_networks=bad_excl_networks, **valid_kwargs)
+        result.record(op_rejected(upd, ctx=ctx, label=f"{label}-bad-update-rejected"))
+    elif not ctx.execute:
+        # dry-run: still exercise the update construction
+        upd = _run_update(ctx, family, name=name, excl_networks=bad_excl_networks, **valid_kwargs)
+        result.record(op_rejected(upd, ctx=ctx, label=f"{label}-bad-update-rejected"))
+
+    # Both rejections must appear in the operation log.
+    if ctx.execute:
+        cap = ctx.runner.run(
+            "operation-log", "capture",
+            timetype="custom", starttime=window_start, endtime=int(time.time()) + 10, page=1, size=200,
+        )
+        result.record(op_succeeded(cap, ctx=ctx, label=f"{label}-oplog-capture"))
+        if cap.success:
+            messages = oplog_messages(cap.response())
+            hits = [m for m in messages if name in m]
+            result.record(
+                Check(name=f"{label}-oplog-base-name", ok=len(hits) >= 1, detail=f"occurrences={len(hits)} needle={name!r}")
+            )
+            hits = [m for m in messages if ("新增" in m or "修改" in m) and "失败" in m]
+            result.record(
+                Check(name=f"{label}-oplog-bad-name", ok=len(hits) >= 1, detail=f"failure entries={len(hits)}")
+            )
+
+    if ctx.execute and create.success:
+        _record_cleanup(ctx, result, _run_delete(ctx, family, name=name), f"{label}-cleanup-delete")
+
+
 def oplog_messages(response: Any) -> list[str]:
     """Flatten an operation-log capture response into its log messages."""
     if not isinstance(response, dict):
