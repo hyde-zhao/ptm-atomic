@@ -1,0 +1,83 @@
+schema_version: "1.1"
+op_id: fw_verify_security_zone_vpp
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_security_zone_vpp
+description: Verify NGFW security zone data-plane (VPP) configuration via SSH, comparing against expected zone name and optional interface list.
+parameters:
+  ssh_host:
+    type: string
+    required: true
+    description: Device SSH hostname or IP address.
+  ssh_port:
+    type: integer
+    required: false
+    description: Device SSH port (default 22).
+  ssh_user:
+    type: string
+    required: true
+    description: SSH login username.
+  ssh_password:
+    type: string
+    required: true
+    description: SSH login password (non-sensitive env-ref preferred).
+  zone_name:
+    type: string
+    required: false
+    description: Expected security-zone name to look up. Omit to list all zones.
+  expected_interfaces:
+    type: array
+    items:
+      type: string
+    required: false
+    description: Optional list of interface names expected to appear in the VPP zone output.
+inputs:
+  ssh_host: "<device-host>"
+  ssh_port: 22
+  ssh_user: "root"
+  ssh_password: "<ssh-password>"
+  zone_name: "<zone-name>"
+  expected_interfaces: []
+side_effect: observation
+returns:
+  status: success
+  data:
+    zone_name: "<zone-name>"
+    vpp_output: "<raw-vpp-show-zone-output>"
+    interfaces_found:
+      - "<interface-name>"
+    vpp_api_consistent: true
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - SSH_CONNECTION_FAILED
+  - VPP_COMMAND_FAILED
+  - STATE_MISMATCH
+  - VALIDATION_FAILED
+verification:
+  kind: data_plane
+  rules:
+    - name: vpp_zone_matches_control_plane
+      input_ref: "<vpp-zone-output-ref>"
+      expected_result: VPP zone configuration matches etcd/API configuration.
+  summary_ref: "<vpp-zone-verification-summary-ref>"
+preconditions:
+  - SSH access to the NGFW device is available.
+  - The vppctl binary exists at /opt/dbappsecurity/bin/vppctl.
+postconditions:
+  - VPP zone verification result is available to the caller.
+tags:
+  - firewall
+  - security_zone
+  - vpp
+  - data_plane
+  - verification
+aliases:
+  - zone
+  - sfarea
+  - vpp
+since_version: "1.7.0"

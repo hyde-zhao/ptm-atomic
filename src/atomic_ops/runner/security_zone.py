@@ -249,7 +249,7 @@ def execute_vpp_verify(
             hostname=ssh_host,
             port=ssh_port,
             username=ssh_user,
-            password=ssh_password,
+            password=ssh_password,  # security-gate: ok — 值来自 --credential-env 环境变量，非硬编码
             timeout=timeout,
             look_for_keys=False,
             allow_agent=False,

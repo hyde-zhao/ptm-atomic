@@ -1,0 +1,110 @@
+schema_version: "1.1"
+op_id: fw_config_ues_access
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_ues_access
+description: Save the NGFW UES access configuration.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ues_access for this operation.
+  params:
+    type: json
+    required: true
+    description: UES access config object. uesswitch enables UES access; uesip and port point to the UES platform; securitykey is optional and may be empty; thirdpartycode identifies the caller (e.g. tgfw).
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: ues_access
+  params:
+    uesswitch: true
+    uesip: "<UES_IP>"
+    port: "53443"
+    securitykey: ""
+    thirdpartycode: "tgfw"
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    pre_snapshot_ref: "<ues-access-pre-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: ues_access
+      applied_ref: "<ues-access-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - full_config
+  notes: Restore the complete pre-change UES access config, not only the modified fields.
+pre_snapshot:
+  op_id: fw_verify_ues_access
+  capture_fields:
+    - full_config
+    - uesswitch
+rollback_apply:
+  op_id: fw_config_ues_access
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_ues_access
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - ues_integration
+gate:
+  required: true
+  reason: UES access changes affect integration with the UES platform and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk configuration contract is used.
+  - PUT /api/v1/uesaccess replaces the whole access config; unset fields are not merged.
+postconditions:
+  - Configuration result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_ues_access query can confirm the device UES access state.
+tags:
+  - firewall
+  - ues
+  - access
+  - configuration
+aliases:
+  - ues-access
+  - ues-access-config
+since_version: "1.7.0"

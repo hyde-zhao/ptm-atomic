@@ -764,8 +764,7 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      query_params:
-        id: "{{ params.id }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -775,7 +774,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - DELETE /api/v1/route?id=<id> removes an existing static route by id.
+        - DELETE uses id as a query value (?id=<id>) and sends no JSON body.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_static_route:
     atom_ref: atoms/fw/fw_verify_static_route.yaml
@@ -788,10 +787,7 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      query_params:
-        page: "{{ params.page }}"
-        size: "{{ params.size }}"
-        is_ip6: "{{ params.is_ip6 }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -800,7 +796,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - GET /api/v1/route?page=1&size=40&is_ip6=false queries the static route list.
+        - Query values are page, size, and is_ip6; GET requests send no JSON body.
         - is_ip6=false queries IPv4 static routes; is_ip6=true queries IPv6 static routes.
   fw_config_ospfv2_global:
     atom_ref: atoms/fw/fw_config_ospfv2_global.yaml
@@ -3526,7 +3522,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.
+        - 'GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.'
         - GET requests send no JSON body.
         - Each val entry carries name, desc, ippools and refcnt fields.
   fw_config_ip6pool_group:
@@ -3659,7 +3655,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.
+        - 'GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.'
         - GET requests send no JSON body.
         - Each val entry carries name, desc, ip6pools and refcnt fields.
   fw_config_macpool:
@@ -5275,3 +5271,523 @@ operations:
         - Requires a default route, public access rights for the management IP, and a configured system DNS server.
         - Session output is captured into diag_snapshot_ref and never written to the repo.
         - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_verify_ues_access:
+    atom_ref: atoms/fw/fw_verify_ues_access.yaml
+    intent: Build a UES access-config query request.
+    request:
+      method: GET
+      path: /api/v1/uesaccess
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ues-access-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+        - Response carries uesswitch, uesip, port, securitykey, and thirdpartycode.
+        - securitykey is sensitive; result refs must mask or omit the stored key value.
+  fw_check_ues_connection:
+    atom_ref: atoms/fw/fw_check_ues_connection.yaml
+    intent: Build a UES connectivity test request.
+    request:
+      method: POST
+      path: /api/v1/uesaccess/state
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: ues
+        val:
+          uesip: "{{ params.uesip }}"
+          port: "{{ params.port }}"
+          securitykey: "{{ params.securitykey }}"
+          thirdpartycode: "{{ params.thirdpartycode }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ues-connection-test-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Triggered by clicking Test Connection on the UES access page.
+        - The test does not mutate the saved UES access configuration.
+        - Failure response shape (unreachable UES) is not recorded; needs device confirmation.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_ues_access:
+    atom_ref: atoms/fw/fw_config_ues_access.yaml
+    intent: Build a UES access-config save request.
+    request:
+      method: PUT
+      path: /api/v1/uesaccess
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: uesaccess
+        val:
+          uesswitch: "{{ params.uesswitch }}"
+          uesip: "{{ params.uesip }}"
+          port: "{{ params.port }}"
+          securitykey: "{{ params.securitykey }}"
+          thirdpartycode: "{{ params.thirdpartycode }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ues-access-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT replaces the whole access config; unset fields are not merged.
+        - securitykey may be empty; writes respond {"msg":"success"}.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ues_global:
+    atom_ref: atoms/fw/fw_verify_ues_global.yaml
+    intent: Build a UES global-config query request.
+    request:
+      method: GET
+      path: /api/v1/uesglobal
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ues-global-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body.
+        - Response carries blackadd, blocktime, hashadd, httpdstport, httpsdstport, uesurl, notipstate, and open_service.
+  fw_config_ues_global:
+    atom_ref: atoms/fw/fw_config_ues_global.yaml
+    intent: Build a UES global-config save request.
+    request:
+      method: PUT
+      path: /api/v1/uesglobal
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: uesglobal
+        val:
+          httpdstport: "{{ params.httpdstport }}"
+          httpsdstport: "{{ params.httpsdstport }}"
+          blackadd: "{{ params.blackadd }}"
+          blocktime: "{{ params.blocktime }}"
+          hashadd: "{{ params.hashadd }}"
+          uesurl: "{{ params.uesurl }}"
+          notipstate: "{{ params.notipstate }}"
+          open_service: "{{ params.open_service }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ues-global-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT replaces the whole global config; uesurl must be echoed from the current GET /uesglobal value.
+        - httpdstport/httpsdstport are integer lists; open_service is a string list (e.g. DNS, DHCP).
+        - Writes respond {"msg":"success"}.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_ues_ip_policy:
+    atom_ref: atoms/fw/fw_config_ues_ip_policy.yaml
+    intent: Build a UES IP promotion-policy create request.
+    request:
+      method: POST
+      path: /api/v1/uesippolicy
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: 0
+        val:
+          name: "{{ params.name }}"
+          enable: "{{ params.enable }}"
+          action: "{{ params.action }}"
+          log: "{{ params.log }}"
+          cycletime: "{{ params.cycletime }}"
+          desc: "{{ params.desc }}"
+          srcip: "{{ params.srcip }}"
+          srcipisgroup: "{{ params.srcipisgroup }}"
+          dstip: "{{ params.dstip }}"
+          dstipisgroup: "{{ params.dstipisgroup }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ues-ip-policy-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "id: 0 marks a create; the response is only {\"msg\":\"success\"}."
+        - The new policy id is resolved by querying the list and matching name.
+        - srcip/dstip are address object names unless the matching isgroup flag is true; "any" matches any address.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_ues_ip_policy:
+    atom_ref: atoms/fw/fw_update_ues_ip_policy.yaml
+    intent: Build a UES IP promotion-policy update request.
+    request:
+      method: PUT
+      path: /api/v1/uesippolicy
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          name: "{{ params.name }}"
+          enable: "{{ params.enable }}"
+          action: "{{ params.action }}"
+          log: "{{ params.log }}"
+          cycletime: "{{ params.cycletime }}"
+          desc: "{{ params.desc }}"
+          srcip: "{{ params.srcip }}"
+          srcipisgroup: "{{ params.srcipisgroup }}"
+          dstip: "{{ params.dstip }}"
+          dstipisgroup: "{{ params.dstipisgroup }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ues-ip-policy-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT updates an existing policy; the top-level id selects the policy.
+        - Partial val objects are accepted (recorded edit carried no val.id); val.id is optional.
+        - Enable/disable and field edits share this endpoint.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_ues_ip_policy:
+    atom_ref: atoms/fw/fw_delete_ues_ip_policy.yaml
+    intent: Build a UES IP promotion-policy delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/uesippolicy
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ues-ip-policy-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value (?id=<policy-id>) and sends no JSON body.
+        - Writes respond {"msg":"success"}.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ues_ip_policy:
+    atom_ref: atoms/fw/fw_verify_ues_ip_policy.yaml
+    intent: Build a UES IP promotion-policy list query request.
+    request:
+      method: GET
+      path: /api/v1/uesippolicy
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ues-ip-policy-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page and size; GET requests send no JSON body.
+        - Response is {count, vals}; each val carries hitcount, pri, id, name, enable, action, log, cycletime, desc, srcip, srcipisgroup, dstip, dstipisgroup.
+        - hitcount is a string-typed field.
+  fw_verify_ues_ip_policy_order:
+    atom_ref: atoms/fw/fw_verify_ues_ip_policy_order.yaml
+    intent: Build a UES IP promotion-policy order query request.
+    request:
+      method: GET
+      path: /api/v1/uesippolicyorder
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ues-ip-policy-order-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query values are page, size, and config_source; GET requests send no JSON body.
+        - Response is {count, page, size, vals}; vals is the policy id array in current priority order.
+  fw_update_ues_ip_policy_priority:
+    atom_ref: atoms/fw/fw_update_ues_ip_policy_priority.yaml
+    intent: Build a UES IP promotion-policy priority move request.
+    request:
+      method: POST
+      path: /api/v1/uesippolicyorder
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          targetsite: "{{ params.targetsite }}"
+          moveid: "{{ params.moveid }}"
+          targetid: "{{ params.targetid }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ues-ip-policy-order-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Recorded payload carries only targetsite and moveid ({"val":{"targetsite":"first","moveid":1}}).
+        - targetid is not recorded; before/after/last targetsite values need device confirmation.
+        - Writes respond {"msg":"success"}.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+
+  fw_config_security_zone:
+    atom_ref: atoms/fw/fw_config_security_zone.yaml
+    intent: Build a security-zone create request.
+    request:
+      method: POST
+      path: /api/v1/sfarea
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          interfaces: "{{ params.interfaces }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <security-zone-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST creates a security zone; name is 1-31 chars and must not start with IDMC-.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_security_zone:
+    atom_ref: atoms/fw/fw_update_security_zone.yaml
+    intent: Build a security-zone update request by name.
+    request:
+      method: PUT
+      path: /api/v1/sfarea
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.name }}"
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          interfaces: "{{ params.interfaces }}"
+          refcnt: "{{ params.refcnt }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <security-zone-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT updates the zone identified by name; refcnt is echoed from the current query.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_security_zone:
+    atom_ref: atoms/fw/fw_delete_security_zone.yaml
+    intent: Build a security-zone delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/sfarea
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <security-zone-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses name as the id query value (?id=<zone-name>) and sends no JSON body.
+        - The zone must have refcnt equal to 0 before deletion.
+        - Live endpoint, session material, and credentials must come from runner input.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_security_zone:
+    atom_ref: atoms/fw/fw_verify_security_zone.yaml
+    intent: Build a security-zone query request.
+    request:
+      method: GET
+      path: /api/v1/sfarea
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <security-zone-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET requests send no JSON body; returns all zones with name, desc, interfaces, and refcnt.
+  fw_config_policy_match_mode:
+    atom_ref: atoms/fw/fw_config_policy_match_mode.yaml
+    intent: Switch the IPv4 policy match relation (set policy-match-mode and|or) on the Dbapp interactive CLI.
+    transport: cli
+    shell:
+      command_template: "set policy-match-mode {{mode}}"
+      success_pattern: "配置成功|当前已经处于(OR|AND)模式"
+      prompt_timeout_ms: 30000
+      privilege_level: admin
+      interactive: true
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Requires a PTY interactive session (paramiko invoke_shell); exec_command cannot run Dbapp CLI commands.
+        - Idempotent: re-setting the current mode outputs 当前已经处于X模式 and counts as success.
+  fw_verify_policy_match_mode:
+    atom_ref: atoms/fw/fw_verify_policy_match_mode.yaml
+    intent: Verify the policy match mode via an idempotent set probe.
+    transport: cli
+    shell:
+      command_template: "set policy-match-mode {{expected_mode}}"
+      success_pattern: "当前已经处于(OR|AND)模式"
+      prompt_timeout_ms: 30000
+      privilege_level: admin
+      interactive: true
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - No read-only mode query exists on the device; the probe is idempotent and switches the mode only when it differs (then fails STATE_MISMATCH).
+  fw_config_clear_policy_any:
+    atom_ref: atoms/fw/fw_config_clear_policy_any.yaml
+    intent: Clear useless any conditions (clear policy-any ip4 all|<id>) with auto-confirmation.
+    transport: cli
+    shell:
+      command_template: "clear policy-any ip4 {{scope}}"
+      success_pattern: "\\S+"
+      prompt_timeout_ms: 30000
+      privilege_level: admin
+      interactive: true
+      confirm_prompt: "确认继续? (y/N):"
+      confirm_input: "y"
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The command asks 确认继续? (y/N); the runner auto-replies y.
+        - In AND match mode the device rejects the command: 错误，当前策略匹配模式为'AND'，不支持使用当前命令.
+  fw_verify_session:
+    atom_ref: atoms/fw/fw_verify_session.yaml
+    intent: Query NGFW session table entries (IPv4 or IPv6) with optional filter conditions.
+    request:
+      method: GET
+      path: /api/v1/monitor/sessioninfo
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <session-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET sends no JSON body; session entries expose rxzone (ingress zone) and txzone (egress zone) fields used for security-zone assertions.
+  fw_verify_security_zone_vpp:
+    atom_ref: atoms/fw/fw_verify_security_zone_vpp.yaml
+    intent: Verify NGFW security-zone data-plane (VPP) state via SSH vppctl.
+    transport: ssh
+    shell:
+      command_template: "vppctl show zone{{#if zone_name}} name {{zone_name}}{{/if}}"
+      success_pattern: ".*"
+      prompt_timeout_ms: 30000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Requires SSH access to the NGFW device; parses vppctl show zone output for zone/interface consistency.

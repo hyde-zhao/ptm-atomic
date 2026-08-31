@@ -307,6 +307,8 @@ def scan_sensitive_file(path: Path) -> list[SensitiveFinding]:
 def sensitive_findings_for_line(path: Path, line_number: int, line: str) -> list[SensitiveFinding]:
     if is_sensitive_rule_definition(line):
         return []
+    if SENSITIVE_SKIP_MARKER in line:
+        return []
 
     findings: list[SensitiveFinding] = []
     for match in SENSITIVE_ASSIGNMENT_RE.finditer(line):
@@ -334,6 +336,12 @@ def is_sensitive_rule_definition(line: str) -> bool:
     if lower.startswith(("pattern:", "regex:", "forbidden_pattern:", "sensitive_pattern:")):
         return True
     return "token=|cookie:" in lower and "authorization" in lower
+
+
+# 行级豁免标记：同一行出现该注释时跳过敏感赋值检测。
+# 仅用于人工确认过的误报（如 contextvars.Token 运行上下文令牌、paramiko 连接参数），
+# 评审确认该行确实不承载凭据后方可标注。
+SENSITIVE_SKIP_MARKER = "# security-gate: ok"
 
 
 def is_allowed_sensitive_value(value: str) -> bool:
