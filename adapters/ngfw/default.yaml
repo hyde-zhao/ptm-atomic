@@ -5707,3 +5707,87 @@ operations:
       runner_required: true
       notes:
         - GET requests send no JSON body; returns all zones with name, desc, interfaces, and refcnt.
+  fw_config_policy_match_mode:
+    atom_ref: atoms/fw/fw_config_policy_match_mode.yaml
+    intent: Switch the IPv4 policy match relation (set policy-match-mode and|or) on the Dbapp interactive CLI.
+    transport: cli
+    shell:
+      command_template: "set policy-match-mode {{mode}}"
+      success_pattern: "配置成功|当前已经处于(OR|AND)模式"
+      prompt_timeout_ms: 30000
+      privilege_level: admin
+      interactive: true
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Requires a PTY interactive session (paramiko invoke_shell); exec_command cannot run Dbapp CLI commands.
+        - Idempotent: re-setting the current mode outputs 当前已经处于X模式 and counts as success.
+  fw_verify_policy_match_mode:
+    atom_ref: atoms/fw/fw_verify_policy_match_mode.yaml
+    intent: Verify the policy match mode via an idempotent set probe.
+    transport: cli
+    shell:
+      command_template: "set policy-match-mode {{expected_mode}}"
+      success_pattern: "当前已经处于(OR|AND)模式"
+      prompt_timeout_ms: 30000
+      privilege_level: admin
+      interactive: true
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - No read-only mode query exists on the device; the probe is idempotent and switches the mode only when it differs (then fails STATE_MISMATCH).
+  fw_config_clear_policy_any:
+    atom_ref: atoms/fw/fw_config_clear_policy_any.yaml
+    intent: Clear useless any conditions (clear policy-any ip4 all|<id>) with auto-confirmation.
+    transport: cli
+    shell:
+      command_template: "clear policy-any ip4 {{scope}}"
+      success_pattern: "\\S+"
+      prompt_timeout_ms: 30000
+      privilege_level: admin
+      interactive: true
+      confirm_prompt: "确认继续? (y/N):"
+      confirm_input: "y"
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The command asks 确认继续? (y/N); the runner auto-replies y.
+        - In AND match mode the device rejects the command: 错误，当前策略匹配模式为'AND'，不支持使用当前命令.
+  fw_verify_session:
+    atom_ref: atoms/fw/fw_verify_session.yaml
+    intent: Query NGFW session table entries (IPv4 or IPv6) with optional filter conditions.
+    request:
+      method: GET
+      path: /api/v1/monitor/sessioninfo
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <session-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET sends no JSON body; session entries expose rxzone (ingress zone) and txzone (egress zone) fields used for security-zone assertions.
+  fw_verify_security_zone_vpp:
+    atom_ref: atoms/fw/fw_verify_security_zone_vpp.yaml
+    intent: Verify NGFW security-zone data-plane (VPP) state via SSH vppctl.
+    transport: ssh
+    shell:
+      command_template: "vppctl show zone{{#if zone_name}} name {{zone_name}}{{/if}}"
+      success_pattern: ".*"
+      prompt_timeout_ms: 30000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Requires SSH access to the NGFW device; parses vppctl show zone output for zone/interface consistency.
