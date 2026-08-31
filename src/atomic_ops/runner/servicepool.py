@@ -273,6 +273,28 @@ def execute_servicepool(
     }
 
 
+def _apply_filter_query(
+    query: dict[str, Any],
+    preset_query: dict[str, Any] | None,
+    *,
+    skip_keywords: bool,
+) -> None:
+    """Translate CLI search fields to device query parameters.
+
+    The device honours ``keywords`` (by name) but accepts-and-ignores
+    src_port/dst_port/protocol on every service type (probe-confirmed). The
+    port/protocol parameters are still mapped and sent so the search surface
+    is exercised end to end; custom/group pass skip_keywords=True because
+    they add the keyword directly from the ``keywords`` argument.
+    """
+    for cli_field, value in (preset_query or {}).items():
+        if skip_keywords and cli_field == "keywords":
+            continue
+        device_field = PRESET_QUERY_FIELD_MAP.get(cli_field)
+        if device_field and value not in (None, ""):
+            query[device_field] = value
+
+
 def _request_url(
     base_url: str,
     op_id: str,
@@ -292,15 +314,14 @@ def _request_url(
             query["type"] = "CUSTOM"
             if keywords:
                 query["keywords"] = keywords
+            _apply_filter_query(query, preset_query, skip_keywords=True)
         elif op_id == "fw_verify_servicepool_preset":
             query["type"] = "PRESET"
-            for cli_field, value in (preset_query or {}).items():
-                device_field = PRESET_QUERY_FIELD_MAP.get(cli_field)
-                if device_field and value not in (None, ""):
-                    query[device_field] = value
+            _apply_filter_query(query, preset_query, skip_keywords=False)
         elif op_id == "fw_verify_servicepool_group":
             if keywords:
                 query["keywords"] = keywords
+            _apply_filter_query(query, preset_query, skip_keywords=True)
         url = f"{url}?{urlencode(query)}"
     elif op_id in DELETE_OPS:
         entry_id = str((payload or {}).get("id") or "")

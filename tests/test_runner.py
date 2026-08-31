@@ -3293,6 +3293,50 @@ class ServicePoolPayloadTests(unittest.TestCase):
         self.assertNotIn("sport=", url)
         self.assertNotIn("bogus_field", url)
 
+    def test_verify_custom_dry_run_maps_port_protocol_params(self) -> None:
+        # 自定义服务搜索：keywords 直接进 URL，端口/协议经映射进 URL（设备忽略但接受）
+        dry = build_servicepool_dry_run(
+            op_id="fw_verify_servicepool",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            keywords="my-svc",
+            preset_query={"keywords": "my-svc", "src_port": "65535", "dst_port": "65535", "protocol": "6"},
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertIn("type=CUSTOM", url)
+        self.assertIn("keywords=my-svc", url)
+        self.assertIn("sport=65535", url)
+        self.assertIn("dport=65535", url)
+        self.assertIn("protocol=6", url)
+        self.assertEqual(url.count("keywords"), 1)
+
+    def test_verify_group_dry_run_maps_port_protocol_params(self) -> None:
+        # 服务组搜索：keywords 直接进 URL，端口/协议参数经映射进 URL
+        dry = build_servicepool_dry_run(
+            op_id="fw_verify_servicepool_group",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            keywords="",
+            preset_query={"src_port": "80", "protocol": "6"},
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertIn("/api/v1/servicepool/group?", url)
+        self.assertIn("sport=80", url)
+        self.assertIn("protocol=6", url)
+        self.assertNotIn("keywords", url)
+
 
 class LoadJsonPayloadTests(unittest.TestCase):
     def test_returns_none_when_both_empty(self) -> None:
@@ -3379,6 +3423,37 @@ class NewModuleCliDryRunTests(unittest.TestCase):
         url = payload["data"]["request"]["url"]
         self.assertIn("type=PRESET", url)
         self.assertNotIn("keywords", url)
+
+    def test_cli_service_pool_verify_custom_search_params(self) -> None:
+        # 自定义服务搜索：--src-port/--dst-port/--protocol 透传到设备查询参数
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "service-pool", "verify", "--src-port", "65535", "--dst-port", "65535",
+                 "--protocol", "6"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("type=CUSTOM", url)
+        self.assertIn("sport=65535", url)
+        self.assertIn("dport=65535", url)
+        self.assertIn("protocol=6", url)
+
+    def test_cli_service_pool_group_verify_search_params(self) -> None:
+        # 服务组搜索：--protocol 透传到 /api/v1/servicepool/group
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "service-pool", "group-verify", "--protocol", "6"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/servicepool/group?", url)
+        self.assertIn("protocol=6", url)
 
     def test_cli_service_pool_group_delete_uses_group_resource(self) -> None:
         stdout = io.StringIO()

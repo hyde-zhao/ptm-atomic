@@ -155,6 +155,9 @@ def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="Paginated query page size.")
     parser.add_argument("--keywords", default="", help="Keyword filter for the query.")
+    parser.add_argument("--src-port", default="", help="Source port filter.")
+    parser.add_argument("--dst-port", default="", help="Destination port filter.")
+    parser.add_argument("--protocol", default="", help="Protocol filter (e.g. 6 for TCP).")
 
 
 def _add_verify_preset_args(parser: argparse.ArgumentParser) -> None:
@@ -255,7 +258,16 @@ def _run_servicepool(args: argparse.Namespace, op_id: str) -> int:
         size = int(getattr(args, "size", 40))
         keywords = getattr(args, "keywords", "") or ""
         preset_query: dict[str, Any] | None = None
-        if op_id == "fw_verify_servicepool_preset":
+        # All three verify ops accept the same search surface: keywords (the
+        # device's effective name filter) plus src_port/dst_port/protocol,
+        # which the device accepts but ignores (probe-confirmed for every
+        # service type). Collect them for custom/group too so their search
+        # cases can exercise the full parameter set like verify-preset.
+        if op_id in (
+            "fw_verify_servicepool",
+            "fw_verify_servicepool_preset",
+            "fw_verify_servicepool_group",
+        ):
             preset_query = {}
             for field in ("keywords", "src_port", "dst_port", "protocol"):
                 value = getattr(args, field, "") or ""
