@@ -18,6 +18,7 @@ import os
 import re
 import shlex
 import socket
+import time
 import warnings
 import logging
 from dataclasses import dataclass
@@ -39,6 +40,30 @@ BVI_CONFIG_COMMAND_TEMPLATE = (
 BVI_CONFIG_SUCCESS_PATTERN = r"\S+"
 BRIDGE_DOMAIN_COMMAND = "/opt/dbappsecurity/bin/vppctl show bridge-domain"
 BRIDGE_DOMAIN_SUCCESS_PATTERN = r"\S+"
+BRIDGE_DOMAIN_MAC_AGE_SET_TEMPLATE = (
+    "/opt/dbappsecurity/bin/vppctl set bridge-domain mac-age {{bridge_domain_id}} {{age_minutes}}"
+)
+BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE = (
+    "/opt/dbappsecurity/bin/vppctl show bridge-domain {{bridge_domain_id}}"
+)
+# show 表头锚点；vppctl set 成功时 stdout 为空、参数错误打到 stderr 且非零退出
+BRIDGE_DOMAIN_SHOW_SUCCESS_PATTERN = r"BD-ID"
+# show 表头列 → 规范化字段，按表头出现顺序（仿 L2FIB_COLUMNS）
+BRIDGE_DOMAIN_COLUMNS = (
+    ("bd_id", "BD-ID"),
+    ("index", "Index"),
+    ("bsn", "BSN"),
+    ("age_minutes", "Age(min)"),
+    ("learning", "Learning"),
+    ("u_forward", "U-Forwrd"),
+    ("uu_flood", "UU-Flood"),
+    ("flooding", "Flooding"),
+    ("arp_term", "ARP-Term"),
+    ("arp_ufwd", "arp-ufwd"),
+    ("bvi_intf", "BVI-Intf"),
+    ("ha_f", "HA-F"),
+)
+_MAC_AGE_SET_FAILURE_RE = re.compile(r"(?i)expecting|error|invalid|unknown")
 
 SSH_DEFAULT_PORT = 22
 TELNET_DEFAULT_PORT = 23
@@ -83,7 +108,34 @@ def evaluate_success(result: ShellCommandResult, success_pattern: str) -> bool:
     return bool(pattern.search(result.stdout))
 
 
+def _load_dotenv() -> None:
+    """Load KEY=VALUE pairs from a .env file in the working directory.
+
+    Mirrors the ptm-te-manaul topology/.env convention so credentials shared
+    with web login (FW_WEB_PASSWORD / FW_SSH_PASSWORD / FW_TELNET_PASSWORD)
+    are available without an explicit export. Existing environment variables
+    take precedence; the file is ignored when absent.
+    """
+    env_path = Path.cwd() / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _read_credential_env(env_name: str) -> str:
+    _load_dotenv()
     value = os.environ.get(env_name)
     if value is None or not value:
         raise RunnerError(
@@ -252,7 +304,6 @@ def _run_telnet_command(
         tn.read_until(b"assword:", timeout=timeout)
         tn.write(credential.encode("utf-8") + b"\n")
 
-        import time
         time.sleep(0.5)
         tn.read_very_eager()
 
@@ -344,24 +395,26 @@ def _execute_shell_op(
     port: int | None,
     credential_env: str,
     timeout: float,
+    username: str | None = None,
 ) -> dict[str, Any]:
     """Shared shell executor for read-only atoms over SSH or Telnet.
 
     Selects the transport primitive based on ``transport`` (ssh/telnet),
     asserts the success pattern against stdout, and returns the raw output
-    under ``data[result_key]``.
+    under ``data[result_key]``. ``username`` overrides the session-file
+    username (e.g. root for vppctl); None falls back to the session file.
     """
     session_payload = read_session_file(session_file)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
-    username = _username_from_session(session_payload)
+    effective_username = username or _username_from_session(session_payload)
     credential = _read_credential_env(credential_env)
 
     result = _run_shell_command(
         transport=transport,
         host=target_host,
         port=target_port,
-        username=username,
+        username=effective_username,
         credential=credential,
         command=command,
         timeout=timeout,
@@ -391,7 +444,7 @@ def _execute_shell_op(
             "command": command,
             "host": target_host,
             "port": target_port,
-            "username": username,
+            "username": effective_username,
         },
         "response": {
             "exit_code": result.exit_code,
@@ -626,3 +679,883 @@ def execute_check_bridge_domain(
         credential_env=credential_env,
         timeout=timeout,
     )
+
+
+# ── tgfw-cli interactive session (fw_verify_l2fib) ───────
+
+
+TGFW_CLI_PROMPT = "DAS-TGFW>"
+L2FIB_COMMAND = "show l2fib all"
+L2FIB_SUCCESS_PATTERN = r"(L2FIB total/learned entries|no l2fib entries)"
+
+# L2FIB 表头列名到结构化字段名的映射，按表头出现顺序排列。
+L2FIB_COLUMNS = (
+    ("mac_address", "Mac-Address"),
+    ("bd_idx", "BD-Idx"),
+    ("if_idx", "If-Idx"),
+    ("bsn_isn", "BSN-ISN"),
+    ("age", "Age(min)"),
+    ("static", "static"),
+    ("filter", "filter"),
+    ("bvi", "bvi"),
+    ("sync", "SYNC"),
+    ("interface_name", "Interface-Name"),
+)
+
+
+def _recv_until(
+    channel: Any,
+    needle: bytes,
+    timeout: float,
+    *,
+    host: str,
+    port: int,
+) -> bytes:
+    """Read from the channel until needle appears; return everything read so far.
+
+    Raises RUNNER_SHELL_COMMAND_TIMEOUT on deadline exhaustion and
+    RUNNER_SHELL_CONNECT_FAILED when the remote side closes the session early.
+    """
+    deadline = time.monotonic() + timeout
+    data = b""
+    while needle not in data:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RunnerError(
+                "RUNNER_SHELL_COMMAND_TIMEOUT",
+                "Interactive CLI session did not produce the expected prompt within the timeout.",
+                {
+                    "host": host,
+                    "port": port,
+                    "timeout_s": timeout,
+                    "collected_tail": repr(data[-200:]),
+                },
+                retryable=True,
+            )
+        try:
+            chunk = channel.recv(4096)
+        except socket.timeout as exc:
+            raise RunnerError(
+                "RUNNER_SHELL_COMMAND_TIMEOUT",
+                "Interactive CLI session did not produce the expected prompt within the timeout.",
+                {
+                    "host": host,
+                    "port": port,
+                    "timeout_s": timeout,
+                    "collected_tail": repr(data[-200:]),
+                },
+                retryable=True,
+            ) from exc
+        if not chunk:
+            raise RunnerError(
+                "RUNNER_SHELL_CONNECT_FAILED",
+                "Interactive CLI session closed before the expected prompt was seen.",
+                {"host": host, "port": port},
+                retryable=False,
+            )
+        data += chunk
+    return data
+
+
+_GRAY_SEGMENT_RE = re.compile(r"\x1b\[90m[^\x1b]*\x1b\[0m")
+
+
+def _cli_output_is_echo(data: bytes, command: str, prompt: str) -> bool:
+    """Return True when every non-empty line of the captured block is a command echo frame.
+
+    Interactive shells echo ``DAS-TGFW> show l2fib all`` back before producing
+    output; the prompt inside the echo line would otherwise satisfy
+    _recv_until early and truncate the real table output. The check is
+    all-lines: the block must not contain any real output line (for example
+    ``no l2fib entries``), otherwise the trailing prompt frame after the
+    command output would keep the caller waiting for data that never arrives.
+
+    The device re-renders the input line on every keystroke; each frame shows
+    the typed characters in the default color and the completion candidate in
+    gray (``\\x1b[90m``). Gray segments are dropped so that only the typed
+    prefix remains, which must be a prefix of the command being echoed.
+    """
+    lines: list[str] = []
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        line = _GRAY_SEGMENT_RE.sub("", line)
+        line = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", line).strip()
+        if line:
+            lines.append(line)
+    if not lines:
+        return False
+    for line in lines:
+        if not line.startswith(prompt):
+            return False
+        tail = line[len(prompt) :].lstrip()
+        if not tail or not command.startswith(tail):
+            return False
+    return True
+
+
+def _run_ssh_cli_session(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    credential: str,
+    command: str,
+    prompt: str,
+    timeout: float,
+) -> ShellCommandResult:
+    """Run one command inside an interactive tgfw-cli session over SSH.
+
+    The device lands directly in the tgfw-cli prompt after login (no extra
+    entry command). A PTY with a wide terminal is requested so that aligned
+    tables are returned without line wrapping.
+    """
+    try:
+        import paramiko  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RunnerError(
+            "RUNNER_SHELL_CONNECT_FAILED",
+            "paramiko is required for SSH transport but is not installed.",
+            {"host": host, "port": port, "missing_dependency": "paramiko"},
+            retryable=False,
+        ) from exc
+
+    logging.getLogger("paramiko").setLevel(logging.CRITICAL)
+
+    # 用 Transport 层直接认证：auth_password 优先，失败后回退 keyboard-interactive，
+    # 兼容只提供 keyboard-interactive 的设备（SSHClient.connect 不暴露该回退）
+    def _interactive_handler(title: str, instructions: str, prompt_list: list[Any]) -> list[str]:
+        return [credential] * len(prompt_list)
+
+    sock: socket.socket | None = None
+    transport: Any = None
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        transport = paramiko.Transport(sock)
+        transport.banner_timeout = timeout
+        transport.auth_timeout = timeout
+        transport.connect()
+
+        try:
+            if credential:
+                transport.auth_password(username, credential)
+            else:
+                transport.auth_interactive(username, _interactive_handler)
+        except paramiko.AuthenticationException:
+            try:
+                transport.auth_interactive(username, _interactive_handler)
+            except paramiko.AuthenticationException as exc:
+                raise RunnerError(
+                    "RUNNER_SHELL_CONNECT_FAILED",
+                    f"SSH authentication failed for user {username!r}.",
+                    {"host": host, "port": port, "username": username},
+                    retryable=False,
+                ) from exc
+
+        channel = transport.open_session()
+        channel.get_pty(width=200, height=50)
+        channel.invoke_shell()
+        channel.settimeout(timeout)
+    except RunnerError:
+        raise
+    except (paramiko.SSHException, socket.error, OSError) as exc:
+        raise RunnerError(
+            "RUNNER_SHELL_CONNECT_FAILED",
+            f"SSH connection to {host}:{port} failed.",
+            {"host": host, "port": port, "error": str(exc)},
+            retryable=True,
+        ) from exc
+
+    try:
+        # SSH 认证已在 transport 层完成（auth_password / keyboard-interactive），
+        # invoke_shell 直接进入设备 shell，登录后直接进入 tgfw-cli，等待 CLI 提示符即可
+        _recv_until(channel, prompt.encode("utf-8"), timeout, host=host, port=port)
+
+        # 发送查询命令，收集输出直到提示符再次出现；
+        # 该 CLI 以 \r 作为行提交符（\n 不会被提交执行）；
+        # 跳过命令回显帧（逐字符补全重绘，含 prompt 的回显会使 _recv_until 提前返回）
+        channel.send(command.encode("utf-8") + b"\r")
+        raw_output = _recv_until(channel, prompt.encode("utf-8"), timeout, host=host, port=port)
+        while _cli_output_is_echo(raw_output, command, prompt):
+            raw_output += _recv_until(channel, prompt.encode("utf-8"), timeout, host=host, port=port)
+
+        # 退出 tgfw-cli：等待设备关闭会话（EOF）后再断开，避免设备侧残留会话占满并发配额
+        channel.send(b"exit\r")
+        channel.settimeout(5.0)
+        try:
+            while channel.recv(4096):
+                pass
+        except (socket.timeout, EOFError):
+            pass
+        channel.settimeout(timeout)
+    except EOFError as exc:
+        raise RunnerError(
+            "RUNNER_SHELL_CONNECT_FAILED",
+            "SSH CLI session closed unexpectedly during command execution.",
+            {"host": host, "port": port},
+            retryable=False,
+        ) from exc
+    except socket.timeout as exc:
+        raise RunnerError(
+            "RUNNER_SHELL_COMMAND_TIMEOUT",
+            "SSH CLI session did not complete within the timeout.",
+            {"host": host, "port": port, "timeout_s": timeout, "command": command},
+            retryable=True,
+        ) from exc
+    finally:
+        if transport is not None:
+            transport.close()
+        if sock is not None:
+            sock.close()
+
+    stdout = _extract_cli_command_output(raw_output, command, prompt)
+    return ShellCommandResult(stdout=stdout, stderr="", exit_code=0)
+
+
+def _run_telnet_cli_session(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    credential: str,
+    command: str,
+    prompt: str,
+    timeout: float,
+) -> ShellCommandResult:
+    """Run one command inside an interactive tgfw-cli session over Telnet."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            import telnetlib
+    except ImportError as exc:
+        raise RunnerError(
+            "RUNNER_SHELL_CONNECT_FAILED",
+            "telnetlib is not available in this Python version (removed in 3.13+).",
+            {"host": host, "port": port, "python_requirement": ">=3.11,<3.13"},
+            retryable=False,
+        ) from exc
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            tn = telnetlib.Telnet(host, port, timeout=timeout)
+    except (OSError, ConnectionRefusedError, socket.timeout) as exc:
+        raise RunnerError(
+            "RUNNER_SHELL_CONNECT_FAILED",
+            f"Telnet connection to {host}:{port} failed.",
+            {"host": host, "port": port, "error": str(exc)},
+            retryable=True,
+        ) from exc
+
+    try:
+        # 累计各阶段返回内容，EOF 时用于诊断登录失败原因
+        session_dump = b""
+        session_dump += tn.read_until(b"ogin:", timeout=timeout)
+        tn.write(username.encode("utf-8") + b"\r")
+        session_dump += tn.read_until(b"assword:", timeout=timeout)
+        tn.write(credential.encode("utf-8") + b"\r")
+
+        # 登录后直接进入 tgfw-cli，等待 CLI 提示符
+        session_dump += tn.read_until(prompt.encode("utf-8"), timeout=timeout)
+
+        tn.write(command.encode("utf-8") + b"\r")
+        raw_output = tn.read_until(prompt.encode("utf-8"), timeout=timeout)
+        while _cli_output_is_echo(raw_output, command, prompt):
+            raw_output += tn.read_until(prompt.encode("utf-8"), timeout=timeout)
+
+        tn.write(b"exit\r")
+        time.sleep(1.0)
+    except EOFError as exc:
+        tail = session_dump.decode("utf-8", errors="replace")[-300:]
+        raise RunnerError(
+            "RUNNER_SHELL_CONNECT_FAILED",
+            "Telnet CLI session closed unexpectedly during command execution.",
+            {"host": host, "port": port, "session_tail": tail},
+            retryable=False,
+        ) from exc
+    except socket.timeout as exc:
+        raise RunnerError(
+            "RUNNER_SHELL_COMMAND_TIMEOUT",
+            "Telnet CLI session did not complete within the timeout.",
+            {"host": host, "port": port, "timeout_s": timeout, "command": command},
+            retryable=True,
+        ) from exc
+    finally:
+        tn.close()
+
+    stdout = _extract_cli_command_output(raw_output, command, prompt)
+    return ShellCommandResult(stdout=stdout, stderr="", exit_code=0)
+
+
+def _extract_cli_command_output(raw_output: bytes, command: str, prompt: str) -> str:
+    """Strip ANSI escapes, input redraw frames, and the trailing prompt from CLI output.
+
+    The tgfw-cli re-renders the input line with ANSI control sequences on every
+    keystroke (each frame contains the prompt), so any line containing the prompt
+    is an input-area frame and is discarded; only the actual command output remains.
+    """
+    text = raw_output.decode("utf-8", errors="replace")
+    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)  # 剥离 ANSI 转义（颜色/清行/光标）
+    lines = text.splitlines()
+    stdout_lines: list[str] = []
+    for line in lines:
+        if prompt in line:
+            continue
+        stdout_lines.append(line)
+    return "\n".join(stdout_lines).strip()
+
+
+def _run_cli_session_command(
+    *,
+    transport: str,
+    host: str,
+    port: int,
+    username: str,
+    credential: str,
+    command: str,
+    prompt: str,
+    timeout: float,
+) -> ShellCommandResult:
+    """Route an interactive CLI session command to the transport executor."""
+    if transport == "ssh":
+        return _run_ssh_cli_session(
+            host=host, port=port, username=username, credential=credential,
+            command=command, prompt=prompt, timeout=timeout,
+        )
+    if transport == "telnet":
+        return _run_telnet_cli_session(
+            host=host, port=port, username=username, credential=credential,
+            command=command, prompt=prompt, timeout=timeout,
+        )
+    raise RunnerError(
+        "RUNNER_UNSUPPORTED_OP",
+        f"Unsupported shell transport: {transport!r}. Supported: ssh, telnet.",
+        {"transport": transport, "supported": ["ssh", "telnet"]},
+        retryable=False,
+    )
+
+
+def parse_l2fib_table(raw: str) -> dict[str, Any]:
+    """Parse the 'show l2fib all' table into a structured dictionary.
+
+    Data rows are first split on whitespace runs (every column is separated by
+    multiple spaces and no field contains an internal space). If a row does not
+    yield exactly the expected number of columns, it falls back to fixed-width
+    slicing anchored at the header line.
+    """
+    lines = raw.splitlines()
+    # 1. 定位表头行（含 Mac-Address 与 Interface-Name 的列标题行）
+    header_index = None
+    for i, line in enumerate(lines):
+        if "Mac-Address" in line and "Interface-Name" in line:
+            header_index = i
+            break
+    entries: list[dict[str, str]] = []
+    if header_index is not None:
+        header = lines[header_index]
+        # 表头各列起始位置，仅作为列宽兜底
+        starts: list[tuple[str, int]] = []
+        for field, label in L2FIB_COLUMNS:
+            starts.append((field, header.find(label)))
+        field_names = [field for field, _ in L2FIB_COLUMNS]
+        # 2. 数据行：表头之后直到摘要行
+        for line in lines[header_index + 1 :]:
+            if not line.strip() or "L2FIB total" in line:
+                break
+            parts = line.split()
+            if len(parts) == len(field_names):
+                row = dict(zip(field_names, parts))
+            else:
+                # 兜底：按表头列边界切分
+                row = {}
+                for j, (field, start) in enumerate(starts):
+                    if start < 0:
+                        row[field] = ""
+                        continue
+                    end = starts[j + 1][1] if j + 1 < len(starts) else len(line)
+                    row[field] = line[start:end].strip()
+            entries.append(row)
+    # 3. 摘要统计
+    total = learned = limit = 0
+    m = re.search(r"L2FIB total/learned entries:\s*(\d+)/(\d+)", raw)
+    if m:
+        total, learned = int(m.group(1)), int(m.group(2))
+    m = re.search(r"Learn limit:\s*(\d+)", raw)
+    if m:
+        limit = int(m.group(1))
+    return {
+        "l2fib_entries": entries,
+        "entry_count": len(entries),
+        "total_entries": total,
+        "learned_entries": learned,
+        "learn_limit": limit,
+    }
+
+
+# ── fw_verify_l2fib ───────────────────────────────────────
+
+
+def build_verify_l2fib_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    timeout: float,
+) -> dict[str, Any]:
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    username = _username_from_session(session_payload)
+    return {
+        "op_id": "fw_verify_l2fib",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": L2FIB_COMMAND,
+            "host": target_host,
+            "port": target_port,
+            "username": username,
+            "prompt": TGFW_CLI_PROMPT,
+            "success_pattern": L2FIB_SUCCESS_PATTERN,
+            "session_flow": [
+                "login as admin",
+                "wait for DAS-TGFW> prompt",
+                "send 'show l2fib all'",
+                "capture output until prompt returns",
+                "exit tgfw-cli",
+            ],
+        },
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_l2fib(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    credential_env: str,
+    timeout: float,
+) -> dict[str, Any]:
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    username = _username_from_session(session_payload)
+    credential = _read_credential_env(credential_env)
+
+    result = _run_cli_session_command(
+        transport=transport,
+        host=target_host,
+        port=target_port,
+        username=username,
+        credential=credential,
+        command=L2FIB_COMMAND,
+        prompt=TGFW_CLI_PROMPT,
+        timeout=timeout,
+    )
+
+    if not evaluate_success(result, L2FIB_SUCCESS_PATTERN):
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "L2FIB table output did not match the success pattern.",
+            {
+                "op_id": "fw_verify_l2fib",
+                "transport": transport,
+                "exit_code": result.exit_code,
+                "stdout_preview": repr(result.stdout[:2000]) if result.stdout else "",
+                "stderr_preview": (result.stderr[:2000] if result.stderr else ""),
+            },
+        )
+
+    parsed = parse_l2fib_table(result.stdout)
+    return {
+        "op_id": "fw_verify_l2fib",
+        "status": "success",
+        "transport": transport,
+        "data": {
+            "l2fib_raw": result.stdout,
+            "l2fib_entries": parsed["l2fib_entries"],
+            "entry_count": parsed["entry_count"],
+            "total_entries": parsed["total_entries"],
+            "learned_entries": parsed["learned_entries"],
+            "learn_limit": parsed["learn_limit"],
+        },
+        "request": {
+            "command": L2FIB_COMMAND,
+            "host": target_host,
+            "port": target_port,
+            "username": username,
+            "prompt": TGFW_CLI_PROMPT,
+        },
+        "response": {
+            "exit_code": result.exit_code,
+            "stdout_ref": "<l2fib-raw-ref>",
+            "stderr_ref": "<diag-snapshot-ref>",
+        },
+        "diag_snapshot_ref": "<diag-snapshot-ref>",
+    }
+
+
+# ── bridge-domain MAC ageing (fw_config/fw_verify_bridge_domain_mac_age) ──
+
+
+def parse_bridge_domain_table(raw: str) -> list[dict[str, str]]:
+    """Parse the 'vppctl show bridge-domain [id]' table into structured rows.
+
+    表头行定位后按各列起始位置做固定宽度切片（BVI-Intf/HA-F 等列间距不稳定，
+    不能按空白切分）；数据行判定：BD-ID 列切片为纯数字（跳过空行与 banner）。
+    """
+    lines = raw.splitlines()
+    header_index = None
+    for i, line in enumerate(lines):
+        if "BD-ID" in line and "Age(min)" in line:
+            header_index = i
+            break
+    entries: list[dict[str, str]] = []
+    if header_index is None:
+        return entries
+    header = lines[header_index]
+    starts: list[tuple[str, int]] = [
+        (field, header.find(label)) for field, label in BRIDGE_DOMAIN_COLUMNS
+    ]
+    for line in lines[header_index + 1 :]:
+        if not line.strip():
+            continue
+        first_start = starts[0][1]
+        second_start = starts[1][1]
+        first_cell = line[first_start:second_start].strip()
+        if not first_cell.isdigit():
+            continue
+        row: dict[str, str] = {}
+        for j, (field, start) in enumerate(starts):
+            if start < 0:
+                row[field] = ""
+                continue
+            end = starts[j + 1][1] if j + 1 < len(starts) else len(line)
+            row[field] = line[start:end].strip()
+        entries.append(row)
+    return entries
+
+
+def _validate_bridge_domain_id(value: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 4094:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "bridge_domain_id must be an integer in 1..4094.",
+            {"field": "bridge_domain_id", "value": value},
+            retryable=False,
+        )
+    return value
+
+
+def _validate_age_minutes(value: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "age_minutes must be a non-negative integer (0 disables ageing).",
+            {"field": "age_minutes", "value": value},
+            retryable=False,
+        )
+    return value
+
+
+def _show_output_valid(result: ShellCommandResult) -> bool:
+    """show 输出有效性判定：exit 0 或 -1 且 stdout 含表头。
+
+    设备偶发不返回 exec 通道的 exit status（``recv_exit_status`` 得 -1）但
+    命令实际已执行、stdout 已完整捕获；此时以输出内容为准。exit 非 0 或
+    stdout 无表头则视为无效。
+    """
+    if result.exit_code not in (0, -1):
+        return False
+    return bool(re.search(BRIDGE_DOMAIN_SHOW_SUCCESS_PATTERN, result.stdout))
+
+
+def build_verify_bridge_domain_mac_age_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str,
+    bridge_domain_id: int,
+    timeout: float,
+) -> dict[str, Any]:
+    _validate_bridge_domain_id(bridge_domain_id)
+    command = render_command(
+        BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE, {"bridge_domain_id": bridge_domain_id}
+    )
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or _username_from_session(session_payload)
+    return {
+        "op_id": "fw_verify_bridge_domain_mac_age",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+            "success_pattern": BRIDGE_DOMAIN_SHOW_SUCCESS_PATTERN,
+        },
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_bridge_domain_mac_age(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str,
+    credential_env: str,
+    bridge_domain_id: int,
+    timeout: float,
+) -> dict[str, Any]:
+    _validate_bridge_domain_id(bridge_domain_id)
+    command = render_command(
+        BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE, {"bridge_domain_id": bridge_domain_id}
+    )
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or _username_from_session(session_payload)
+    credential = _read_credential_env(credential_env)
+
+    result = _run_shell_command(
+        transport=transport,
+        host=target_host,
+        port=target_port,
+        username=effective_username,
+        credential=credential,
+        command=command,
+        timeout=timeout,
+    )
+
+    if not _show_output_valid(result):
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "Bridge-domain show output did not match the success pattern.",
+            {
+                "op_id": "fw_verify_bridge_domain_mac_age",
+                "transport": transport,
+                "bridge_domain_id": bridge_domain_id,
+                "exit_code": result.exit_code,
+                "stdout_preview": (result.stdout[:2000] if result.stdout else ""),
+                "stderr_preview": (result.stderr[:2000] if result.stderr else ""),
+            },
+        )
+
+    rows = parse_bridge_domain_table(result.stdout)
+    if not rows:
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "Bridge-domain table contained no data row for the requested domain.",
+            {
+                "op_id": "fw_verify_bridge_domain_mac_age",
+                "bridge_domain_id": bridge_domain_id,
+                "stdout_preview": (result.stdout[:2000] if result.stdout else ""),
+            },
+        )
+    return {
+        "op_id": "fw_verify_bridge_domain_mac_age",
+        "status": "success",
+        "transport": transport,
+        "data": {
+            "bridge_domain_id": bridge_domain_id,
+            "age_minutes": rows[0].get("age_minutes", ""),
+            "bridge_domain_raw": result.stdout,
+        },
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+            "success_pattern": BRIDGE_DOMAIN_SHOW_SUCCESS_PATTERN,
+        },
+        "response": {
+            "exit_code": result.exit_code,
+            "stdout_ref": "<bridge-domain-raw-ref>",
+            "stderr_ref": "<diag-snapshot-ref>",
+        },
+        "diag_snapshot_ref": "<diag-snapshot-ref>",
+    }
+
+
+def build_config_bridge_domain_mac_age_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str,
+    bridge_domain_id: int,
+    age_minutes: int,
+    timeout: float,
+) -> dict[str, Any]:
+    _validate_bridge_domain_id(bridge_domain_id)
+    _validate_age_minutes(age_minutes)
+    set_command = render_command(
+        BRIDGE_DOMAIN_MAC_AGE_SET_TEMPLATE,
+        {"bridge_domain_id": bridge_domain_id, "age_minutes": age_minutes},
+    )
+    show_command = render_command(
+        BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE, {"bridge_domain_id": bridge_domain_id}
+    )
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or _username_from_session(session_payload)
+    return {
+        "op_id": "fw_config_bridge_domain_mac_age",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": set_command,
+            "verify_command": show_command,
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+            "success_pattern": "exit_code==0 and stderr free of expecting/error/invalid",
+        },
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def _mac_age_set_failed(result: ShellCommandResult) -> bool:
+    """vppctl set 明确失败判定：stderr 有报错文本，或退出码非 0 且非 -1。
+
+    vppctl 参数错误（如只传 BD-ID）会把 ``expecting ...`` 打到 stderr 并以非零
+    退出；成功时 stdout 为空，不能用 stdout pattern 判定。设备偶发在命令执行
+    后不返回 exit status（``recv_exit_status`` 返回 -1 且通道全空），此时以
+    回读验证为最终真相，不在此判定失败。
+    """
+    if result.exit_code not in (0, -1):
+        return True
+    if _MAC_AGE_SET_FAILURE_RE.search(result.stderr):
+        return True
+    return False
+
+
+def execute_config_bridge_domain_mac_age(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str,
+    credential_env: str,
+    bridge_domain_id: int,
+    age_minutes: int,
+    timeout: float,
+) -> dict[str, Any]:
+    _validate_bridge_domain_id(bridge_domain_id)
+    _validate_age_minutes(age_minutes)
+    set_command = render_command(
+        BRIDGE_DOMAIN_MAC_AGE_SET_TEMPLATE,
+        {"bridge_domain_id": bridge_domain_id, "age_minutes": age_minutes},
+    )
+    show_command = render_command(
+        BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE, {"bridge_domain_id": bridge_domain_id}
+    )
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or _username_from_session(session_payload)
+    credential = _read_credential_env(credential_env)
+
+    set_result = _run_shell_command(
+        transport=transport,
+        host=target_host,
+        port=target_port,
+        username=effective_username,
+        credential=credential,
+        command=set_command,
+        timeout=timeout,
+    )
+    if _mac_age_set_failed(set_result):
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "vppctl set bridge-domain mac-age did not succeed.",
+            {
+                "op_id": "fw_config_bridge_domain_mac_age",
+                "bridge_domain_id": bridge_domain_id,
+                "age_minutes": age_minutes,
+                "exit_code": set_result.exit_code,
+                "stdout_preview": (set_result.stdout[:2000] if set_result.stdout else ""),
+                "stderr_preview": (set_result.stderr[:2000] if set_result.stderr else ""),
+            },
+        )
+
+    # 回读验证：同一凭据再次连接执行 show，解析 Age(min) 确认配置生效。
+    # 设备偶发不返回 set 的 exit status（recv_exit_status 得 -1），回读是最终真相。
+    show_result = _run_shell_command(
+        transport=transport,
+        host=target_host,
+        port=target_port,
+        username=effective_username,
+        credential=credential,
+        command=show_command,
+        timeout=timeout,
+    )
+    rows = (
+        parse_bridge_domain_table(show_result.stdout)
+        if _show_output_valid(show_result)
+        else []
+    )
+    age_minutes_actual = rows[0].get("age_minutes", "") if rows else ""
+    verify_match = age_minutes_actual == str(age_minutes)
+    if not verify_match:
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "Read-back Age(min) does not match the requested value.",
+            {
+                "op_id": "fw_config_bridge_domain_mac_age",
+                "bridge_domain_id": bridge_domain_id,
+                "age_minutes": age_minutes,
+                "age_minutes_actual": age_minutes_actual,
+                "show_exit_code": show_result.exit_code,
+                "stdout_preview": (show_result.stdout[:2000] if show_result.stdout else ""),
+                "stderr_preview": (show_result.stderr[:2000] if show_result.stderr else ""),
+            },
+        )
+    return {
+        "op_id": "fw_config_bridge_domain_mac_age",
+        "status": "success",
+        "transport": transport,
+        "data": {
+            "bridge_domain_id": bridge_domain_id,
+            "age_minutes": age_minutes,
+            "age_minutes_actual": age_minutes_actual,
+            "verify_match": verify_match,
+            "bridge_domain_raw": show_result.stdout,
+        },
+        "request": {
+            "command": set_command,
+            "verify_command": show_command,
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+        },
+        "response": {
+            "exit_code": set_result.exit_code,
+            "stdout_ref": "<bridge-domain-raw-ref>",
+            "stderr_ref": "<diag-snapshot-ref>",
+        },
+        "diag_snapshot_ref": "<diag-snapshot-ref>",
+    }

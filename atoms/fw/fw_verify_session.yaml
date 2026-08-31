@@ -1,0 +1,146 @@
+schema_version: "1.1"
+op_id: fw_verify_session
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_session
+description: Query the NGFW session table (IPv4 or IPv6) through /api/v1/monitor/sessioninfo.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  isip6:
+    type: int
+    required: false
+    description: Address family selector; 0 queries IPv4 sessions and 1 queries IPv6 sessions. Defaults to 0.
+  page:
+    type: int
+    required: false
+    description: Query page number. Defaults to 1.
+  size:
+    type: int
+    required: false
+    description: Query page size. Defaults to 10.
+  proto:
+    type: string
+    required: false
+    description: Protocol filter (for example ANY, TCP, UDP). Defaults to ANY.
+  src_addr:
+    type: string
+    required: false
+    description: Source address filter; defaults to the family zero address (0.0.0.0 for ipv4, 0:0::0 for ipv6).
+  dst_addr:
+    type: string
+    required: false
+    description: Destination address filter; defaults to the family zero address.
+  src_port:
+    type: int
+    required: false
+    description: Source port filter. Defaults to 0 (no filter).
+  dst_port:
+    type: int
+    required: false
+    description: Destination port filter. Defaults to 0 (no filter).
+  natsip:
+    type: string
+    required: false
+    description: NAT source address filter; defaults to the family zero address.
+  natdip:
+    type: string
+    required: false
+    description: NAT destination address filter; defaults to the family zero address.
+  natsport:
+    type: int
+    required: false
+    description: NAT source port filter. Defaults to 0.
+  natdport:
+    type: int
+    required: false
+    description: NAT destination port filter. Defaults to 0.
+  vlanid:
+    type: string
+    required: false
+    description: VLAN id filter. Defaults to empty (no filter).
+  rx_zone:
+    type: string
+    required: false
+    description: Ingress zone filter. Defaults to empty (no filter).
+  tx_zone:
+    type: string
+    required: false
+    description: Egress zone filter. Defaults to empty (no filter).
+  rx_if:
+    type: string
+    required: false
+    description: Ingress interface filter (for example TE0_7). Defaults to empty (no filter).
+  tx_if:
+    type: string
+    required: false
+    description: Egress interface filter (for example TE0_9). Defaults to empty (no filter).
+  policy_id:
+    type: string
+    required: false
+    description: Policy id filter. Defaults to empty (no filter).
+  app_name:
+    type: string
+    required: false
+    description: Application name filter. Defaults to empty (no filter).
+  action:
+    type: string
+    required: false
+    description: Action filter (permit/deny). Defaults to empty (no filter).
+inputs:
+  session_ref: "<session-ref>"
+  isip6: 0
+  page: 1
+  size: 10
+  proto: ANY
+  src_addr: 0.0.0.0
+  dst_addr: 0.0.0.0
+side_effect: observation
+returns:
+  status: success
+  data:
+    count: 0
+    ipv4count: 0
+    ipv6count: 0
+    permitcount: 0
+    denycount: 0
+    page: 1
+    size: 10
+    sessions: "<session-vals-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_RESPONSE_INVALID
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: session_query_returns_count_and_vals
+      input_ref: "<session-query-result-ref>"
+      expected_result: The device returns the session table with count and a vals list; an empty table (zero sessions) is a valid successful result.
+  summary_ref: "<session-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+  - The firewall management plane is reachable.
+postconditions:
+  - The session table is not modified by this verification operation.
+  - The returned count and sessions list let callers inspect active sessions by address family, zone, or interface.
+tags:
+  - firewall
+  - session
+  - monitor
+  - query
+aliases:
+  - session
+  - sessioninfo
+  - session-table
+  - sessions
+  - monitor-session
+since_version: "1.8.0"

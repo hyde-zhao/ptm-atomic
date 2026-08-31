@@ -1,0 +1,97 @@
+schema_version: "1.1"
+op_id: fw_config_bridge_domain_mac_age
+device_type: fw
+transport: ssh
+description: Set the VPP bridge-domain MAC ageing time over SSH or Telnet (vppctl set bridge-domain mac-age <id> <mins>).
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_bridge_domain_mac_age
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when telnet target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  username:
+    type: string
+    required: false
+    description: SSH/Telnet username; defaults to root because vppctl requires root privileges. Falls back to the session-file username when empty.
+  bridge_domain_id:
+    type: int
+    required: true
+    description: VPP bridge-domain ID (1-4094) whose MAC ageing time is configured.
+  age_minutes:
+    type: int
+    required: true
+    description: MAC ageing time in minutes (0 disables ageing). Both bridge_domain_id and age_minutes are required by vppctl.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  username: root
+  bridge_domain_id: 4094
+  age_minutes: 6
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    bridge_domain_id: "<bridge-domain-id>"
+    age_minutes: "<age-minutes>"
+    age_minutes_actual: "<age-minutes-actual>"
+    verify_match: "<verify-match>"
+    bridge_domain_raw: "<bridge-domain-raw-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+risk:
+  level: high
+  categories:
+    - configuration
+    - network
+gate:
+  required: true
+  reason: MAC ageing time changes data-plane MAC ageing behavior; review before use on shared devices.
+  approver_role: change_reviewer
+  evidence_required:
+    - state_reference
+    - parameter_digest
+verification:
+  kind: capacity_domain
+  rules:
+    - name: mac_age_configured
+      input_ref: "<age-minutes-actual>"
+      expected_result: The read-back Age(min) equals the requested age_minutes.
+  summary_ref: "<mac-age-summary-ref>"
+preconditions:
+  - Device management SSH or Telnet service is reachable.
+  - A valid root credential is available via the runner credential env var (FW_SSH_PASSWORD by default).
+  - The vppctl binary is available at /opt/dbappsecurity/bin/vppctl on the device.
+postconditions:
+  - The bridge-domain MAC ageing time is set to age_minutes and confirmed by a read-back query; output is captured in diag_snapshot_ref.
+tags:
+  - firewall
+  - bridge-domain
+  - vpp
+  - mac-age
+  - config
+  - cli
+aliases:
+  - mac-age
+  - bd-mac-age
+  - set-mac-age
+  - set-bridge-domain-mac-age
+since_version: "1.1.0"

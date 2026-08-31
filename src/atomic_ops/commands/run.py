@@ -153,6 +153,9 @@ SUPPORTED_OPS = (
     "fw_verify_system_version",
     "fw_check_bvi_interface_config",
     "fw_check_bridge_domain",
+    "fw_verify_l2fib",
+    "fw_config_bridge_domain_mac_age",
+    "fw_verify_bridge_domain_mac_age",
     *SECURITY_ZONE_OPS,
     *CUSTOMAPPOBJ_OPS,
     *CUSTOMAPPOBJTAG_OPS,
@@ -161,6 +164,7 @@ SUPPORTED_OPS = (
     *IP6POOL_GROUP_OPS,
     *TIMEOBJECT_OPS,
     *NEIGHBOR_OPS,
+    "fw_verify_session",
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -218,6 +222,10 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_verify_system_version": ("cli", "verify-system-version"),
     "fw_check_bvi_interface_config": ("cli", "check-bvi-interface-config"),
     "fw_check_bridge_domain": ("cli", "check-bridge-domain"),
+    "fw_verify_l2fib": ("cli", "verify-l2fib"),
+    "fw_config_bridge_domain_mac_age": ("cli", "set-mac-age"),
+    "fw_verify_bridge_domain_mac_age": ("cli", "verify-mac-age"),
+    "fw_verify_session": ("session-monitor", "verify"),
     # Deprecated legacy op_id aliases (merged into the unified transport op)
     "fw_verify_system_version_cli": ("cli", "verify-system-version"),
     "fw_verify_system_version_telnet": ("cli", "verify-system-version"),
@@ -331,6 +339,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_ha as run_ha
     from atomic_ops.commands import run_trex as run_trex
     from atomic_ops.commands import run_neighbor as run_neighbor
+    from atomic_ops.commands import run_session_monitor as run_session_monitor
     from atomic_ops.commands import run_cli as run_cli
 
     return (
@@ -444,6 +453,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_ha.build_subtree(),
         *run_trex.build_subtree(),
         *run_neighbor.build_subtree(),
+        *run_session_monitor.build_subtree(),
         CommandGroup(
             name="cli",
             help="SSH/Telnet shell verification operations.",
@@ -1047,9 +1057,19 @@ def _single_arg(args: argparse.Namespace, name: str) -> str | None:
 def _arg_list(args: argparse.Namespace, name: str) -> list[str]:
     value = getattr(args, name)
     if isinstance(value, list):
-        return [item for item in value if item]
+        # list 元素本身可能是逗号串（append 参数 + op_mapper 逗号串传参），统一拆分。
+        out: list[str] = []
+        for item in value:
+            if isinstance(item, str) and "," in item:
+                parts = [p.strip() for p in item.split(",") if p.strip()]
+                out.extend(parts or [item])
+            else:
+                out.append(item)
+        return out
     if value:
-        return [value]
+        # 逗号串（如 "1,2,3"）拆分为多值列表；op_mapper 对 list 参数以逗号串形式传 CLI。
+        parts = [p.strip() for p in str(value).split(",") if p.strip()]
+        return parts or [value]
     return []
 
 
