@@ -1,0 +1,81 @@
+schema_version: "1.1"
+op_id: fw_verify_macpool
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_macpool
+description: Query NGFW MAC address objects through /api/v1/macpool with pagination.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be macpool for this operation.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the MAC address object query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the MAC address object query.
+  keywords:
+    type: string
+    required: false
+    description: Keyword filter for the MAC address object query.
+  params:
+    type: json
+    required: true
+    description: MAC address object query envelope; GET sends no JSON body and returns count and vals.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: macpool
+  page: 1
+  size: 40
+  keywords: ""
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<macpool-state-ref>"
+    full_config_ref: "<macpool-full-config-ref>"
+    vals_ref: "<macpool-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: macpool_query_returns_list
+      input_ref: "<macpool-query-result-ref>"
+      expected_result: the device returns count and vals with name, desc, type, macaddrs and refcnt fields.
+  summary_ref: "<macpool-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Query result and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - macpool
+  - verification
+aliases:
+  - mac-pool
+  - mac-address-object
+  - macaddr
+since_version: "1.11.0"

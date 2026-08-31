@@ -205,12 +205,12 @@ def _add_apply_template_args(parser: argparse.ArgumentParser) -> None:
         default="ipv4",
         help="Network layer packet type. Defaults to ipv4.",
     )
-    parser.add_argument("--l4-protocol", choices=("tcp", "udp"), required=True, help="Layer 4 protocol.")
-    parser.add_argument("--l4-sport", type=int, required=True, help="Layer 4 source port (0-65535).")
-    parser.add_argument("--l4-dport", type=int, required=True, help="Layer 4 destination port (0-65535).")
+    parser.add_argument("--l4-protocol", choices=("tcp", "udp", "icmp"), required=True, help="Layer 4 protocol (icmp = echo request, no ports).")
+    parser.add_argument("--l4-sport", type=int, required=False, default=None, help="Layer 4 source port (tcp/udp only).")
+    parser.add_argument("--l4-dport", type=int, required=False, default=None, help="Layer 4 destination port (tcp/udp only).")
     parser.add_argument("--traffic-mode", choices=("count", "continuous"), required=True, help="Traffic mode.")
     parser.add_argument("--rate", required=True, help="TRex-style rate string such as 100pps or 10mbps.")
-    parser.add_argument("--count", type=int, default=None, help="Packet count, required when traffic-mode is count.")
+    parser.add_argument("--count", type=int, default=None, help="Packet count (required when traffic-mode=count except ICMP defaults to 5).")
     parser.add_argument("--frame-size", type=int, default=None, help="Ethernet frame size in bytes (>= 64).")
     parser.add_argument("--vlan", default=None, help="VLAN ID or VLAN stack.")
     parser.add_argument("--src-ip", default=None, help="Optional source IP.")

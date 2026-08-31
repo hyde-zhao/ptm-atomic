@@ -1,0 +1,111 @@
+schema_version: "1.1"
+op_id: fw_update_domainpool
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_domainpool
+description: Update an NGFW domain name object through /api/v1/domainpool.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be domainpool for this operation.
+  params:
+    type: json
+    required: true
+    description: Complete /api/v1/domainpool payload for domain name-object update with id and val.name identifying the target.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: domainpool
+  params:
+    id: atomicDomainPool
+    val:
+      name: atomicDomainPool
+      desc: atomic domain name pool
+      domainaddrs:
+        - domain: example.com
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    object_name: atomicDomainPool
+    pre_snapshot_ref: "<domainpool-pre-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: domainpool
+      applied_ref: "<domainpool-update-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - name
+    - full_config
+  notes: Restore the original domain name-object definition from the pre-update snapshot.
+pre_snapshot:
+  op_id: fw_verify_domainpool
+  capture_fields:
+    - name
+    - full_config
+rollback_apply:
+  op_id: fw_update_domainpool
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_domainpool
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Domain name-object updates can change policy matching and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk domain name-object update is used.
+postconditions:
+  - Domain name-object update result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - domainpool
+  - configuration
+aliases:
+  - domain-pool
+  - domain-name-object
+  - domainaddr
+since_version: "1.11.0"

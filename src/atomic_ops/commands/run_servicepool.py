@@ -160,6 +160,10 @@ def _add_verify_args(parser: argparse.ArgumentParser) -> None:
 def _add_verify_preset_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="Paginated query page size.")
+    parser.add_argument("--keywords", default="", help="Preset service name keyword filter.")
+    parser.add_argument("--src-port", default="", help="Source port filter.")
+    parser.add_argument("--dst-port", default="", help="Destination port filter.")
+    parser.add_argument("--protocol", default="", help="Protocol filter (e.g. 6 for TCP).")
 
 
 def _run_servicepool_config(args: argparse.Namespace) -> int:
@@ -250,6 +254,13 @@ def _run_servicepool(args: argparse.Namespace, op_id: str) -> int:
         page = int(getattr(args, "page", 1))
         size = int(getattr(args, "size", 40))
         keywords = getattr(args, "keywords", "") or ""
+        preset_query: dict[str, Any] | None = None
+        if op_id == "fw_verify_servicepool_preset":
+            preset_query = {}
+            for field in ("keywords", "src_port", "dst_port", "protocol"):
+                value = getattr(args, field, "") or ""
+                if value != "":
+                    preset_query[field] = value
         payload: dict[str, Any] | None
 
         if op_id == "fw_config_servicepool":
@@ -337,6 +348,7 @@ def _run_servicepool(args: argparse.Namespace, op_id: str) -> int:
                 page=page,
                 size=size,
                 keywords=keywords,
+                preset_query=preset_query,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
             )
@@ -350,6 +362,7 @@ def _run_servicepool(args: argparse.Namespace, op_id: str) -> int:
                 page=page,
                 size=size,
                 keywords=keywords,
+                preset_query=preset_query,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
             )

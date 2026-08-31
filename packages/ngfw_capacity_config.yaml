@@ -3,7 +3,7 @@
 package_id: ngfw_capacity_config
 display_name: NGFW Capacity Configuration
 description: Capacity configuration contract operations for NGFW domains.
-version: "1.3.0"
+version: "1.4.0"
 operations:
   - fw_config_interface
   - fw_update_interface
@@ -126,3 +126,23 @@ operations:
   - fw_delete_batch_dns_proxy_server
   - fw_config_pppoe
   - fw_config_dns_diag
+  - fw_config_macpool
+  - fw_update_macpool
+  - fw_delete_macpool
+  - fw_delete_batch_macpool
+  - fw_config_domainpool
+  - fw_update_domainpool
+  - fw_delete_domainpool
+  - fw_delete_batch_domainpool
+  - fw_config_filetype
+  - fw_update_filetype
+  - fw_delete_filetype
+  - fw_config_filetypeobj
+  - fw_update_filetypeobj
+  - fw_delete_batch_filetypeobj
+  - fw_config_localcert
+  - fw_update_localcert
+  - fw_delete_localcert
+  - fw_delete_batch_localcert
+  - fw_config_localcacert
+  - fw_delete_batch_localcacert

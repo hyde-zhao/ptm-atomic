@@ -112,6 +112,7 @@ from atomic_ops.runner.servicepool import (
     build_servicepool_group_update_payload,
     build_servicepool_batch_delete_payload,
     build_servicepool_group_batch_delete_payload,
+    build_servicepool_dry_run,
     validate_servicepool_payload,
 )
 from atomic_ops.runner.ippool_group import (
@@ -131,6 +132,34 @@ from atomic_ops.runner.timeobject import (
     build_timeobject_update_payload,
     build_timeobject_batch_delete_payload,
     validate_timeobject_payload,
+)
+from atomic_ops.runner.macpool import (
+    build_macpool_payload,
+    build_macpool_update_payload,
+    build_macpool_batch_delete_payload,
+    validate_macpool_payload,
+)
+from atomic_ops.runner.domainpool import (
+    build_domainpool_payload,
+    build_domainpool_update_payload,
+    build_domainpool_batch_delete_payload,
+    validate_domainpool_payload,
+)
+from atomic_ops.runner.filetype import (
+    build_filetype_payload,
+    build_filetype_update_payload,
+    build_filetypeobj_payload,
+    build_filetypeobj_update_payload,
+    build_filetype_batch_delete_payload,
+    validate_filetype_payload,
+)
+from atomic_ops.runner.cert import (
+    build_localcert_payload,
+    build_localcert_update_payload,
+    build_localcert_issue_payload,
+    build_localcacert_payload,
+    build_cert_batch_delete_payload,
+    validate_cert_payload,
 )
 
 
@@ -3195,6 +3224,68 @@ class ServicePoolPayloadTests(unittest.TestCase):
         with self.assertRaises(RunnerError):
             validate_servicepool_payload(payload, op_id="fw_delete_batch_servicepool_group")
 
+    def test_verify_preset_dry_run_without_filters_only_type_preset(self) -> None:
+        # 无搜索参数时保持既有行为：只带 type=PRESET，不出现关键字/端口
+        dry = build_servicepool_dry_run(
+            op_id="fw_verify_servicepool_preset",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            keywords="",
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertIn("type=PRESET", url)
+        self.assertNotIn("keywords", url)
+        self.assertNotIn("sport", url)
+
+    def test_verify_preset_dry_run_maps_search_params(self) -> None:
+        # preset_query 的 CLI 字段经 PRESET_QUERY_FIELD_MAP 映射为设备查询参数
+        dry = build_servicepool_dry_run(
+            op_id="fw_verify_servicepool_preset",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            keywords="",
+            preset_query={"keywords": "http", "src_port": "80", "dst_port": "8080", "protocol": "6"},
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertIn("type=PRESET", url)
+        self.assertIn("keywords=http", url)
+        self.assertIn("sport=80", url)
+        self.assertIn("dport=8080", url)
+        self.assertIn("protocol=6", url)
+
+    def test_verify_preset_dry_run_drops_empty_fields(self) -> None:
+        # 空值字段不进入 URL；未知字段被映射跳过
+        dry = build_servicepool_dry_run(
+            op_id="fw_verify_servicepool_preset",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            keywords="",
+            preset_query={"keywords": "ssh", "src_port": "", "dst_port": "22", "protocol": "", "bogus_field": "x"},
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertIn("keywords=ssh", url)
+        self.assertIn("dport=22", url)
+        self.assertNotIn("sport=", url)
+        self.assertNotIn("bogus_field", url)
+
 
 class LoadJsonPayloadTests(unittest.TestCase):
     def test_returns_none_when_both_empty(self) -> None:
@@ -3553,6 +3644,441 @@ class NewModuleV2CliDryRunTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["op_id"], "fw_delete_customappobjtag")
         self.assertIn("/api/v1/customappobjtag?id=tag1", payload["data"]["request"]["url"])
+
+
+class MacPoolPayloadTests(unittest.TestCase):
+    def test_config_payload_forces_type_two(self) -> None:
+        payload = build_macpool_payload(name="m1", macs=["02:03:0a:00:53:0c"])
+        self.assertEqual(payload["val"]["type"], 2)
+        self.assertEqual(payload["val"]["macaddrs"], [{"mac": "02:03:0a:00:53:0c"}])
+
+    def test_macs_rejects_non_string(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_macpool_payload(name="m1", macs=["02:03:0a:00:53:0c", 5])
+
+    def test_update_payload_includes_id_and_val(self) -> None:
+        payload = build_macpool_update_payload(
+            entry_id="m1", name="m1", desc="d", macs=["00:00:5e:00:53:01"]
+        )
+        self.assertEqual(payload["id"], "m1")
+        self.assertEqual(payload["val"]["desc"], "d")
+        self.assertEqual(payload["val"]["macaddrs"][0]["mac"], "00:00:5e:00:53:01")
+
+    def test_batch_delete_resource(self) -> None:
+        payload = build_macpool_batch_delete_payload(entry_ids=["m1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/macpool")
+        self.assertEqual(payload["batch"][0]["body"]["id"], ["m1"])
+
+    def test_validate_batch_rejects_wrong_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/servicepool", "body": {"id": ["m1"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_macpool_payload(payload, op_id="fw_delete_batch_macpool")
+
+    def test_delete_dry_run_uses_query_id(self) -> None:
+        from atomic_ops.runner.macpool import build_macpool_dry_run
+        dry = build_macpool_dry_run(
+            op_id="fw_delete_macpool",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload={"id": "m1"},
+            page=1,
+            size=40,
+            keywords="",
+            types=[],
+            verify_tls=False,
+            timeout=10.0,
+        )
+        self.assertIn("/api/v1/macpool?id=m1", dry["request"]["url"])
+        self.assertIsNone(dry["request"]["payload"])
+
+
+class NewModuleV3CliDryRunTests(unittest.TestCase):
+    def test_cli_macpool_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "mac-pool", "config", "--name", "m1", "--mac", "02:03:0a:00:53:0c"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_macpool")
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["type"], 2)
+        self.assertEqual(val["macaddrs"][0]["mac"], "02:03:0a:00:53:0c")
+
+    def test_cli_macpool_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "mac-pool", "delete", "--id", "m1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_macpool")
+        self.assertIn("/api/v1/macpool?id=m1", payload["data"]["request"]["url"])
+
+    def test_cli_macpool_delete_batch_resource(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "mac-pool", "delete-batch", "--id", "m1", "--id", "m2"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_batch_macpool")
+        self.assertIn("/api/v1/batch", payload["data"]["request"]["url"])
+
+    def test_cli_macpool_verify_url_has_pagination(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "mac-pool", "verify", "--keywords", "m1", "--page", "1", "--size", "40"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/macpool?", url)
+        self.assertIn("keywords=m1", url)
+
+
+class DomainPoolPayloadTests(unittest.TestCase):
+    def test_config_payload_uses_domainaddrs(self) -> None:
+        payload = build_domainpool_payload(name="d1", domains=["example.com"])
+        self.assertEqual(payload["val"]["domainaddrs"], [{"domain": "example.com"}])
+
+    def test_domains_rejects_non_string(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_domainpool_payload(name="d1", domains=["example.com", 5])
+
+    def test_update_payload_includes_id_and_val(self) -> None:
+        payload = build_domainpool_update_payload(
+            entry_id="d1", name="d1", desc="d", domains=["example.org"]
+        )
+        self.assertEqual(payload["id"], "d1")
+        self.assertEqual(payload["val"]["desc"], "d")
+        self.assertEqual(payload["val"]["domainaddrs"][0]["domain"], "example.org")
+
+    def test_batch_delete_resource(self) -> None:
+        payload = build_domainpool_batch_delete_payload(entry_ids=["d1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/domainpool")
+        self.assertEqual(payload["batch"][0]["body"]["id"], ["d1"])
+
+    def test_validate_batch_rejects_wrong_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/servicepool", "body": {"id": ["d1"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_domainpool_payload(payload, op_id="fw_delete_batch_domainpool")
+
+    def test_delete_dry_run_uses_query_id(self) -> None:
+        from atomic_ops.runner.domainpool import build_domainpool_dry_run
+        dry = build_domainpool_dry_run(
+            op_id="fw_delete_domainpool",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload={"id": "d1"},
+            page=1,
+            size=40,
+            keywords="",
+            verify_tls=False,
+            timeout=10.0,
+        )
+        self.assertIn("/api/v1/domainpool?id=d1", dry["request"]["url"])
+        self.assertIsNone(dry["request"]["payload"])
+
+
+class NewModuleV4CliDryRunTests(unittest.TestCase):
+    def test_cli_domainpool_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "domain-pool", "config", "--name", "d1", "--domain", "example.com"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_domainpool")
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["domainaddrs"][0]["domain"], "example.com")
+
+    def test_cli_domainpool_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "domain-pool", "delete", "--id", "d1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_domainpool")
+        self.assertIn("/api/v1/domainpool?id=d1", payload["data"]["request"]["url"])
+
+    def test_cli_domainpool_delete_batch_resource(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "domain-pool", "delete-batch", "--id", "d1", "--id", "d2"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_batch_domainpool")
+        self.assertIn("/api/v1/batch", payload["data"]["request"]["url"])
+
+    def test_cli_domainpool_verify_url_has_pagination(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "domain-pool", "verify", "--keywords", "d1", "--page", "1", "--size", "40"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/domainpool?", url)
+        self.assertIn("keywords=d1", url)
+
+
+class FileTypePayloadTests(unittest.TestCase):
+    def test_single_config_payload_has_id_zero(self) -> None:
+        payload = build_filetype_payload(name="ft1", description="d")
+        self.assertEqual(payload["id"], 0)
+        self.assertEqual(payload["val"]["name"], "ft1")
+        self.assertEqual(payload["val"]["type"], True)
+        self.assertEqual(payload["val"]["classify"], [0])
+        self.assertEqual(payload["val"]["refcnt"], 0)
+
+    def test_single_update_payload_includes_id(self) -> None:
+        payload = build_filetype_update_payload(entry_id="ft1", name="ft1", description="d2")
+        self.assertEqual(payload["id"], "ft1")
+        self.assertEqual(payload["val"]["description"], "d2")
+
+    def test_group_config_payload_has_filetype_members(self) -> None:
+        payload = build_filetypeobj_payload(name="g1", des="desc", filetypes=["PGD", "TAR"])
+        self.assertEqual(payload["id"], 0)
+        self.assertEqual(payload["val"]["des"], "desc")
+        self.assertEqual(payload["val"]["filetype"], [{"name": "PGD", "type": False}, {"name": "TAR", "type": False}])
+
+    def test_group_update_payload_includes_id(self) -> None:
+        payload = build_filetypeobj_update_payload(entry_id="g1", name="g1", des="d", filetypes=["PGD"])
+        self.assertEqual(payload["id"], "g1")
+        self.assertEqual(payload["val"]["filetype"][0]["name"], "PGD")
+
+    def test_group_delete_batch_resource(self) -> None:
+        payload = build_filetype_batch_delete_payload(entry_ids=["g1"])
+        self.assertEqual(payload["batch"][0]["resource"], "/api/v1/appsec/filetypeObj")
+        self.assertEqual(payload["batch"][0]["body"]["id"], ["g1"])
+
+    def test_validate_batch_rejects_wrong_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/appsec/filetype", "body": {"id": ["g1"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_filetype_payload(payload, op_id="fw_delete_batch_filetypeobj")
+
+    def test_delete_dry_run_uses_query_id(self) -> None:
+        from atomic_ops.runner.filetype import build_filetype_dry_run
+        dry = build_filetype_dry_run(
+            op_id="fw_delete_filetype",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload={"id": "ft1"},
+            page=1,
+            size=40,
+            keywords="",
+            verify_tls=False,
+            timeout=10.0,
+        )
+        self.assertIn("/api/v1/appsec/filetype?id=ft1", dry["request"]["url"])
+        self.assertIsNone(dry["request"]["payload"])
+
+
+class NewModuleV5CliDryRunTests(unittest.TestCase):
+    def test_cli_filetype_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "filetype", "config", "--name", "ft1", "--description", "d"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_filetype")
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["name"], "ft1")
+        self.assertEqual(val["type"], True)
+
+    def test_cli_filetype_delete_uses_query_id(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "filetype", "delete", "--id", "ft1"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_filetype")
+        self.assertIn("/api/v1/appsec/filetype?id=ft1", payload["data"]["request"]["url"])
+
+    def test_cli_filetype_group_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "filetype", "group-config", "--name", "g1", "--filetype", "PGD"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_filetypeobj")
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["filetype"][0]["name"], "PGD")
+
+    def test_cli_filetype_group_verify_url_has_pagination(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "filetype", "group-verify", "--keywords", "g1", "--page", "1", "--size", "40"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/appsec/filetypeObj?", url)
+        self.assertIn("keywords=g1", url)
+
+    def test_cli_filetype_group_delete_batch_resource(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "filetype", "group-delete-batch", "--id", "g1", "--id", "g2"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_batch_filetypeobj")
+        self.assertIn("/api/v1/batch", payload["data"]["request"]["url"])
+
+
+class CertPayloadTests(unittest.TestCase):
+    def test_localcert_rsa_payload_has_subject_and_option(self) -> None:
+        payload = build_localcert_payload(
+            name="c1", subject={"country": "CN", "state": "SC", "location": "CD", "organization": "A", "organUnit": "QA"}
+        )
+        self.assertEqual(payload["val"]["subject"]["country"], "CN")
+        self.assertEqual(payload["val"]["option"], {"type": "RSA", "keyLenth": 2048})
+
+    def test_localcert_sm2_payload_omits_key_length(self) -> None:
+        payload = build_localcert_payload(name="c1", key_type="SM2")
+        self.assertEqual(payload["val"]["option"], {"type": "SM2"})
+
+    def test_localcert_issue_payload(self) -> None:
+        payload = build_localcert_issue_payload(entry_id="5", cacert="defaultLocalCA.crt", time_length=30)
+        self.assertEqual(payload["id"], "5")
+        self.assertEqual(payload["val"], {"option": "1", "cacert": "defaultLocalCA.crt", "timeLenth": 30})
+
+    def test_localcacert_payload_is_flat(self) -> None:
+        payload = build_localcacert_payload(name="ca1", key_type="RSA", time_length=30)
+        self.assertEqual(payload["val"]["type"], "RSA")
+        self.assertEqual(payload["val"]["timeLenth"], 30)
+        self.assertNotIn("option", payload["val"])
+
+    def test_batch_delete_casts_ids_to_string(self) -> None:
+        payload = build_cert_batch_delete_payload(entry_ids=["3", "4"], resource="/api/v1/cert/localcert")
+        self.assertEqual(payload["batch"][0]["body"]["id"], ["3"])
+        self.assertEqual(payload["batch"][1]["body"]["id"], ["4"])
+
+    def test_validate_batch_rejects_wrong_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/cert/localcacert", "body": {"id": ["3"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_cert_payload(payload, op_id="fw_delete_batch_localcert")
+
+    def test_delete_dry_run_uses_query_id(self) -> None:
+        from atomic_ops.runner.cert import build_cert_dry_run
+        dry = build_cert_dry_run(
+            op_id="fw_delete_localcert",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload={"id": "5"},
+            page=1,
+            size=40,
+            keywords="",
+            verify_tls=False,
+            timeout=10.0,
+        )
+        self.assertIn("/api/v1/cert/localcert?id=5", dry["request"]["url"])
+        self.assertIsNone(dry["request"]["payload"])
+
+
+class NewModuleV6CliDryRunTests(unittest.TestCase):
+    def test_cli_localcert_config_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cert", "localcert-config", "--name", "c1", "--key-type", "RSA"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_localcert")
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["option"]["type"], "RSA")
+
+    def test_cli_localcert_issue_dry_run(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cert", "localcert-issue", "--id", "5", "--cacert", "defaultLocalCA.crt"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_update_localcert")
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["option"], "1")
+        self.assertEqual(val["timeLenth"], 30)
+
+    def test_cli_localcert_delete_batch_resource(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cert", "localcert-delete-batch", "--id", "3", "--id", "4"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_batch_localcert")
+        self.assertIn("/api/v1/batch", payload["data"]["request"]["url"])
+
+    def test_cli_localcacert_config_dry_run_flat(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cert", "localcacert-config", "--name", "ca1", "--key-type", "RSA"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_config_localcacert")
+        val = payload["data"]["request"]["payload"]["val"]
+        self.assertEqual(val["type"], "RSA")
+        self.assertNotIn("option", val)
+
+    def test_cli_localcacert_verify_url_has_pagination(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "cert", "localcacert-verify", "--keywords", "ca1", "--page", "1", "--size", "40"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/cert/localcacert?", url)
+        self.assertIn("keywords=ca1", url)
 
 
 class StaticDnsPayloadTests(unittest.TestCase):

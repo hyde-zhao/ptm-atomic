@@ -252,14 +252,20 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
                 "ip_version must be ipv4 or ipv6.",
                 {"field": "ip_version", "actual": ip_version},
             )
-        if payload.get("l4_protocol") not in ("tcp", "udp"):
+        l4_proto = payload.get("l4_protocol")
+        if l4_proto not in ("tcp", "udp", "icmp"):
             raise RunnerError(
                 "RUNNER_VALIDATION_FAILED",
-                "l4_protocol must be tcp or udp.",
-                {"field": "l4_protocol", "actual": payload.get("l4_protocol")},
+                "l4_protocol must be tcp, udp or icmp.",
+                {"field": "l4_protocol", "actual": l4_proto},
             )
-        payload["l4_sport"] = _validate_port_int("l4_sport", payload.get("l4_sport"))
-        payload["l4_dport"] = _validate_port_int("l4_dport", payload.get("l4_dport"))
+        if l4_proto in ("tcp", "udp"):
+            payload["l4_sport"] = _validate_port_int("l4_sport", payload.get("l4_sport"))
+            payload["l4_dport"] = _validate_port_int("l4_dport", payload.get("l4_dport"))
+        else:
+            # ICMP 无端口
+            payload["l4_sport"] = None
+            payload["l4_dport"] = None
         traffic_mode = payload.get("traffic_mode")
         if traffic_mode not in ("count", "continuous"):
             raise RunnerError(
@@ -277,11 +283,15 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
         if traffic_mode == "count":
             count = payload.get("count")
             if count is None:
-                raise RunnerError(
-                    "RUNNER_VALIDATION_FAILED",
-                    "count is required when traffic_mode=count.",
-                    {"field": "count"},
-                )
+                if payload.get("l4_protocol") == "icmp":
+                    # ICMP 默认 5 个报文（与 ping 一致），可用 --count 覆盖
+                    count = 5
+                else:
+                    raise RunnerError(
+                        "RUNNER_VALIDATION_FAILED",
+                        "count is required when traffic_mode=count.",
+                        {"field": "count"},
+                    )
             payload["count"] = _validate_positive_int("count", count)
         elif payload.get("count") is not None:
             payload["count"] = _validate_positive_int("count", payload["count"])
@@ -293,12 +303,7 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
         payload["ports"] = ports
         _require_payload_str(payload, "txport")
         _require_payload_str(payload, "rxport")
-        if payload["txport"] == payload["rxport"]:
-            raise RunnerError(
-                "RUNNER_VALIDATION_FAILED",
-                "txport and rxport must be different.",
-                {"txport": payload["txport"], "rxport": payload["rxport"]},
-            )
+        # 允许 txport==rxport（ICMP 应答回同一口；非 ICMP 由 trex-api 按模板协议拒绝）
         if payload["txport"] not in ports or payload["rxport"] not in ports:
             raise RunnerError(
                 "RUNNER_VALIDATION_FAILED",

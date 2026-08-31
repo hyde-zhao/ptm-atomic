@@ -3658,6 +3658,805 @@ operations:
         - 'GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.'
         - GET requests send no JSON body.
         - Each val entry carries name, desc, ip6pools and refcnt fields.
+  fw_config_macpool:
+    atom_ref: atoms/fw/fw_config_macpool.yaml
+    intent: Build a MAC address object create request.
+    request:
+      method: POST
+      path: /api/v1/macpool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          type: "{{ params.type }}"
+          macaddrs: "{{ params.macaddrs }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <macpool-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - macaddrs is a list of objects each carrying a mac address string.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_macpool:
+    atom_ref: atoms/fw/fw_update_macpool.yaml
+    intent: Build a MAC address object update request by name.
+    request:
+      method: PUT
+      path: /api/v1/macpool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <macpool-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Update requires the MAC address object name as id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_macpool:
+    atom_ref: atoms/fw/fw_delete_macpool.yaml
+    intent: Build a MAC address object delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/macpool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <macpool-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the MAC address object name to delete.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_macpool:
+    atom_ref: atoms/fw/fw_delete_batch_macpool.yaml
+    intent: Build a batch MAC address object delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/macpool
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <macpool-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/macpool items.
+        - Each body.id is a single-element list holding the object name.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_macpool:
+    atom_ref: atoms/fw/fw_verify_macpool.yaml
+    intent: Build a MAC address object query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/macpool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <macpool-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET takes page, size and optional keywords query parameters and returns count and vals.
+        - GET requests send no JSON body.
+        - Each val entry carries name, desc, type, macaddrs and refcnt fields.
+  fw_config_domainpool:
+    atom_ref: atoms/fw/fw_config_domainpool.yaml
+    intent: Build a domain name object create request.
+    request:
+      method: POST
+      path: /api/v1/domainpool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          domainaddrs: "{{ params.domainaddrs }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <domainpool-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - domainaddrs is a list of objects each carrying a domain name string.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_domainpool:
+    atom_ref: atoms/fw/fw_update_domainpool.yaml
+    intent: Build a domain name object update request by name.
+    request:
+      method: PUT
+      path: /api/v1/domainpool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <domainpool-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Update requires the domain name object name as id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_domainpool:
+    atom_ref: atoms/fw/fw_delete_domainpool.yaml
+    intent: Build a domain name object delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/domainpool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <domainpool-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the domain name object name to delete.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_domainpool:
+    atom_ref: atoms/fw/fw_delete_batch_domainpool.yaml
+    intent: Build a batch domain name object delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/domainpool
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <domainpool-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/domainpool items.
+        - Each body.id is a single-element list holding the object name.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_domainpool:
+    atom_ref: atoms/fw/fw_verify_domainpool.yaml
+    intent: Build a domain name object query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/domainpool
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <domainpool-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET takes page, size and optional keywords query parameters and returns count and vals.
+        - GET requests send no JSON body.
+        - Each val entry carries name, desc, domainpool_id and domainaddrs fields.
+  fw_config_filetype:
+    atom_ref: atoms/fw/fw_config_filetype.yaml
+    intent: Build a custom file type create request.
+    request:
+      method: POST
+      path: /api/v1/appsec/filetype
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: 0
+        val:
+          name: "{{ params.name }}"
+          type: "{{ params.type }}"
+          classify: "{{ params.classify }}"
+          refcnt: "{{ params.refcnt }}"
+          description: "{{ params.description }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <filetype-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The device matches the custom file type by val.name; type/classify/refcnt are fixed defaults.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_filetype:
+    atom_ref: atoms/fw/fw_update_filetype.yaml
+    intent: Build a custom file type update request by name.
+    request:
+      method: PUT
+      path: /api/v1/appsec/filetype
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <filetype-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Update requires the custom file type name as id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_filetype:
+    atom_ref: atoms/fw/fw_delete_filetype.yaml
+    intent: Build a custom file type delete request by name.
+    request:
+      method: DELETE
+      path: /api/v1/appsec/filetype
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <filetype-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the custom file type name to delete.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_filetypeobj:
+    atom_ref: atoms/fw/fw_config_filetypeobj.yaml
+    intent: Build a file type group create request.
+    request:
+      method: POST
+      path: /api/v1/appsec/filetypeObj
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: 0
+        val:
+          name: "{{ params.name }}"
+          des: "{{ params.des }}"
+          filetype: "{{ params.filetype }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <filetypeobj-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - filetype is a list of objects each carrying a name and a type flag.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_filetypeobj:
+    atom_ref: atoms/fw/fw_update_filetypeobj.yaml
+    intent: Build a file type group update request by name.
+    request:
+      method: PUT
+      path: /api/v1/appsec/filetypeObj
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <filetypeobj-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Update requires the file type group name as id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_filetypeobj:
+    atom_ref: atoms/fw/fw_verify_filetypeobj.yaml
+    intent: Build a file type group query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/appsec/filetypeObj
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <filetypeobj-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET takes page, size and optional keywords query parameters and returns count and vals.
+        - GET requests send no JSON body.
+        - Each val entry carries objid, name, count, des and filetype fields.
+  fw_delete_batch_filetypeobj:
+    atom_ref: atoms/fw/fw_delete_batch_filetypeobj.yaml
+    intent: Build a batch file type group delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/appsec/filetypeObj
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <filetypeobj-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/appsec/filetypeObj items.
+        - Each body.id is a single-element list holding the group name.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_localcert:
+    atom_ref: atoms/fw/fw_config_localcert.yaml
+    intent: Build a local certificate create request.
+    request:
+      method: POST
+      path: /api/v1/cert/localcert
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          subject: "{{ params.subject }}"
+          option: "{{ params.option }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <localcert-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The device matches the local certificate by val.name; the certificate is created unsigned.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_localcert:
+    atom_ref: atoms/fw/fw_update_localcert.yaml
+    intent: Build a local certificate update or issue request by numeric id.
+    request:
+      method: PUT
+      path: /api/v1/cert/localcert
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <localcert-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Update requires the local certificate numeric id resolved by fw_verify_localcert.
+        - The issue variant carries option, cacert and timeLenth to sign a pending certificate.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_localcert:
+    atom_ref: atoms/fw/fw_delete_localcert.yaml
+    intent: Build a local certificate delete request by numeric id.
+    request:
+      method: DELETE
+      path: /api/v1/cert/localcert
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <localcert-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE uses id as a query value and sends no JSON body.
+        - id is the local certificate numeric id to delete.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_localcert:
+    atom_ref: atoms/fw/fw_delete_batch_localcert.yaml
+    intent: Build a batch local certificate delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/cert/localcert
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <localcert-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/cert/localcert items.
+        - Each body.id is a single-element list holding the string certificate id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_localcert:
+    atom_ref: atoms/fw/fw_verify_localcert.yaml
+    intent: Build a local certificate query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/cert/localcert
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <localcert-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET takes page, size and optional keywords query parameters and returns count and vals.
+        - GET requests send no JSON body.
+        - Each val entry carries id, name, fileState, keyType and issuer fields.
+  fw_config_localcacert:
+    atom_ref: atoms/fw/fw_config_localcacert.yaml
+    intent: Build a local CA certificate create request.
+    request:
+      method: POST
+      path: /api/v1/cert/localcacert
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          subject: "{{ params.subject }}"
+          type: "{{ params.type }}"
+          timeLenth: "{{ params.timeLenth }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <localcacert-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The local CA certificate is self-signed at creation; the payload is flat with no option sub-object.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_localcacert:
+    atom_ref: atoms/fw/fw_verify_localcacert.yaml
+    intent: Build a local CA certificate query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/cert/localcacert
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <localcacert-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET takes page, size and optional keywords query parameters and returns count and vals.
+        - GET requests send no JSON body.
+        - Each val entry carries id, name, isCA, keyType and issuer fields.
+  fw_delete_batch_localcacert:
+    atom_ref: atoms/fw/fw_delete_batch_localcacert.yaml
+    intent: Build a batch local CA certificate delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/cert/localcacert
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <localcacert-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/cert/localcacert items.
+        - Each body.id is a single-element list holding the string certificate id.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_geoip:
+    atom_ref: atoms/fw/fw_config_geoip.yaml
+    intent: Build a geoip object create request (endpoint unconfirmed).
+    request:
+      method: POST
+      path: /geoip
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <geoip-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Endpoint unconfirmed on the device; skeleton contract only.
+  fw_update_geoip:
+    atom_ref: atoms/fw/fw_update_geoip.yaml
+    intent: Build a geoip object update request (endpoint unconfirmed).
+    request:
+      method: PUT
+      path: /geoip
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <geoip-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Endpoint unconfirmed on the device; skeleton contract only.
+  fw_delete_geoip:
+    atom_ref: atoms/fw/fw_delete_geoip.yaml
+    intent: Build a geoip object delete request (endpoint unconfirmed).
+    request:
+      method: DELETE
+      path: /geoip
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <geoip-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Endpoint unconfirmed on the device; skeleton contract only.
+  fw_delete_batch_geoip:
+    atom_ref: atoms/fw/fw_delete_batch_geoip.yaml
+    intent: Build a batch geoip object delete request (endpoint unconfirmed).
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: <TBD>
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <geoip-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Endpoint unconfirmed on the device; skeleton contract only.
+  fw_verify_geoip:
+    atom_ref: atoms/fw/fw_verify_geoip.yaml
+    intent: Build a geoip object query request (endpoint unconfirmed).
+    request:
+      method: GET
+      path: /geoip
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <geoip-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Endpoint unconfirmed on the device; skeleton contract only.
   fw_config_timeobject:
     atom_ref: atoms/fw/fw_config_timeobject.yaml
     intent: Build a time object create request.
