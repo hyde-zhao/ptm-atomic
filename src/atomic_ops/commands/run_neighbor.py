@@ -53,6 +53,13 @@ def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="Paginated query page size.")
     parser.add_argument("--keywords", default="", help="Optional search keywords for fuzzy matching.")
+    parser.add_argument(
+        "--is-ip6",
+        type=int,
+        choices=(0, 1),
+        default=0,
+        help="Address family selector; 0 queries the IPv4 ARP table and 1 queries the IPv6 ND table. Defaults to 0.",
+    )
 
 
 def _run_create(args: argparse.Namespace) -> int:
@@ -99,6 +106,7 @@ def _run_neighbor(args: argparse.Namespace, op_id: str) -> int:
         page = int(getattr(args, "page", 1))
         size = int(getattr(args, "size", 40))
         keywords = getattr(args, "keywords", "")
+        is_ip6 = int(getattr(args, "is_ip6", 0))
         payload: dict[str, Any] | None
 
         if op_id in {"fw_config_neighbor", "fw_update_neighbor"}:
@@ -153,7 +161,7 @@ def _run_neighbor(args: argparse.Namespace, op_id: str) -> int:
             result = build_neighbor_dry_run(
                 op_id=op_id, base_url=ctx["base_url"], session_file=session_file,
                 auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
-                page=page, size=size, keywords=keywords,
+                page=page, size=size, keywords=keywords, is_ip6=is_ip6,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
             )
@@ -161,7 +169,7 @@ def _run_neighbor(args: argparse.Namespace, op_id: str) -> int:
             result = execute_neighbor(
                 op_id=op_id, base_url=ctx["base_url"], session_file=session_file,
                 auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
-                page=page, size=size, keywords=keywords,
+                page=page, size=size, keywords=keywords, is_ip6=is_ip6,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
             )
