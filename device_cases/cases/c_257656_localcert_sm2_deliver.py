@@ -12,7 +12,7 @@ from framework.context import CaseContext
 from framework.naming import unique_random
 from framework.results import CaseResult
 
-from cases.cert_support import cert_present, first_id, subject_ok
+from cases.cert_support import all_ids, cert_present, first_id, subject_ok
 
 TITLE = "P1-257656 SM2 本地证书对象配置下发成功"
 
@@ -72,7 +72,12 @@ def run(ctx: CaseContext, result: CaseResult) -> None:
             ))
     finally:
         if ctx.execute and cert_id is not None:
+            # An issued SM2 cert splits into <name>_sig.crt (original id) and
+            # <name>_enc.crt (NEW id); deleting only the first id would leave
+            # the _enc entry orphaned, so re-verify and delete EVERY matching id.
+            v_clean = ctx.runner.run("cert", "localcert-verify", page=1, size=200, keywords=name)
+            ids = all_ids(v_clean.response(), name) or [cert_id]
             result.record(op_succeeded(
-                ctx.runner.run("cert", "localcert-delete-batch", id=str(cert_id)),
+                ctx.runner.run("cert", "localcert-delete-batch", id=[str(i) for i in ids]),
                 ctx=ctx, label="localcert-sm2-cleanup",
             ))

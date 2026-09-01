@@ -18,6 +18,10 @@ def _cli_env() -> dict[str, str]:
     env = dict(os.environ)
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = str(SRC_DIR) + (os.pathsep + existing if existing else "")
+    # The child CLI writes --format json to a pipe. Without this it uses the
+    # Windows console codepage (cp936/GBK on zh-CN), so Chinese operation-log
+    # messages arrive mangled when the parent decodes the pipe as UTF-8.
+    env["PYTHONIOENCODING"] = "utf-8"
     return env
 
 

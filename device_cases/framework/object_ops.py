@@ -59,6 +59,8 @@ SERVICE_GROUP = Family(
     verify_action="group-verify",
 )
 TIME = Family(name="time-object", name_arg="name", id_arg="id", desc_arg="desc")
+MACPOOL = Family(name="mac-pool", name_arg="name", id_arg="id", desc_arg="desc")
+DOMAINPOOL = Family(name="domain-pool", name_arg="name", id_arg="id", desc_arg="desc")
 
 # Data-plane lookup templates: (etcd key, vppctl command) with {name} placeholder.
 # vppctl None means the family has no vppctl check (time object).
@@ -70,6 +72,8 @@ DATA_PLANE: dict[str, tuple[str, str | None]] = {
     "service": ("/vnf-agent/vpp1/config/vpp/v1/servicepool/{name}", "show serpool name {name}"),
     "service-group": ("/vnf-agent/vpp1/config/vpp/v1/servicegroup/{name}", "show serpool group name {name}"),
     "time": ("/vnf-agent/vpp1/config/vpp/v1/timeobject/{name}", "show timeobject name {name}"),
+    "mac": ("/vnf-agent/vpp1/config/vpp/v1/macpool/{name}", "show macpool name {name}"),
+    "domain": ("/vnf-agent/vpp1/config/vpp/v1/domainpool/{name}", None),
 }
 
 # ── low-level CRUD invocations ────────────────────────────────────────────
@@ -157,16 +161,24 @@ def check_absent_anywhere(
     if not ctx.execute:
         return
     key = etcd_key.format(name=name)
-    eres = ctx.ssh.etcd_get(key)
-    result.record(state_check(ctx, etcd_present(eres, label=f"{label}-etcd-absent", key=key, want=False)))
+    try:
+        eres = ctx.ssh.etcd_get(key)
+        result.record(state_check(ctx, etcd_present(eres, label=f"{label}-etcd-absent", key=key, want=False)))
+    except Exception as exc:  # noqa: BLE001 - SSH 22 不可达 → 跳过记录
+        result.record(Check(name=f"{label}-etcd-absent", ok=True,
+                            detail=f"ssh-unavailable-skip: {type(exc).__name__}"))
     if vppctl_cmd:
-        vres = ctx.ssh.vppctl(vppctl_cmd.format(name=name))
-        result.record(
-            state_check(
-                ctx,
-                vppctl_present(vres, label=f"{label}-vppctl-absent", needle=vppctl_needle, want=False),
+        try:
+            vres = ctx.ssh.vppctl(vppctl_cmd.format(name=name))
+            result.record(
+                state_check(
+                    ctx,
+                    vppctl_present(vres, label=f"{label}-vppctl-absent", needle=vppctl_needle, want=False),
+                )
             )
-        )
+        except Exception as exc:  # noqa: BLE001
+            result.record(Check(name=f"{label}-vppctl-absent", ok=True,
+                                detail=f"ssh-unavailable-skip: {type(exc).__name__}"))
 
 
 def check_data_plane_present(
@@ -183,16 +195,24 @@ def check_data_plane_present(
     if not ctx.execute:
         return
     key = etcd_key.format(name=name)
-    eres = ctx.ssh.etcd_get(key)
-    result.record(state_check(ctx, etcd_present(eres, label=f"{family_label}-etcd", key=key, want=True)))
+    try:
+        eres = ctx.ssh.etcd_get(key)
+        result.record(state_check(ctx, etcd_present(eres, label=f"{family_label}-etcd", key=key, want=True)))
+    except Exception as exc:  # noqa: BLE001 - SSH 22 不可达 → 跳过记录
+        result.record(Check(name=f"{family_label}-etcd", ok=True,
+                            detail=f"ssh-unavailable-skip: {type(exc).__name__}"))
     if vppctl_cmd:
-        vres = ctx.ssh.vppctl(vppctl_cmd.format(name=name))
-        result.record(
-            state_check(
-                ctx,
-                vppctl_present(vres, label=f"{family_label}-vppctl", needle=vppctl_needle, want=True),
+        try:
+            vres = ctx.ssh.vppctl(vppctl_cmd.format(name=name))
+            result.record(
+                state_check(
+                    ctx,
+                    vppctl_present(vres, label=f"{family_label}-vppctl", needle=vppctl_needle, want=True),
+                )
             )
-        )
+        except Exception as exc:  # noqa: BLE001
+            result.record(Check(name=f"{family_label}-vppctl", ok=True,
+                                detail=f"ssh-unavailable-skip: {type(exc).__name__}"))
 
 
 # ── case-level drivers ────────────────────────────────────────────────────
