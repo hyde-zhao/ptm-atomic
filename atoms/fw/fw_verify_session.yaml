@@ -60,6 +60,30 @@ parameters:
     type: string
     required: false
     description: Session action filter (permit/deny).
+  natsip:
+    type: string
+    required: false
+    description: NAT source address filter.
+  natdip:
+    type: string
+    required: false
+    description: NAT destination address filter.
+  natsport:
+    type: int
+    required: false
+    description: NAT source port filter (0 = no filter).
+  natdport:
+    type: int
+    required: false
+    description: NAT destination port filter (0 = no filter).
+  vlanid:
+    type: string
+    required: false
+    description: VLAN id filter.
+  app_name:
+    type: string
+    required: false
+    description: Application name filter.
 inputs:
   session_ref: "<session-ref>"
   page: 1
@@ -75,6 +99,12 @@ inputs:
   rx_if: ""
   tx_if: ""
   action: ""
+  natsip: ""
+  natdip: ""
+  natsport: 0
+  natdport: 0
+  vlanid: ""
+  app_name: ""
 side_effect: observation
 returns:
   status: success

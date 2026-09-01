@@ -124,6 +124,7 @@ def build_neighbor_dry_run(
     page: int,
     size: int,
     keywords: str,
+    is_ip6: int = 0,
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
@@ -134,7 +135,9 @@ def build_neighbor_dry_run(
         "execute_required": True,
         "request": {
             "method": method,
-            "url": _request_url(base_url, op_id, payload=payload, page=page, size=size, keywords=keywords),
+            "url": _request_url(
+                base_url, op_id, payload=payload, page=page, size=size, keywords=keywords, is_ip6=is_ip6
+            ),
             "auth": {"name": auth_header, "value": "<session-ref>"},
             "content_type": "application/json",
             "payload": None if op_id in NO_BODY_OPS else payload,
@@ -155,6 +158,7 @@ def execute_neighbor(
     page: int,
     size: int,
     keywords: str,
+    is_ip6: int = 0,
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
@@ -165,7 +169,9 @@ def execute_neighbor(
     headers = {"Content-Type": "application/json", auth_header: header_value}
     status_code, response_payload, _text = request_json(
         method,
-        _request_url(base_url, op_id, payload=payload, page=page, size=size, keywords=keywords),
+        _request_url(
+            base_url, op_id, payload=payload, page=page, size=size, keywords=keywords, is_ip6=is_ip6
+        ),
         headers=headers,
         json_payload=None if op_id in NO_BODY_OPS else payload,
         timeout=timeout,
@@ -205,18 +211,20 @@ def _request_url(
     page: int,
     size: int,
     keywords: str,
+    is_ip6: int = 0,
 ) -> str:
     _method, path = _method_path(op_id)
     url = f"{normalize_base_url(base_url)}{path}"
     if op_id in GET_OPS:
         _validate_positive_int("page", page)
         _validate_positive_int("size", size)
+        _validate_is_ip6(is_ip6)
         query: dict[str, Any] = {
             "page": page,
             "size": size,
             "keywords": keywords or "",
             "is_linux": False,
-            "is_ip6": False,
+            "is_ip6": bool(is_ip6),
         }
         url = f"{url}?{urlencode(query)}"
     if op_id in DELETE_OPS:
@@ -312,5 +320,23 @@ def _validate_positive_int(field: str, value: int | str) -> int:
             "RUNNER_VALIDATION_FAILED",
             "Neighbor integer field must be positive.",
             {"field": field, "value": parsed},
+        )
+    return parsed
+
+
+def _validate_is_ip6(value: int | str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Neighbor is_ip6 field must be 0 (IPv4 ARP) or 1 (IPv6 ND).",
+            {"field": "is_ip6", "value": value},
+        ) from exc
+    if parsed not in (0, 1):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Neighbor is_ip6 field must be 0 (IPv4 ARP) or 1 (IPv6 ND).",
+            {"field": "is_ip6", "value": parsed},
         )
     return parsed

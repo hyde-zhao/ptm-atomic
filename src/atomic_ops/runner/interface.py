@@ -25,11 +25,25 @@ INTERFACE_ENDPOINTS = {
     "fw_delete_batch_interface": ("POST", "/api/v1/batch"),
 }
 NO_BODY_OPS = {"fw_verify_interface", "fw_delete_interface"}
-INTERFACE_KINDS = {"bvi", "sub", "physical", "bond", "tunnel"}
+INTERFACE_KINDS = {"bvi", "sub", "physical", "bond", "tunnel", "pppoe"}
 INTERFACE_MODES = {"Route", "Switch", "Pair", "Monitor"}
-ROUTE_ONLY_KINDS = {"bvi", "sub", "tunnel"}
+ROUTE_ONLY_KINDS = {"bvi", "sub", "tunnel", "pppoe"}
+# ---------------------------------------------------------------------------
+# 接口 ID 识别正则（仅用于从 id 中提取构造 val 所需的字段，NOT 格式强校验）。
+#
+# 按决策点3：接口 id 透传，不因格式不符而拒绝（配置用例需要把无效值发给 DUT，
+# 由 DUT 校验并返回错误）。这些正则只作为"提取工具"：能匹配就提取出 instance/
+# parent/sub_id/bond_id 供 val 构造；匹配不上则回退到显式参数或 0，绝不 raise。
+#
+# 有效值结构（供用例编写参考，DUT 型号相关）：
+#   - 物理口:    GE<slot>_<port>，如 GE0_0 / GE0_1；不同型号前缀不同（TE0_9 / TTE0_1 / GE0_5）
+#   - 子接口:    <父接口>.<子ID>，如 GE0_0.100 / TE0_1.100
+#   - BVI:       bvi<编号>，如 bvi1 / bvi2
+#   - 聚合口:    bond<编号>，如 bond1
+#   - 隧道口:    tunnel<名称>，如 tunnel0 / tunnel-ipip1
+# ---------------------------------------------------------------------------
 PHYSICAL_ID_RE = re.compile(r"^GE\d+_\d+$")
-SUB_ID_RE = re.compile(r"^(?P<parent>GE\d+_\d+)\.(?P<sub_id>\d+)$")
+SUB_ID_RE = re.compile(r"^(?P<parent>[^.]+)\.(?P<sub_id>\d+)$")
 BVI_ID_RE = re.compile(r"^bvi(?P<instance>\d+)$")
 BOND_ID_RE = re.compile(r"^bond(?P<bond_id>\d+)$")
 TUNNEL_ID_RE = re.compile(r"^tunnel[\w-]*$")
@@ -55,6 +69,8 @@ def build_interface_payload(
     bond_members: list[str] | None = None,
     bond_mode: int = 5,
     bond_lb: int = 0,
+    pppoe_username: str | None = None,
+    pppoe_password: str | None = None,
     link_type: int | None = None,
     pvid: int = 1,
     allow_pass: str | None = None,
@@ -96,6 +112,8 @@ def build_interface_payload(
         _apply_physical(val, entry_id)
     elif interface_kind == "bond":
         _apply_bond(val, entry_id, bond_id, bond_members or [], bond_mode, bond_lb)
+    elif interface_kind == "pppoe":
+        _apply_pppoe(val, entry_id, pppoe_username, pppoe_password)
     elif interface_kind == "tunnel":
         _apply_tunnel(
             val, entry_id, tunnel_type, src_addr, dst_addr,
@@ -146,7 +164,9 @@ def validate_interface_payload(payload: dict[str, Any], *, op_id: str) -> dict[s
     mode = _validate_mode(kind, str(val.get("mode") or ""))
     if kind == "tunnel":
         _validate_tunnel_val(val)
-    else:
+    elif kind == "pppoe":
+        _validate_pppoe_val(val)
+    elif kind != "unknown":
         expected_type = {"bvi": 14, "sub": 1, "physical": 3, "bond": 10}[kind]
         if val.get("type") != expected_type:
             raise RunnerError(
@@ -299,7 +319,6 @@ def _base_val(
         "ipv6_address_mode_config": {
             "dhcp_client_setting": {},
             "address_mode": 0,
-            "install_default_route": False,
         },
         "ip_addresses": ip_addresses,
         "service": {"https": False, "ssh": False, "ping": False},
@@ -313,10 +332,16 @@ def _base_val(
 
 
 def _apply_bvi(val: dict[str, Any], entry_id: str, bvi_instance: int | None) -> None:
+    # 透传：id 格式不做强校验（DUT 校验无效值），正则仅用于提取 instance。
+    # 提取不到且未显式传 bvi_instance 时回退 0，不拒绝。
     match = BVI_ID_RE.match(entry_id)
-    if not match:
-        raise RunnerError("RUNNER_VALIDATION_FAILED", "BVI id must use bvi<number> style.", {"id": entry_id})
-    instance = _validate_positive_int("bvi_instance", bvi_instance or match.group("instance"))
+    if match is not None and bvi_instance is None:
+        instance = int(match.group("instance"))
+    elif bvi_instance is not None:
+        instance = _validate_non_negative_int("bvi_instance", bvi_instance)
+    else:
+        digits = re.search(r"(\d+)", entry_id)
+        instance = int(digits.group(1)) if digits else 0
     val.update(
         {
             "linkType": val.get("linkType", 0),
@@ -341,21 +366,19 @@ def _apply_bvi(val: dict[str, Any], entry_id: str, bvi_instance: int | None) -> 
 
 
 def _apply_sub(val: dict[str, Any], entry_id: str, parent_name: str | None, sub_id: int | None) -> None:
+    # 透传：id 格式不做强校验（DUT 校验无效值），正则仅用于提取 parent/sub_id。
+    # 提取不到时从 id 按 '.' 拆分，仍拆分不出则回退参数或 0，不拒绝。
     match = SUB_ID_RE.match(entry_id)
-    if not match:
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Subinterface id must use <parent>.<sub-id> style.",
-            {"id": entry_id},
-        )
-    parent = parent_name or match.group("parent")
-    parsed_sub_id = _validate_positive_int("sub_id", sub_id or match.group("sub_id"))
-    if parent != match.group("parent") or parsed_sub_id != int(match.group("sub_id")):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Subinterface parent and sub_id must match the interface id.",
-            {"id": entry_id, "parent_name": parent, "sub_id": parsed_sub_id},
-        )
+    if match is not None:
+        parent = parent_name or match.group("parent")
+        parsed_sub_id = int(sub_id) if sub_id is not None else int(match.group("sub_id"))
+    elif "." in entry_id:
+        parent_part, _, sub_part = entry_id.rpartition(".")
+        parent = parent_name or parent_part or entry_id
+        parsed_sub_id = int(sub_id) if sub_id is not None else (int(sub_part) if sub_part.isdigit() else 0)
+    else:
+        parent = parent_name or entry_id
+        parsed_sub_id = int(sub_id) if sub_id is not None else 0
     val.update(
         {
             "linkType": val.get("linkType", 0),
@@ -373,6 +396,22 @@ def _apply_physical(val: dict[str, Any], entry_id: str) -> None:
     val["type"] = 3
 
 
+def _apply_pppoe(
+    val: dict[str, Any],
+    entry_id: str,
+    pppoe_username: str | None,
+    pppoe_password: str | None,
+) -> None:
+    # PPPoE 叠加在物理接口上（type=3），另设 pppoe 子对象（username/password）
+    # 并将 IPv4 地址模式置为 2（PPPoE 动态获取，对齐 DUT2 TE0_8 已调通配置）。
+    # 接口 ID 沿用物理口命名（如 TE0_8），不做格式校验，直接透传。
+    _validate_non_empty("pppoe_username", pppoe_username or "")
+    _validate_non_empty("pppoe_password", pppoe_password or "")
+    val["type"] = 3
+    val["pppoe"] = {"username": pppoe_username, "password": pppoe_password}
+    val["ipv4_address_mode_config"]["address_mode"] = 2
+
+
 def _apply_bond(
     val: dict[str, Any],
     entry_id: str,
@@ -382,34 +421,28 @@ def _apply_bond(
     bond_lb: int,
 ) -> None:
     match = BOND_ID_RE.match(entry_id)
-    if not match:
-        raise RunnerError("RUNNER_VALIDATION_FAILED", "Bond interface id must use bond<number> style.", {"id": entry_id})
-    parsed_bond_id = _validate_positive_int("bond_id", bond_id or match.group("bond_id"))
-    if parsed_bond_id != int(match.group("bond_id")):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Bond id must match the interface id.",
-            {"id": entry_id, "bond_id": parsed_bond_id},
-        )
+    # 透传：id 格式不做强校验（DUT 校验无效值），正则仅用于提取 bond_id。
+    # 提取不到时回退显式参数或 id 内数字，再回退 0。
+    if match is not None and bond_id is None:
+        parsed_bond_id = int(match.group("bond_id"))
+    elif bond_id is not None:
+        parsed_bond_id = _validate_non_negative_int("bond_id", bond_id)
+    else:
+        digits = re.search(r"(\d+)", entry_id)
+        parsed_bond_id = int(digits.group(1)) if digits else 0
     if not bond_members:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "At least one bond member is required.",
             {"field": "bond_member"},
         )
-    bonded_interfaces = []
-    for member in bond_members:
-        if not PHYSICAL_ID_RE.match(member):
-            raise RunnerError(
-                "RUNNER_VALIDATION_FAILED",
-                "Bond member must use physical interface id style.",
-                {"field": "bond_member", "value": member},
-            )
-        bonded_interfaces.append({"name": member, "is_passive": False, "is_long_timeout": False})
+    # bond 成员名透传不校验格式（不同型号物理口命名不同，GE0_5 / TE0_9 / TTE0_1）。
+    bonded_interfaces = [
+        {"name": member, "is_passive": False, "is_long_timeout": False} for member in bond_members
+    ]
     val.update(
         {
             "type": 10,
-            "enable_garp_timed_send": False,
             "bond": {
                 "id": parsed_bond_id,
                 "mode": _validate_non_negative_int("bond_mode", bond_mode),
@@ -432,12 +465,7 @@ def _apply_tunnel(
     gre_check_sum: bool,
     gre_keepalive_enable: bool,
 ) -> None:
-    if not TUNNEL_ID_RE.match(entry_id):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Tunnel interface id must use a tunnel-prefixed style.",
-            {"id": entry_id},
-        )
+    # 透传：tunnel id 格式不做强校验（DUT 校验无效值），仅保留业务约束。
     if tunnel_type not in TUNNEL_TYPE_CODES:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
@@ -457,6 +485,29 @@ def _apply_tunnel(
         }
     else:
         val["ipip"] = {"src_addr": src_addr, "dst_addr": dst_addr}
+
+
+def _validate_pppoe_val(val: dict[str, Any]) -> None:
+    if val.get("type") != 3:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "PPPoE interface must use physical type (3).",
+            {"field": "type", "actual": val.get("type")},
+        )
+    pppoe = val.get("pppoe")
+    if not isinstance(pppoe, dict) or not pppoe.get("username") or not pppoe.get("password"):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "PPPoE interface requires a pppoe object with username and password.",
+            {"field": "pppoe"},
+        )
+    address_mode = (val.get("ipv4_address_mode_config") or {}).get("address_mode")
+    if address_mode != 2:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "PPPoE interface requires ipv4 address_mode=2.",
+            {"field": "ipv4_address_mode_config.address_mode", "actual": address_mode},
+        )
 
 
 def _validate_tunnel_val(val: dict[str, Any]) -> None:
@@ -573,49 +624,28 @@ def _validate_batch_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _kind_from_payload(entry_id: str, val: dict[str, Any]) -> str:
     type_code = val.get("type")
     if type_code in TUNNEL_TYPE_CODES_SET:
-        if not TUNNEL_ID_RE.match(entry_id):
-            raise RunnerError(
-                "RUNNER_VALIDATION_FAILED",
-                "Tunnel interface id must use a tunnel-prefixed style.",
-                {"id": entry_id, "type": type_code},
-            )
         return "tunnel"
     if BVI_ID_RE.match(entry_id) and "bvi" in val:
         return "bvi"
     if SUB_ID_RE.match(entry_id) and "sub" in val:
         return "sub"
+    if "pppoe" in val:
+        # PPPoE 叠加在物理口上（type=3），先于 physical 判定
+        return "pppoe"
     if type_code == 3:
         # 物理口按 type 代码判定，不校验 ID 前缀（不同型号防火墙命名不同：GE0_5 / TE0_9 / TTE0_1）
         return "physical"
     if BOND_ID_RE.match(entry_id) and "bond" in val:
         return "bond"
-    raise RunnerError(
-        "RUNNER_VALIDATION_FAILED",
-        "Interface payload id style or type-specific object is unsupported.",
-        {"id": entry_id},
-    )
+    # 透传兜底：id 风格识别不出时不拒绝，返回 unknown，由调用方跳过 type 强校验、
+    # 把 payload 原样发给 DUT（配置用例需验证无效值）。
+    return "unknown"
 
 
 def _validate_deletable_interface_id(entry_id: str) -> None:
+    # 透传：delete 的 id 不做格式/类别强校验（DUT 校验无效 id），仅要求非空。
+    # 物理口/tunnel 是否可删由 DUT 决定，runner 不再拦截。
     _validate_non_empty("id", entry_id)
-    if PHYSICAL_ID_RE.match(entry_id):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Physical interfaces cannot be deleted.",
-            {"id": entry_id},
-        )
-    if TUNNEL_ID_RE.match(entry_id):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Tunnel interfaces cannot be deleted; delete the IP tunnel via fw_delete_iptun instead.",
-            {"id": entry_id},
-        )
-    if not (BVI_ID_RE.match(entry_id) or SUB_ID_RE.match(entry_id) or BOND_ID_RE.match(entry_id)):
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "Interface delete id must be bvi<number>, <parent>.<sub-id>, or bond<number>.",
-            {"id": entry_id},
-        )
 
 
 def _validate_interface_kind(interface_kind: str) -> str:

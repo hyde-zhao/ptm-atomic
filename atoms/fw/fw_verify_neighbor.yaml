@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_verify_neighbor
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_neighbor
-description: Query the NGFW neighbor (ARP) table from /api/v1/neighbor.
+description: Query the NGFW neighbor table (IPv4 ARP or IPv6 ND) from /api/v1/neighbor.
 parameters:
   session_ref:
     type: string
@@ -12,9 +12,14 @@ parameters:
     type: string
     required: true
     description: Must be neighbor for this operation.
+  is_ip6:
+    type: int
+    required: false
+    description: Address family selector; 0 queries the IPv4 ARP table and 1 queries the IPv6 ND (neighbor discovery) table. Defaults to 0.
 inputs:
   session_ref: "<session-ref>"
   query_domain: neighbor
+  is_ip6: 0
 side_effect: observation
 returns:
   status: success
@@ -38,16 +43,19 @@ error_types:
 preconditions:
   - External orchestration holds a valid session_ref or runner session file.
 postconditions:
-  - All neighbor (ARP) table entries are available to the caller.
+  - All neighbor (ARP or ND) table entries are available to the caller.
 tags:
   - firewall
   - network
   - arp
+  - nd
   - neighbor
   - verification
 aliases:
   - arp
   - arp-table
+  - nd
+  - nd-table
   - neighbor-table
   - show-arp
   - query-arp

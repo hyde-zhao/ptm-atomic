@@ -1,0 +1,77 @@
+schema_version: "1.1"
+op_id: fw_verify_bridge_domain_mac_age
+device_type: fw
+transport: ssh
+description: Query the VPP bridge-domain MAC ageing time over SSH or Telnet (vppctl show bridge-domain <id>).
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_bridge_domain_mac_age
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when telnet target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  username:
+    type: string
+    required: false
+    description: SSH/Telnet username; defaults to root because vppctl requires root privileges. Falls back to the session-file username when empty.
+  bridge_domain_id:
+    type: int
+    required: true
+    description: VPP bridge-domain ID (1-4094) whose MAC ageing time is queried.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  username: root
+  bridge_domain_id: 4094
+side_effect: observation
+returns:
+  status: success
+  data:
+    bridge_domain_id: "<bridge-domain-id>"
+    age_minutes: "<age-minutes>"
+    bridge_domain_raw: "<bridge-domain-raw-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: mac_age_returned
+      input_ref: "<age-minutes>"
+      expected_result: The Age(min) column is parsed from the bridge-domain show output.
+  summary_ref: "<mac-age-summary-ref>"
+preconditions:
+  - Device management SSH or Telnet service is reachable.
+  - A valid root credential is available via the runner credential env var (FW_SSH_PASSWORD by default).
+  - The vppctl binary is available at /opt/dbappsecurity/bin/vppctl on the device.
+postconditions:
+  - The bridge-domain table output is captured in diag_snapshot_ref; nothing is written to the repo.
+tags:
+  - firewall
+  - bridge-domain
+  - vpp
+  - mac-age
+  - query
+  - cli
+aliases:
+  - mac-age
+  - bd-mac-age
+  - show-bd-mac-age
+since_version: "1.1.0"

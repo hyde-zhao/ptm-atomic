@@ -1,0 +1,68 @@
+schema_version: "1.1"
+op_id: fw_verify_l2fib
+device_type: fw
+transport: ssh
+description: Query the L2FIB table via the tgfw-cli interactive shell over SSH or Telnet.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_l2fib
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when telnet target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+side_effect: observation
+returns:
+  status: success
+  data:
+    l2fib_raw: "<l2fib-raw-ref>"
+    l2fib_entries: "<l2fib-entries-ref>"
+    entry_count: 0
+    total_entries: 0
+    learned_entries: 0
+    learn_limit: 0
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: l2fib_entries_returned
+      input_ref: "<l2fib-entries-ref>"
+      expected_result: The device returns the L2FIB table with a non-empty entry list as tgfw-cli session output.
+  summary_ref: "<l2fib-summary-ref>"
+preconditions:
+  - Device management SSH or Telnet service is reachable.
+  - A valid admin credential is available via the runner credential env var (cli family defaults to FW_WEB_PASSWORD, the same credential shared with web login).
+  - The login lands directly in the tgfw-cli interactive shell (DAS-TGFW> prompt).
+postconditions:
+  - Query output is captured in diag_snapshot_ref; nothing is written to the repo.
+tags:
+  - firewall
+  - l2fib
+  - layer2
+  - query
+  - cli
+aliases:
+  - l2fib
+  - mac-table
+since_version: "1.1.0"

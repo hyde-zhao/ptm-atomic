@@ -32,7 +32,7 @@ def build_subtree() -> tuple[CommandSpec, ...]:
 
 def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", required=True, action="append", help="Entry id. May be repeated for batch operations.")
-    parser.add_argument("--interface-kind", choices=("bvi", "sub", "physical", "bond", "tunnel"), required=True, help="NGFW interface kind. Tunnel interfaces support PUT and GET only.")
+    parser.add_argument("--interface-kind", choices=("bvi", "sub", "physical", "bond", "tunnel", "pppoe"), required=True, help="NGFW interface kind. Tunnel interfaces support PUT and GET only.")
     parser.add_argument("--mode", choices=("Route", "Switch", "Pair", "Monitor"), default="Route", help="NGFW interface mode.")
     parser.add_argument("--name", help="Interface val.name. Defaults to --id.")
     parser.add_argument("--desc", default="", help="Interface description.")
@@ -47,6 +47,8 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bond-member", action="append", default=[], help="Physical interface member for a bond. May be repeated.")
     parser.add_argument("--bond-mode", type=int, default=5, help="Bond mode field.")
     parser.add_argument("--bond-lb", type=int, default=0, help="Bond load-balance field.")
+    parser.add_argument("--pppoe-username", help="PPPoE username (pppoe kind only).")
+    parser.add_argument("--pppoe-password", help="PPPoE password (pppoe kind only).")
     parser.add_argument("--link-type", type=int, help="Interface linkType field.")
     parser.add_argument("--pvid", type=int, default=1, help="Switch/Pair/Monitor mode PVID.")
     parser.add_argument("--allow-pass", help="Switch/Pair/Monitor mode allowPass field.")
@@ -183,7 +185,7 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                     interface_kind=getattr(args, "interface_kind"),
                     entry_id=_single_arg(args, "id"),
                     mode=getattr(args, "mode", "Route"),
-                    ip_addresses=list(getattr(args, "ip_address") or []),
+                    ip_addresses=_arg_list(args, "ip_address"),
                     name=getattr(args, "name"),
                     desc=getattr(args, "desc", ""),
                     enabled=bool(getattr(args, "interface_enabled", True)),
@@ -191,9 +193,11 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                     sub_id=getattr(args, "sub_id"),
                     bvi_instance=getattr(args, "bvi_instance"),
                     bond_id=getattr(args, "bond_id"),
-                    bond_members=list(getattr(args, "bond_member") or []),
+                    bond_members=_arg_list(args, "bond_member"),
                     bond_mode=int(getattr(args, "bond_mode", 5)),
                     bond_lb=int(getattr(args, "bond_lb", 0)),
+                    pppoe_username=getattr(args, "pppoe_username"),
+                    pppoe_password=getattr(args, "pppoe_password"),
                     link_type=getattr(args, "link_type"),
                     pvid=int(getattr(args, "pvid", 1)),
                     allow_pass=getattr(args, "allow_pass"),
