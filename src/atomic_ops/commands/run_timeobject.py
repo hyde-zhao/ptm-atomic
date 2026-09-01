@@ -193,7 +193,13 @@ def _run_timeobject(args: argparse.Namespace, op_id: str) -> int:
                 payload_json=getattr(args, "payload_json", None),
             )
             if raw_payload is not None:
-                payload = raw_payload
+                # 设备 PUT 信封要求 {"id":<name>,"val":{...}}。--payload-json 逃生口若只携带
+                # {"val":...} 而未带 id, 从 --id 注入, 否则设备 400 "请求中没有id字段"。
+                if isinstance(raw_payload, dict) and "val" in raw_payload and "id" not in raw_payload:
+                    _require_arg(args, "id")
+                    payload = {"id": _single_arg(args, "id") or "", "val": raw_payload["val"]}
+                else:
+                    payload = raw_payload
             else:
                 _require_arg(args, "id")
                 _require_arg(args, "name")

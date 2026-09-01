@@ -88,7 +88,7 @@ The two streams are intentionally separate. A schema or operation-library change
 
 ### Fixed
 
-- None.
+- Fix `time-object update --payload-json/--payload-file` dropping the required `id`: the escape-hatch payload was sent verbatim, so `PUT /api/v1/timeobject` received `{"val":{...}}` without `id` and the device rejected it with 400 "请求中没有id字段". The id is now injected from `--id` when the raw payload omits it (still passed through unchanged when it already carries `id`).
 
 ### Security
 
