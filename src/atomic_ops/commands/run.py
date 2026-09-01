@@ -66,6 +66,9 @@ POLICY_ROUTE_OPS = (
     "fw_verify_policy_route",
     "fw_update_policy_route_priority",
 )
+SESSION_OPS = (
+    "fw_verify_session",
+)
 STATIC_ROUTE_OPS = (
     "fw_config_static_route",
     "fw_update_static_route",
@@ -141,11 +144,52 @@ NEIGHBOR_OPS = (
     "fw_delete_neighbor",
     "fw_delete_batch_neighbor",
 )
+MACPOOL_OPS = (
+    "fw_config_macpool",
+    "fw_update_macpool",
+    "fw_delete_macpool",
+    "fw_delete_batch_macpool",
+    "fw_verify_macpool",
+)
+DOMAINPOOL_OPS = (
+    "fw_config_domainpool",
+    "fw_update_domainpool",
+    "fw_delete_domainpool",
+    "fw_delete_batch_domainpool",
+    "fw_verify_domainpool",
+)
+FILETYPE_OPS = (
+    "fw_config_filetype",
+    "fw_update_filetype",
+    "fw_delete_filetype",
+    "fw_config_filetypeobj",
+    "fw_update_filetypeobj",
+    "fw_verify_filetypeobj",
+    "fw_delete_batch_filetypeobj",
+)
+CERT_OPS = (
+    "fw_config_localcert",
+    "fw_update_localcert",
+    "fw_delete_localcert",
+    "fw_delete_batch_localcert",
+    "fw_verify_localcert",
+    "fw_config_localcacert",
+    "fw_verify_localcacert",
+    "fw_delete_batch_localcacert",
+)
+GEOIP_OPS = (
+    "fw_config_geoip",
+    "fw_update_geoip",
+    "fw_delete_geoip",
+    "fw_delete_batch_geoip",
+    "fw_verify_geoip",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
     "fw_config_object",
     *POLICY_ROUTE_OPS,
+    *SESSION_OPS,
     *STATIC_ROUTE_OPS,
     *INTERFACE_OPS,
     *OSPFV2_OPS,
@@ -164,7 +208,11 @@ SUPPORTED_OPS = (
     *IP6POOL_GROUP_OPS,
     *TIMEOBJECT_OPS,
     *NEIGHBOR_OPS,
-    "fw_verify_session",
+    *MACPOOL_OPS,
+    *DOMAINPOOL_OPS,
+    *FILETYPE_OPS,
+    *CERT_OPS,
+    *GEOIP_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -178,6 +226,7 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_delete_policy_route": ("policy-route", "delete"),
     "fw_verify_policy_route": ("policy-route", "verify"),
     "fw_update_policy_route_priority": ("policy-route", "priority"),
+    "fw_verify_session": ("session", "verify"),
     "fw_config_static_route": ("static-route", "config"),
     "fw_update_static_route": ("static-route", "update"),
     "fw_delete_static_route": ("static-route", "delete"),
@@ -225,7 +274,6 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_verify_l2fib": ("cli", "verify-l2fib"),
     "fw_config_bridge_domain_mac_age": ("cli", "set-mac-age"),
     "fw_verify_bridge_domain_mac_age": ("cli", "verify-mac-age"),
-    "fw_verify_session": ("session-monitor", "verify"),
     # Deprecated legacy op_id aliases (merged into the unified transport op)
     "fw_verify_system_version_cli": ("cli", "verify-system-version"),
     "fw_verify_system_version_telnet": ("cli", "verify-system-version"),
@@ -324,6 +372,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_ip6pool_group as run_ip6pool_group
     from atomic_ops.commands import run_timeobject as run_timeobject
     from atomic_ops.commands import run_policy_route as run_policy_route
+    from atomic_ops.commands import run_session as run_session
     from atomic_ops.commands import run_static_route as run_static_route
     from atomic_ops.commands import run_security_zone as run_security_zone
     from atomic_ops.commands import run_acl_policy as run_acl_policy
@@ -338,9 +387,15 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_reboot as run_reboot
     from atomic_ops.commands import run_ha as run_ha
     from atomic_ops.commands import run_trex as run_trex
+    from atomic_ops.commands import run_dns as run_dns
     from atomic_ops.commands import run_neighbor as run_neighbor
-    from atomic_ops.commands import run_session_monitor as run_session_monitor
+    from atomic_ops.commands import run_ues as run_ues
     from atomic_ops.commands import run_cli as run_cli
+    from atomic_ops.commands import run_macpool as run_macpool
+    from atomic_ops.commands import run_domainpool as run_domainpool
+    from atomic_ops.commands import run_filetype as run_filetype
+    from atomic_ops.commands import run_cert as run_cert
+    from atomic_ops.commands import run_geoip as run_geoip
 
     return (
         CommandGroup(
@@ -403,6 +458,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             description="Policy-route configuration, update, delete, verify, and priority operations.",
             children=run_policy_route.build_subtree(),
         ),
+        *run_session.build_subtree(),
         CommandGroup(
             name="static-route",
             help="Static route operations.",
@@ -451,9 +507,40 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_config_transfer.build_subtree(),
         *run_reboot.build_subtree(),
         *run_ha.build_subtree(),
+        *run_dns.build_subtree(),
         *run_trex.build_subtree(),
         *run_neighbor.build_subtree(),
-        *run_session_monitor.build_subtree(),
+        *run_ues.build_subtree(),
+        CommandGroup(
+            name="mac-pool",
+            help="MAC address object operations.",
+            description="MAC address object configuration, update, delete, batch-delete, and verify operations.",
+            children=run_macpool.build_subtree(),
+        ),
+        CommandGroup(
+            name="domain-pool",
+            help="Domain name object operations.",
+            description="Domain name object configuration, update, delete, batch-delete, and verify operations.",
+            children=run_domainpool.build_subtree(),
+        ),
+        CommandGroup(
+            name="filetype",
+            help="File type and file type group operations.",
+            description="Custom file type config/update/delete and file type group config/update/verify/batch-delete operations.",
+            children=run_filetype.build_subtree(),
+        ),
+        CommandGroup(
+            name="cert",
+            help="Certificate operations.",
+            description="Local certificate and local CA certificate create, update/issue, delete, batch-delete, and verify operations.",
+            children=run_cert.build_subtree(),
+        ),
+        CommandGroup(
+            name="geoip",
+            help="Custom geoip region object operations.",
+            description="Custom geoip region object config, update, delete, batch-delete, and verify operations.",
+            children=run_geoip.build_subtree(),
+        ),
         CommandGroup(
             name="cli",
             help="SSH/Telnet shell verification operations.",
@@ -519,6 +606,8 @@ def _dispatch_legacy(op_id: str, args: argparse.Namespace) -> int:
             payload = _run_object_legacy(args)
         elif op_id in POLICY_ROUTE_OPS:
             payload = _run_policy_route_legacy(args)
+        elif op_id in SESSION_OPS:
+            payload = _run_session_legacy(args)
         elif op_id in STATIC_ROUTE_OPS:
             payload = _run_static_route_legacy(args)
         elif op_id in INTERFACE_OPS:
@@ -916,6 +1005,55 @@ def _run_security_zone_legacy(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _run_session_legacy(args: argparse.Namespace) -> dict[str, Any]:
+    from atomic_ops.runner.session_table import (
+        build_session_filters,
+        build_session_verify_dry_run,
+        execute_session_verify,
+    )
+
+    session_file = resolve_session_file(getattr(args, "session_file", None))
+    filters = build_session_filters(
+        args={
+            "proto": getattr(args, "proto", "ANY"),
+            "src_addr": getattr(args, "src_addr", "0:0::0"),
+            "dst_addr": getattr(args, "dst_addr", "0:0::0"),
+            "src_port": getattr(args, "src_port", 0),
+            "dst_port": getattr(args, "dst_port", 0),
+            "rxZone": getattr(args, "rx_zone", ""),
+            "txZone": getattr(args, "tx_zone", ""),
+            "rxIf": getattr(args, "rx_if", ""),
+            "txIf": getattr(args, "tx_if", ""),
+            "action": getattr(args, "action", ""),
+            "policyId": getattr(args, "policy_id", ""),
+            "appName": getattr(args, "app_name", ""),
+        }
+    )
+    if not getattr(args, "execute"):
+        return build_session_verify_dry_run(
+            base_url=getattr(args, "base_url"),
+            session_file=session_file,
+            auth_header=getattr(args, "auth_header"),
+            page=int(getattr(args, "page", 1)),
+            size=int(getattr(args, "size", 40)),
+            is_ip6=bool(getattr(args, "is_ip6", False)),
+            filters=filters,
+            verify_tls=bool(getattr(args, "verify_tls")),
+            timeout=float(getattr(args, "timeout")),
+        )
+    return execute_session_verify(
+        base_url=getattr(args, "base_url"),
+        session_file=session_file,
+        auth_header=getattr(args, "auth_header"),
+        page=int(getattr(args, "page", 1)),
+        size=int(getattr(args, "size", 40)),
+        is_ip6=bool(getattr(args, "is_ip6", False)),
+        filters=filters,
+        verify_tls=bool(getattr(args, "verify_tls")),
+        timeout=float(getattr(args, "timeout")),
+    )
+
+
 def _run_ospfv2_legacy(args: argparse.Namespace) -> dict[str, Any]:
     from atomic_ops.runner.ospfv2 import build_ospfv2_dry_run, build_ospfv2_payload, execute_ospfv2
 
@@ -1057,19 +1195,9 @@ def _single_arg(args: argparse.Namespace, name: str) -> str | None:
 def _arg_list(args: argparse.Namespace, name: str) -> list[str]:
     value = getattr(args, name)
     if isinstance(value, list):
-        # list 元素本身可能是逗号串（append 参数 + op_mapper 逗号串传参），统一拆分。
-        out: list[str] = []
-        for item in value:
-            if isinstance(item, str) and "," in item:
-                parts = [p.strip() for p in item.split(",") if p.strip()]
-                out.extend(parts or [item])
-            else:
-                out.append(item)
-        return out
+        return [item for item in value if item]
     if value:
-        # 逗号串（如 "1,2,3"）拆分为多值列表；op_mapper 对 list 参数以逗号串形式传 CLI。
-        parts = [p.strip() for p in str(value).split(",") if p.strip()]
-        return parts or [value]
+        return [value]
     return []
 
 

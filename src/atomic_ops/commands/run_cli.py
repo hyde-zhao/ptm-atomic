@@ -80,6 +80,27 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             add_args=_add_check_bridge_domain_args,
         ),
         CommandSpec(
+            name="verify-process-state",
+            help="Check vpp/dnsmasq/agent process state over SSH (pgrep).",
+            description="pgrep the process command line; a numeric pid means the process is running.",
+            handler=_run_verify_process_state,
+            add_args=_add_process_args,
+        ),
+        CommandSpec(
+            name="kill-process",
+            help="Kill vpp/dnsmasq/agent by pid over SSH (auto-restarts).",
+            description="kill -9 <pid>; the device supervisor restarts the process automatically.",
+            handler=_run_kill_process,
+            add_args=_add_kill_args,
+        ),
+        CommandSpec(
+            name="config-dns-diag",
+            help="Run DNS resolution diagnostics over SSH (ping/traceroute).",
+            description="ping or traceroute a domain from the firewall to verify local DNS resolution.",
+            handler=_run_config_dns_diag,
+            add_args=_add_dns_diag_args,
+        ),
+        CommandSpec(
             name="verify-l2fib",
             help="Query the L2FIB table via the tgfw-cli interactive shell over SSH/Telnet (show l2fib all).",
             description="Connect to the device, enter the tgfw-cli interactive shell, run 'show l2fib all', and parse the L2FIB table.",
@@ -212,6 +233,205 @@ def _run_check_bvi_interface_config(args: argparse.Namespace) -> int:
 
 def _add_check_bridge_domain_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
+
+
+def _add_process_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--process",
+        choices=("vpp", "dnsmasq", "agent"),
+        required=True,
+        help="Process to inspect: vpp, dnsmasq, or agent.",
+    )
+
+
+def _add_kill_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--process",
+        choices=("vpp", "dnsmasq", "agent"),
+        required=True,
+        help="Process being killed (vpp, dnsmasq, or agent) for context.",
+    )
+    parser.add_argument(
+        "--pid",
+        required=True,
+        help="Process id to kill; obtain it via verify-process-state.",
+    )
+
+
+def _add_dns_diag_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--domain",
+        required=True,
+        help="Domain name resolved by the firewall, e.g. www.baidu.com.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("ping", "traceroute"),
+        required=True,
+        help="Diagnostic command: ping -c 3 <domain> or traceroute <domain>.",
+    )
+
+
+def _run_verify_process_state(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_process_state_dry_run,
+        execute_verify_process_state,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        process = getattr(args, "process")
+        if not ctx.get("execute"):
+            result = build_verify_process_state_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                process=process,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = getattr(args, "credential_env", None)
+            if not credential_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--credential-env is required when using --execute.",
+                    {"missing": "credential_env"},
+                )
+            result = execute_verify_process_state(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                credential_env=credential_env,
+                process=process,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _run_kill_process(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_kill_process_dry_run,
+        execute_kill_process,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        process = getattr(args, "process")
+        pid = getattr(args, "pid")
+        if not ctx.get("execute"):
+            result = build_kill_process_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                process=process,
+                pid=pid,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = getattr(args, "credential_env", None)
+            if not credential_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--credential-env is required when using --execute.",
+                    {"missing": "credential_env"},
+                )
+            result = execute_kill_process(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                credential_env=credential_env,
+                process=process,
+                pid=pid,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _run_config_dns_diag(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_dns_diag_dry_run,
+        execute_dns_diag,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        domain = getattr(args, "domain")
+        mode = getattr(args, "mode")
+        if not ctx.get("execute"):
+            result = build_dns_diag_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                domain=domain,
+                mode=mode,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = getattr(args, "credential_env", None)
+            if not credential_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--credential-env is required when using --execute.",
+                    {"missing": "credential_env"},
+                )
+            result = execute_dns_diag(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                credential_env=credential_env,
+                domain=domain,
+                mode=mode,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
 
 
 def _add_verify_l2fib_args(parser: argparse.ArgumentParser) -> None:

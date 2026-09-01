@@ -57,3 +57,11 @@ Thumbs.db
 .input/*
 
 .ptm-team-manifest.json
+_metadata.json
+session.json
+
+# Generated device-case run reports
+out/
+
+# One-time probing scripts (local helpers; not part of the deliverable)
+device_cases/probe/

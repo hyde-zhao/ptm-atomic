@@ -172,6 +172,15 @@ def _username_from_session(session_payload: dict[str, Any], *, default: str = "a
     return default
 
 
+def _username_preview(session_file: Path, *, default: str = "admin") -> str:
+    """Resolve the username for a dry-run request preview without requiring a session file."""
+    try:
+        session_payload = read_session_file(session_file)
+    except RunnerError:
+        return default
+    return _username_from_session(session_payload)
+
+
 def _default_port(transport: str) -> int:
     return TELNET_DEFAULT_PORT if transport == "telnet" else SSH_DEFAULT_PORT
 
@@ -1559,3 +1568,284 @@ def execute_config_bridge_domain_mac_age(
         },
         "diag_snapshot_ref": "<diag-snapshot-ref>",
     }
+
+
+# ── fw_verify_process_state ───────────────────────────────
+
+
+PROCESS_COMMANDS = {
+    "vpp": 'pgrep -f "^/opt/dbappsecurity/bin/vpp -c /appdata/etc/vpp/startup.conf"',
+    "dnsmasq": 'pgrep -f "^/opt/dbappsecurity/bin/dnsmasq -k -C /appdata/etc/dns/dnsmasq.conf"',
+    "agent": 'pgrep -f "^/opt/dbappsecurity/bin/vpp-agent -config-dir=/appdata/etc/agentcfg"',
+}
+PROCESS_SUCCESS_PATTERN = r"\d+"
+
+
+def _process_command(process: str) -> str:
+    try:
+        return PROCESS_COMMANDS[process]
+    except KeyError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Unsupported process name for process state verification.",
+            {"process": process, "supported": sorted(PROCESS_COMMANDS)},
+        ) from exc
+
+
+def build_verify_process_state_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    process: str,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    username = _username_preview(session_file)
+    command = _process_command(process)
+    return {
+        "op_id": "fw_verify_process_state",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": username,
+            "success_pattern": PROCESS_SUCCESS_PATTERN,
+        },
+        "process": process,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_process_state(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    credential_env: str,
+    process: str,
+    timeout: float,
+) -> dict[str, Any]:
+    command = _process_command(process)
+    result = _execute_shell_op(
+        op_id="fw_verify_process_state",
+        transport=transport,
+        command=command,
+        success_pattern=PROCESS_SUCCESS_PATTERN,
+        result_key="pid",
+        stdout_ref_label="<process-state-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        credential_env=credential_env,
+        timeout=timeout,
+    )
+    pid = result["data"]["pid"]
+    result["data"]["running"] = bool(re.search(r"\d+", pid))
+    result["data"]["process"] = process
+    return result
+
+
+# ── fw_kill_process ───────────────────────────────────────
+
+
+KILL_COMMAND_TEMPLATE = "kill -9 {{pid}}"
+KILL_SUCCESS_PATTERN = r"\A\z"
+
+
+def build_kill_process_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    process: str,
+    pid: str,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    username = _username_preview(session_file)
+    command = render_command(KILL_COMMAND_TEMPLATE, {"pid": pid})
+    return {
+        "op_id": "fw_kill_process",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": username,
+            "success_pattern": KILL_SUCCESS_PATTERN,
+        },
+        "process": process,
+        "pid": pid,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_kill_process(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    credential_env: str,
+    process: str,
+    pid: str,
+    timeout: float,
+) -> dict[str, Any]:
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    username = _username_from_session(session_payload)
+    credential = _read_credential_env(credential_env)
+    command = render_command(KILL_COMMAND_TEMPLATE, {"pid": pid})
+
+    result = _run_shell_command(
+        transport=transport,
+        host=target_host,
+        port=target_port,
+        username=username,
+        credential=credential,
+        command=command,
+        timeout=timeout,
+    )
+    if not evaluate_success(result, KILL_SUCCESS_PATTERN):
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "kill command did not complete successfully for the target process.",
+            {
+                "op_id": "fw_kill_process",
+                "process": process,
+                "pid": pid,
+                "exit_code": result.exit_code,
+                "stdout_preview": (result.stdout[:200] if result.stdout else ""),
+                "stderr_preview": (result.stderr[:200] if result.stderr else ""),
+            },
+        )
+    return {
+        "op_id": "fw_kill_process",
+        "status": "success",
+        "transport": transport,
+        "data": {
+            "killed": True,
+            "process": process,
+            "pid": pid,
+            "auto_restart": True,
+        },
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": username,
+        },
+        "response": {
+            "exit_code": result.exit_code,
+            "stdout_ref": "<kill-result-ref>",
+            "stderr_ref": "<diag-snapshot-ref>",
+        },
+        "diag_snapshot_ref": "<diag-snapshot-ref>",
+    }
+
+
+# ── fw_config_dns_diag ────────────────────────────────────
+
+
+DNS_DIAG_COMMANDS = {
+    "ping": "ping -c 3 {{domain}}",
+    "traceroute": "traceroute {{domain}}",
+}
+DNS_DIAG_SUCCESS_PATTERNS = {
+    "ping": r"\d+ bytes from",
+    "traceroute": r"\d+ hops max",
+}
+
+
+def _diag_command(mode: str, domain: str) -> str:
+    try:
+        template = DNS_DIAG_COMMANDS[mode]
+    except KeyError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Unsupported DNS diagnostic mode.",
+            {"mode": mode, "supported": sorted(DNS_DIAG_COMMANDS)},
+        ) from exc
+    return render_command(template, {"domain": domain})
+
+
+def build_dns_diag_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    domain: str,
+    mode: str,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    username = _username_preview(session_file)
+    command = _diag_command(mode, domain)
+    return {
+        "op_id": "fw_config_dns_diag",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": username,
+            "success_pattern": DNS_DIAG_SUCCESS_PATTERNS[mode],
+        },
+        "mode": mode,
+        "domain": domain,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_dns_diag(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    credential_env: str,
+    domain: str,
+    mode: str,
+    timeout: float,
+) -> dict[str, Any]:
+    command = _diag_command(mode, domain)
+    return _execute_shell_op(
+        op_id="fw_config_dns_diag",
+        transport=transport,
+        command=command,
+        success_pattern=DNS_DIAG_SUCCESS_PATTERNS[mode],
+        result_key="diag_output",
+        stdout_ref_label="<dns-diag-output-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        credential_env=credential_env,
+        timeout=timeout,
+    )

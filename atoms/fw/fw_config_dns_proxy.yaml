@@ -1,0 +1,69 @@
+schema_version: "1.1"
+op_id: fw_config_dns_proxy
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_dns_proxy
+description: Enable or disable the global DNS proxy through PUT /api/v1/dns/global.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dns-global for this operation.
+  params:
+    type: json
+    required: true
+    description: DNS proxy toggle object with enable boolean (id is fixed to dnsServer).
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: dns-global
+  params:
+    enable: true
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: dns-global
+      applied_ref: "<dns-global-config-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+side_effect: state_mutation
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - dns
+gate:
+  required: true
+  reason: The global DNS proxy intercepts client DNS queries and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Global DNS proxy state change result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_dns_proxy_server can confirm proxy server behavior after enabling.
+tags:
+  - firewall
+  - dns
+  - dns-proxy
+  - configuration
+aliases:
+  - dns-proxy-toggle
+  - global-dns-proxy
+  - dns-global-switch
+since_version: "1.9.0"

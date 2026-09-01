@@ -1,0 +1,89 @@
+schema_version: "1.1"
+op_id: fw_kill_process
+device_type: fw
+transport: ssh
+description: Kill the vpp/dnsmasq/agent process by pid with kill -9 over SSH; the process auto-restarts.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_kill_process
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when the SSH target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  process:
+    type: string
+    required: true
+    description: Process being killed; one of vpp, dnsmasq, or agent.
+  pid:
+    type: string
+    required: true
+    description: Process id to kill; obtain it via fw_verify_process_state.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  process: vpp
+  pid: "2249"
+side_effect: destructive
+returns:
+  status: success
+  data:
+    killed: true
+    process: vpp
+    pid: "2249"
+    auto_restart: true
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+rollback_strategy:
+  type: manual_required
+  snapshot_required: false
+  required_inputs:
+    - killed
+  notes: The killed process is restarted automatically by the device supervisor (vpp and agent immediately; dnsmasq after the global DNS proxy is enabled), so no manual restart is expected.
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+risk:
+  level: high
+  categories:
+    - process
+    - destructive
+gate:
+  required: true
+  reason: Killing core processes interrupts DNS and forwarding services and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - Device management SSH service is reachable with a root-capable credential via the runner credential env var.
+  - The pid was obtained by fw_verify_process_state; gate evidence exists before this destructive kill is used.
+  - Process restart after kill is expected and part of the test intent.
+postconditions:
+  - The process is killed and restarted automatically by the device supervisor; a follow-up fw_verify_process_state can confirm the new pid.
+tags:
+  - firewall
+  - dns
+  - process
+  - destructive
+  - cli
+aliases:
+  - kill-process
+  - process-kill
+  - kill-vpp-dnsmasq-agent
+since_version: "1.9.0"

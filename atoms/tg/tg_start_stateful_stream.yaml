@@ -1,0 +1,58 @@
+schema_version: "1.1"
+op_id: tg_start_stateful_stream
+device_type: tg
+description: Start ASTF stateful traffic from a loaded profile template.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_start_stateful_stream
+parameters:
+  user_id:
+    type: string
+    required: false
+    description: TRex multi-user owner id. Defaults to "default".
+  mult:
+    type: int
+    required: false
+    description: CPS multiplier. mult x template base_cps = actual CPS. Defaults to 1.
+  duration:
+    type: int
+    required: false
+    description: >-
+      Run duration in seconds. >0 = timed, -1 = continuous until stop.
+      Defaults to -1.
+returns:
+  status: success
+  data:
+    user_id: default
+    mult: 1
+    duration: -1
+    state: running
+  error_type: INVALID_PARAM
+  diag_snapshot_ref: ""
+idempotent: false
+side_effect: traffic_runtime
+rollback_strategy:
+  type: inverse_op
+  op_id: tg_stop_stateful_stream
+  snapshot_required: false
+  required_inputs:
+    - user_id
+  notes: Stop terminates the stateful stream and clears runtime state.
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - A stateful template has been loaded via tg_apply_stateful_template.
+  - The trex-astf.service is running.
+postconditions:
+  - ASTF stateful traffic is running on the TRex ASTF instance.
+tags:
+  - traffic
+  - trex
+  - stateful
+  - stream
+since_version: "1.3.0"

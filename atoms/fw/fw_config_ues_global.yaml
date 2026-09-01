@@ -1,0 +1,112 @@
+schema_version: "1.1"
+op_id: fw_config_ues_global
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_ues_global
+description: Save the NGFW UES global configuration.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ues_global for this operation.
+  params:
+    type: json
+    required: true
+    description: UES global config object. httpdstport/httpsdstport are integer lists; open_service is a string list of service names; blackadd/blocktime control blacklist add and block duration; hashadd enables hashed add; uesurl must echo the current GET /uesglobal value because PUT replaces the whole config.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: ues_global
+  params:
+    httpdstport: [80]
+    httpsdstport: [443]
+    blackadd: true
+    blocktime: 300
+    hashadd: true
+    uesurl: "https://<UES_IP>:53443/publish/index.html?language=zh-CN"
+    notipstate: true
+    open_service: ["DNS", "DHCP"]
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    pre_snapshot_ref: "<ues-global-pre-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: ues_global
+      applied_ref: "<ues-global-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - full_config
+  notes: Restore the complete pre-change UES global config, not only the modified fields.
+pre_snapshot:
+  op_id: fw_verify_ues_global
+  capture_fields:
+    - full_config
+rollback_apply:
+  op_id: fw_config_ues_global
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_ues_global
+  expected_state: equals_pre_snapshot
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - ues_integration
+gate:
+  required: true
+  reason: UES global changes affect user-facing promotion and blocking behavior and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk configuration contract is used.
+  - uesurl is derived from the UES access endpoint and must be echoed from the current GET /uesglobal value.
+postconditions:
+  - Configuration result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_ues_global query can confirm the device UES global state.
+tags:
+  - firewall
+  - ues
+  - global
+  - configuration
+aliases:
+  - ues-global
+  - ues-global-config
+since_version: "1.7.0"

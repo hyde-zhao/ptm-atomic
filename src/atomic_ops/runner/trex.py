@@ -26,6 +26,15 @@ SUCCESS_STATUS = {200}
 TEMPLATE_RE = re.compile(r"^[a-z0-9_-]+$")
 RATE_RE = re.compile(r"^[1-9][0-9]*(pps|kbps|mbps|gbps)$", re.IGNORECASE)
 
+TREX_STATEFUL_OPS = {
+    "tg_config_stateful_interface",
+    "tg_apply_stateful_template",
+    "tg_start_stateful_stream",
+    "tg_verify_stateful_metrics",
+    "tg_stop_stateful_stream",
+    "tg_delete_stateful_template",
+}
+
 TREX_OPS: dict[str, tuple[str, str]] = {
     op_id: ("POST", f"/api/v1/ops/{op_id}")
     for op_id in (
@@ -41,6 +50,11 @@ TREX_OPS: dict[str, tuple[str, str]] = {
 }
 # ownership 走独立 GET 端点，非 /api/v1/ops/{op_id} 调度
 TREX_OPS["tg_verify_ownership"] = ("GET", "/api/v1/ownership")
+# Stateful (ASTF) operations
+TREX_OPS.update({
+    op_id: ("POST", f"/api/v1/ops/{op_id}")
+    for op_id in TREX_STATEFUL_OPS
+})
 
 # user_id 命名规范：default（兼容旧流程）或 dev<ip末段>-<序号>（如 dev172-1）
 USER_ID_RE = re.compile(r"^(default|dev\d{1,3}-\d+)$")
@@ -55,6 +69,8 @@ _USER_ID_FORWARD_OPS = {
     "tg_stop_traffic_stream",
     "tg_delete_traffic_template",
 }
+# Stateful (ASTF) ops also forward user_id
+_USER_ID_FORWARD_OPS.update(TREX_STATEFUL_OPS)
 
 # trex-api OperationEnvelope.error_type -> (CLI runner error_code, retryable)
 ERROR_TYPE_MAP: dict[str, tuple[str, bool]] = {
@@ -156,6 +172,36 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
             payload["max_loss"] = params.get("max_loss")
     elif op_id == "tg_delete_traffic_template":
         payload = {"template": params.get("template")}
+    elif op_id == "tg_apply_stateful_template":
+        payload = {
+            "template": params.get("template"),
+        }
+        tunables = params.get("tunables")
+        if tunables is not None:
+            payload["tunables"] = tunables
+    elif op_id == "tg_config_stateful_interface":
+        interfaces = params.get("interfaces")
+        if not isinstance(interfaces, list) or not interfaces:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "interfaces must be a non-empty list.",
+                {"field": "interfaces"},
+            )
+        payload: dict[str, Any] = {"interfaces": interfaces}
+    elif op_id == "tg_start_stateful_stream":
+        payload = {
+            "mult": params.get("mult", 1),
+            "duration": params.get("duration", -1),
+        }
+    elif op_id == "tg_verify_stateful_metrics":
+        payload = {}
+        max_loss = params.get("max_loss")
+        if max_loss is not None:
+            payload["max_loss"] = max_loss
+    elif op_id == "tg_stop_stateful_stream":
+        payload = {}
+    elif op_id == "tg_delete_stateful_template":
+        payload = {}
     elif op_id == "tg_verify_ownership":
         # GET 查询无请求体
         payload: dict[str, Any] = {}
@@ -206,14 +252,20 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
                 "ip_version must be ipv4 or ipv6.",
                 {"field": "ip_version", "actual": ip_version},
             )
-        if payload.get("l4_protocol") not in ("tcp", "udp"):
+        l4_proto = payload.get("l4_protocol")
+        if l4_proto not in ("tcp", "udp", "icmp"):
             raise RunnerError(
                 "RUNNER_VALIDATION_FAILED",
-                "l4_protocol must be tcp or udp.",
-                {"field": "l4_protocol", "actual": payload.get("l4_protocol")},
+                "l4_protocol must be tcp, udp or icmp.",
+                {"field": "l4_protocol", "actual": l4_proto},
             )
-        payload["l4_sport"] = _validate_port_int("l4_sport", payload.get("l4_sport"))
-        payload["l4_dport"] = _validate_port_int("l4_dport", payload.get("l4_dport"))
+        if l4_proto in ("tcp", "udp"):
+            payload["l4_sport"] = _validate_port_int("l4_sport", payload.get("l4_sport"))
+            payload["l4_dport"] = _validate_port_int("l4_dport", payload.get("l4_dport"))
+        else:
+            # ICMP 无端口
+            payload["l4_sport"] = None
+            payload["l4_dport"] = None
         traffic_mode = payload.get("traffic_mode")
         if traffic_mode not in ("count", "continuous"):
             raise RunnerError(
@@ -231,11 +283,15 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
         if traffic_mode == "count":
             count = payload.get("count")
             if count is None:
-                raise RunnerError(
-                    "RUNNER_VALIDATION_FAILED",
-                    "count is required when traffic_mode=count.",
-                    {"field": "count"},
-                )
+                if payload.get("l4_protocol") == "icmp":
+                    # ICMP 默认 5 个报文（与 ping 一致），可用 --count 覆盖
+                    count = 5
+                else:
+                    raise RunnerError(
+                        "RUNNER_VALIDATION_FAILED",
+                        "count is required when traffic_mode=count.",
+                        {"field": "count"},
+                    )
             payload["count"] = _validate_positive_int("count", count)
         elif payload.get("count") is not None:
             payload["count"] = _validate_positive_int("count", payload["count"])
@@ -247,12 +303,7 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
         payload["ports"] = ports
         _require_payload_str(payload, "txport")
         _require_payload_str(payload, "rxport")
-        if payload["txport"] == payload["rxport"]:
-            raise RunnerError(
-                "RUNNER_VALIDATION_FAILED",
-                "txport and rxport must be different.",
-                {"txport": payload["txport"], "rxport": payload["rxport"]},
-            )
+        # 允许 txport==rxport（ICMP 应答回同一口；非 ICMP 由 trex-api 按模板协议拒绝）
         if payload["txport"] not in ports or payload["rxport"] not in ports:
             raise RunnerError(
                 "RUNNER_VALIDATION_FAILED",
@@ -273,6 +324,33 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
             payload["max_loss"] = float(max_loss)
     elif op_id == "tg_delete_traffic_template":
         _validate_template_name(payload.get("template"), field="template")
+    elif op_id == "tg_apply_stateful_template":
+        _validate_template_name(payload.get("template"), field="template")
+    elif op_id == "tg_config_stateful_interface":
+        interfaces = payload.get("interfaces")
+        if not isinstance(interfaces, list) or not interfaces:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "interfaces must be a non-empty list.",
+                {"field": "interfaces"},
+            )
+    elif op_id == "tg_start_stateful_stream":
+        mult = payload.get("mult", 1)
+        if not isinstance(mult, int) or mult < 1:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "mult must be a positive integer.",
+                {"field": "mult"},
+            )
+        duration = payload.get("duration", -1)
+        if not isinstance(duration, int) or (duration != -1 and duration <= 0):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "duration must be -1 (continuous) or a positive integer.",
+                {"field": "duration"},
+            )
+    elif op_id in {"tg_verify_stateful_metrics", "tg_stop_stateful_stream", "tg_delete_stateful_template"}:
+        pass  # no required fields beyond optional user_id
     elif op_id == "tg_verify_ownership":
         # GET 查询无请求体，无需校验
         pass

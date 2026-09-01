@@ -65,7 +65,7 @@ def bind_run_context(run_id: str, mode: str) -> contextvars.Token:
     return _current_run.set(RunContext(run_id=run_id, mode=mode, start_ts=time.monotonic()))
 
 
-def reset_run_context(token: contextvars.Token) -> None:
+def reset_run_context(token: contextvars.Token) -> None:  # security-gate: ok — contextvars.Token 类型注解，非凭据
     _current_run.reset(token)
 
 

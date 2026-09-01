@@ -1,0 +1,110 @@
+schema_version: "1.1"
+op_id: fw_config_geoip
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_geoip
+description: Define a custom geoip region object mapping an IP range to a country/province/city.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be geoip for this operation.
+  params:
+    type: json
+    required: true
+    description: Geoip region configuration with ip range, country, province, city, accuracy and description; province and city are required and validated by the device region database.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: geoip
+  params:
+    accuracy: 2
+    desc: atomic geoip object
+    ip: 192.0.2.1-192.0.2.9
+    country: CN
+    province: Hunan
+    city: Changsha
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: geoip
+      applied_ref: "<geoip-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+side_effect: state_mutation
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_geoip
+  snapshot_required: false
+  required_inputs:
+    - ip
+  id_source: query
+  query_op: fw_verify_geoip
+  query_match: desc
+  id_field: id
+  notes: The geoip object has no name; its numeric id is returned on create and also resolved via fw_verify_geoip by description, then deleted.
+pre_snapshot:
+  op_id: fw_verify_geoip
+  capture_fields:
+    - desc
+    - existence
+post_verify:
+  op_id: fw_verify_geoip
+  expected_state: present
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Geoip region object changes can affect geo-location policy matching and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk configuration contract is used.
+postconditions:
+  - Configuration result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - capacity
+  - geoip
+  - configuration
+aliases:
+  - geoip
+  - geo-ip-object
+  - region-object
+  - custom-region
+since_version: "1.11.0"

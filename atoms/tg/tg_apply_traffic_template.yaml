@@ -30,15 +30,15 @@ parameters:
   l4_protocol:
     type: string
     required: true
-    description: Layer 4 protocol, currently tcp or udp.
+    description: "Layer 4 protocol: tcp, udp, or icmp (icmp = echo request, no ports)."
   l4_sport:
     type: int
-    required: true
-    description: Layer 4 source port.
+    required: false
+    description: Layer 4 source port (tcp/udp only).
   l4_dport:
     type: int
-    required: true
-    description: Layer 4 destination port.
+    required: false
+    description: Layer 4 destination port (tcp/udp only).
   traffic_mode:
     type: string
     required: true

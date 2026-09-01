@@ -384,7 +384,7 @@ dependencies = [
 requires-dist = [
     { name = "cryptography" },
     { name = "jsonschema" },
-    { name = "paramiko" },
+    { name = "paramiko", specifier = ">=5.0.0" },
     { name = "pyyaml" },
     { name = "requests" },
 ]

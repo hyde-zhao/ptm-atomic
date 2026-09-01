@@ -1,0 +1,81 @@
+schema_version: "1.1"
+op_id: fw_delete_batch_static_dns
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_batch_static_dns
+description: Batch-delete multiple static DNS entries through POST /api/v1/batch with DELETE /api/v1/dns/cache items.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be static-dns for this operation.
+  params:
+    type: json
+    required: true
+    description: Batch object with one DELETE /api/v1/dns/cache item per domain name to remove.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: static-dns
+  params:
+    batch:
+      - method: DELETE
+        resource: /api/v1/dns/cache
+        body:
+          id:
+            - www.example.com
+      - method: DELETE
+        resource: /api/v1/dns/cache
+        body:
+          id:
+            - www.example1.com
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: static-dns
+      applied_ref: "<static-dns-batch-delete-result-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+side_effect: destructive
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - dns
+gate:
+  required: true
+  reason: Removing multiple static DNS entries can break local and proxied DNS resolution and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - The batch contains at least one DELETE /api/v1/dns/cache item with a non-empty id array.
+postconditions:
+  - Static DNS batch delete result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_static_dns can confirm the entries no longer resolve through the static table.
+tags:
+  - firewall
+  - dns
+  - static-dns
+  - batch
+  - configuration
+aliases:
+  - static-dns-batch-delete
+  - dns-entry-batch-delete
+  - domain-mapping-clear
+since_version: "1.9.0"

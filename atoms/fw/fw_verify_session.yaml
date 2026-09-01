@@ -2,112 +2,118 @@ schema_version: "1.1"
 op_id: fw_verify_session
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_session
-description: Query the NGFW session table (IPv4 or IPv6) through /api/v1/monitor/sessioninfo.
+description: Query NGFW session table entries (IPv4 or IPv6) with optional filter conditions.
 parameters:
   session_ref:
     type: string
     required: false
     description: Non-sensitive session reference from an external orchestrator.
-  isip6:
-    type: int
-    required: false
-    description: Address family selector; 0 queries IPv4 sessions and 1 queries IPv6 sessions. Defaults to 0.
   page:
     type: int
     required: false
-    description: Query page number. Defaults to 1.
+    description: Query page number (default 1).
   size:
     type: int
     required: false
-    description: Query page size. Defaults to 10.
+    description: Query page size (default 40).
+  is_ip6:
+    type: bool
+    required: false
+    description: false queries IPv4 sessions and true queries IPv6 sessions.
   proto:
     type: string
     required: false
-    description: Protocol filter (for example ANY, TCP, UDP). Defaults to ANY.
+    description: Protocol filter, e.g. ANY, UDP, TCP.
   src_addr:
     type: string
     required: false
-    description: Source address filter; defaults to the family zero address (0.0.0.0 for ipv4, 0:0::0 for ipv6).
+    description: Source address filter.
   dst_addr:
     type: string
     required: false
-    description: Destination address filter; defaults to the family zero address.
+    description: Destination address filter.
   src_port:
     type: int
     required: false
-    description: Source port filter. Defaults to 0 (no filter).
+    description: Source port filter (0 = no filter).
   dst_port:
     type: int
     required: false
-    description: Destination port filter. Defaults to 0 (no filter).
-  natsip:
-    type: string
-    required: false
-    description: NAT source address filter; defaults to the family zero address.
-  natdip:
-    type: string
-    required: false
-    description: NAT destination address filter; defaults to the family zero address.
-  natsport:
-    type: int
-    required: false
-    description: NAT source port filter. Defaults to 0.
-  natdport:
-    type: int
-    required: false
-    description: NAT destination port filter. Defaults to 0.
-  vlanid:
-    type: string
-    required: false
-    description: VLAN id filter. Defaults to empty (no filter).
+    description: Destination port filter (0 = no filter).
   rx_zone:
     type: string
     required: false
-    description: Ingress zone filter. Defaults to empty (no filter).
+    description: Ingress (source) security zone filter.
   tx_zone:
     type: string
     required: false
-    description: Egress zone filter. Defaults to empty (no filter).
+    description: Egress (destination) security zone filter.
   rx_if:
     type: string
     required: false
-    description: Ingress interface filter (for example TE0_7). Defaults to empty (no filter).
+    description: Ingress interface filter.
   tx_if:
     type: string
     required: false
-    description: Egress interface filter (for example TE0_9). Defaults to empty (no filter).
-  policy_id:
-    type: string
-    required: false
-    description: Policy id filter. Defaults to empty (no filter).
-  app_name:
-    type: string
-    required: false
-    description: Application name filter. Defaults to empty (no filter).
+    description: Egress interface filter.
   action:
     type: string
     required: false
-    description: Action filter (permit/deny). Defaults to empty (no filter).
+    description: Session action filter (permit/deny).
+  natsip:
+    type: string
+    required: false
+    description: NAT source address filter.
+  natdip:
+    type: string
+    required: false
+    description: NAT destination address filter.
+  natsport:
+    type: int
+    required: false
+    description: NAT source port filter (0 = no filter).
+  natdport:
+    type: int
+    required: false
+    description: NAT destination port filter (0 = no filter).
+  vlanid:
+    type: string
+    required: false
+    description: VLAN id filter.
+  app_name:
+    type: string
+    required: false
+    description: Application name filter.
 inputs:
   session_ref: "<session-ref>"
-  isip6: 0
   page: 1
-  size: 10
+  size: 40
+  is_ip6: false
   proto: ANY
-  src_addr: 0.0.0.0
-  dst_addr: 0.0.0.0
+  src_addr: "0:0::0"
+  dst_addr: "0:0::0"
+  src_port: 0
+  dst_port: 0
+  rx_zone: ""
+  tx_zone: ""
+  rx_if: ""
+  tx_if: ""
+  action: ""
+  natsip: ""
+  natdip: ""
+  natsport: 0
+  natdport: 0
+  vlanid: ""
+  app_name: ""
 side_effect: observation
 returns:
   status: success
   data:
+    verification_summary_ref: "<session-verification-summary-ref>"
+    verification_status: passed
     count: 0
-    ipv4count: 0
-    ipv6count: 0
-    permitcount: 0
-    denycount: 0
-    page: 1
-    size: 10
-    sessions: "<session-vals-ref>"
+    sessions: "<session-entry-list>"
+    session_zones: "<session-zone-pair-list>"
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
 idempotent: true
@@ -117,30 +123,28 @@ timeout_ms: 30000
 error_types:
   - NONE
   - VALIDATION_FAILED
-  - RUNNER_RESPONSE_INVALID
+  - CONFIG_RESULT_MISSING
   - STATE_MISMATCH
 verification:
   kind: capacity_domain
   rules:
-    - name: session_query_returns_count_and_vals
+    - name: session_query_returns_zone_fields
       input_ref: "<session-query-result-ref>"
-      expected_result: The device returns the session table with count and a vals list; an empty table (zero sessions) is a valid successful result.
+      expected_result: Session entries expose rxzone (ingress zone) and txzone (egress zone) fields used for security-zone assertions.
   summary_ref: "<session-verification-summary-ref>"
 preconditions:
   - External orchestration holds a valid session_ref.
-  - The firewall management plane is reachable.
+  - At least one session exists for the requested address family, or empty result is acceptable.
 postconditions:
-  - The session table is not modified by this verification operation.
-  - The returned count and sessions list let callers inspect active sessions by address family, zone, or interface.
+  - Session query result and diagnostic references are available to the caller.
 tags:
   - firewall
+  - capacity
   - session
   - monitor
-  - query
+  - verification
 aliases:
-  - session
-  - sessioninfo
   - session-table
-  - sessions
-  - monitor-session
-since_version: "1.8.0"
+  - sessioninfo
+  - session-monitor
+since_version: "1.1.0"

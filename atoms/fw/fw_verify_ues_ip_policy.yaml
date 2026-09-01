@@ -1,0 +1,70 @@
+schema_version: "1.1"
+op_id: fw_verify_ues_ip_policy
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ues_ip_policy
+description: Query NGFW UES IP promotion policies.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: true
+    description: Query page number.
+  size:
+    type: int
+    required: true
+    description: Query page size.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: ues_ip_policy
+  page: 1
+  size: 40
+side_effect: observation
+returns:
+  status: success
+  data:
+    verification_summary_ref: "<ues-ip-policy-verification-summary-ref>"
+    verification_status: passed
+    existence: true
+    ip_policy_id: "<ues-ip-policy-id>"
+    ip_policy_ids: "<ues-ip-policy-id-list>"
+    count: 0
+    full_config: "<ues-ip-policy-full-config-ref>"
+    hitcount: 0
+    priority: 1
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: ues_ip_policy_query_returns_requested_page
+      input_ref: "<ues-ip-policy-query-result-ref>"
+      expected_result: page and size filters are applied; each val carries id, name, enable, action, cycletime, srcip, dstip, and string-typed hitcount
+  summary_ref: "<ues-ip-policy-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - UES IP promotion-policy query result and diagnostic references are available to the caller.
+tags:
+  - firewall
+  - ues
+  - ip_policy
+  - verification
+aliases:
+  - ues-promotion-policy
+  - promotion-policy
+  - ues-ippolicy
+since_version: "1.7.0"

@@ -1,0 +1,61 @@
+schema_version: "1.1"
+op_id: tg_apply_stateful_template
+device_type: tg
+description: Load a pre-defined ASTF profile template onto the TRex ASTF instance.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_apply_stateful_template
+parameters:
+  user_id:
+    type: string
+    required: false
+    description: TRex multi-user owner id. Defaults to "default".
+  template:
+    type: string
+    required: true
+    description: >-
+      Pre-defined ASTF template name.
+      Available: http-simple, http-multi, dns-query, ftp-download.
+  tunables:
+    type: json
+    required: false
+    description: >-
+      Template-specific tunables JSON (e.g. {"nflows":5} for flows,
+      {"ftp":20,"http":50,"dns":30} mixed percentages) plus common
+      client_ip/server_ip pool start addresses.
+returns:
+  status: success
+  data:
+    template: mixed-services
+    tunables:
+      nflows: 10
+      mix:
+        ftp: 20
+        http: 50
+        dns: 30
+      client_ip: 16.0.0.2
+      server_ip: 48.0.0.2
+    profile_path: /opt/trex/v3.08/astf/mixed_services.py
+    status: applied
+  error_type: INVALID_PARAM
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: state_mutation
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - The trex-astf.service is running and RPC port 4511 is reachable.
+  - The requested template exists in the template registry.
+postconditions:
+  - The ASTF profile is loaded on the TRex ASTF instance.
+tags:
+  - traffic
+  - trex
+  - stateful
+  - template
+since_version: "1.3.0"
