@@ -1,4 +1,4 @@
-"""P3-900108: 非法新建修改与删除预定义服务测试.
+"""P2-900108: 非法新建修改与删除预定义服务测试.
 
 Preset services are read-only: the front-end offers no CRUD buttons (manual
 check), creating with type=PRESET is rejected by the backend, and deleting /
@@ -15,7 +15,7 @@ from framework.checks import Check, op_rejected, op_succeeded
 from framework.context import CaseContext
 from framework.results import CaseResult
 
-TITLE = "P3-900108 非法新建修改与删除预定义服务"
+TITLE = "P2-900108 非法新建修改与删除预定义服务"
 
 PRESET_CREATE = {
     "val": {

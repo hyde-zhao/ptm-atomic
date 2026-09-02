@@ -1,4 +1,4 @@
-"""P0-900107: 预定义服务搜索.
+"""P2-900107: 预定义服务搜索.
 
 Search NGFW preset services through /api/v1/servicepool?type=PRESET. The device
 honours the ``keywords`` filter (probing: count drops to matches); ``src_port``
@@ -16,7 +16,7 @@ from framework.checks import Check, op_succeeded, state_check
 from framework.context import CaseContext
 from framework.results import CaseResult
 
-TITLE = "P0-900107 预定义服务搜索"
+TITLE = "P2-900107 预定义服务搜索"
 
 
 def _preset_entries(response: Any) -> list[dict[str, Any]]:
