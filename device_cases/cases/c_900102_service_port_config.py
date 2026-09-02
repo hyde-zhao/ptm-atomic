@@ -1,4 +1,4 @@
-"""P1-900102: 自定义服务起始与结束端口配置测试.
+"""P2-900102: 自定义服务起始与结束端口配置测试.
 
 A single destination port is stored as an N-N range and a real start/end
 range is stored as-is. Both must be delivered successfully and visible in the
@@ -13,7 +13,7 @@ from framework.naming import unique_random
 from framework.object_ops import _run_create, _run_delete, _run_verify, SERVICE
 from framework.results import CaseResult
 
-TITLE = "P1-900102 自定义服务起始与结束端口配置"
+TITLE = "P2-900102 自定义服务起始与结束端口配置"
 
 
 def _dest_range(d_start: int, d_end: int) -> str:

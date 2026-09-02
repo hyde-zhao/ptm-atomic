@@ -1,4 +1,4 @@
-"""P2-331605: geoip IP 范围冲突被设备拒绝.
+"""P1-331605: geoip IP 范围冲突被设备拒绝.
 
 Each custom geoip object reserves a globally unique ip range (probe17k: a
 second create sharing an ip -> 400 eGeoipIPConflict "IP信息冲突"). The
@@ -14,7 +14,7 @@ from framework.results import CaseResult
 
 from cases.geoip_support import CITY, PROVINCE, geoip_absent, geoip_present
 
-TITLE = "P2-331605 geoip IP 范围冲突被拒绝"
+TITLE = "P1-331605 geoip IP 范围冲突被拒绝"
 
 
 def run(ctx: CaseContext, result: CaseResult) -> None:

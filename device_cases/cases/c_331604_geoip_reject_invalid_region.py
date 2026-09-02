@@ -1,4 +1,4 @@
-"""P2-331604: geoip 非法省份/城市被设备拒绝.
+"""P1-331604: geoip 非法省份/城市被设备拒绝.
 
 The device validates province/city against its region database (probe17g
 isolation: omission or unknown names such as HN/CS -> 400 eRequestParam).
@@ -15,7 +15,7 @@ from framework.results import CaseResult
 
 from cases.geoip_support import geoip_absent
 
-TITLE = "P2-331604 geoip 非法地区参数被设备拒绝"
+TITLE = "P1-331604 geoip 非法地区参数被设备拒绝"
 
 
 def run(ctx: CaseContext, result: CaseResult) -> None:

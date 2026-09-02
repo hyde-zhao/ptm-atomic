@@ -1,4 +1,4 @@
-"""P2-900112: 非法新建修改与删除预定义应用.
+"""P0-900112: 非法新建修改与删除预定义应用.
 
 Preset applications must be read-only: the front-end offers no CRUD buttons
 (manual check), creating with type=PRESET is rejected, and deleting /
@@ -15,7 +15,7 @@ from framework.checks import Check, op_rejected, op_succeeded, state_check
 from framework.context import CaseContext
 from framework.results import CaseResult
 
-TITLE = "P2-900112 非法新建修改与删除预定义应用"
+TITLE = "P0-900112 非法新建修改与删除预定义应用"
 
 PRESET_PAYLOAD = {
     "val": {
