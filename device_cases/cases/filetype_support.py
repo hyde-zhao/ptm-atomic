@@ -142,13 +142,24 @@ class FiletypeRest:
         return list(seen.values())
 
     # --- file type group --------------------------------------------------
-    def create_group(self, name: str, *, members: list[str] | None = None,
-                     des: str = "") -> requests.Response:
+    def post_group(self, name: str, *, members: list[str] | None = None,
+                   des: str = "") -> requests.Response:
         val = {"name": name, "des": des,
                "filetype": [{"name": m, "type": True} for m in (members or [])]}
         return requests.post(f"{self.base}{GROUP_URL}",
                              headers=self._headers(True), json={"id": 0, "val": val},
                              verify=self._verify, timeout=30)
+
+    def post_group_raw(self, val: dict[str, Any]) -> requests.Response:
+        """POST an arbitrary group ``val`` (negative-path cases: empty object,
+        over-length/illegal names, reserved IDMC- prefix)."""
+        return requests.post(f"{self.base}{GROUP_URL}",
+                             headers=self._headers(True), json={"id": 0, "val": val},
+                             verify=self._verify, timeout=30)
+
+    def create_group(self, name: str, *, members: list[str] | None = None,
+                     des: str = "") -> requests.Response:
+        return self.post_group(name, members=members, des=des)
 
     def update_group(self, name: str, *, members: list[str] | None = None,
                      des: str = "") -> requests.Response:
