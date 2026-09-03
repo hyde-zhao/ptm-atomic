@@ -1,4 +1,4 @@
-"""File type object runner commands (filetype config/update/delete + group-config/group-update/group-verify/group-delete-batch)."""
+"""File type object runner commands (filetype config/update/delete/verify/verify-preset + group-config/group-update/group-verify/group-delete-batch)."""
 
 from __future__ import annotations
 
@@ -41,6 +41,20 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             description="Delete a single NGFW custom file type by name (DELETE ?id=).",
             handler=_run_filetype_delete,
             add_args=_add_delete_args,
+        ),
+        CommandSpec(
+            name="verify",
+            help="Verify custom file types (type custom).",
+            description="Query NGFW custom file types through /api/v1/appsec/filetype?type=custom.",
+            handler=_run_filetype_verify,
+            add_args=_add_filetype_verify_args,
+        ),
+        CommandSpec(
+            name="verify-preset",
+            help="Verify preset file types (type predefine).",
+            description="Query NGFW preset file types through /api/v1/appsec/filetype?type=predefine.",
+            handler=_run_filetype_verify_preset,
+            add_args=_add_filetype_verify_args,
         ),
         CommandSpec(
             name="group-config",
@@ -125,6 +139,14 @@ def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--keywords", default="", help="Keyword filter for the query.")
 
 
+def _add_filetype_verify_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--keywords",
+        default="",
+        help="Keyword filter (name or description substring match) for the file type query.",
+    )
+
+
 def _run_filetype_config(args: argparse.Namespace) -> int:
     return _run_filetype(args, "fw_config_filetype")
 
@@ -148,6 +170,14 @@ def _run_filetypeobj_update(args: argparse.Namespace) -> int:
 
 def _run_filetypeobj_verify(args: argparse.Namespace) -> int:
     return _run_filetype(args, "fw_verify_filetypeobj")
+
+
+def _run_filetype_verify(args: argparse.Namespace) -> int:
+    return _run_filetype(args, "fw_verify_filetype")
+
+
+def _run_filetype_verify_preset(args: argparse.Namespace) -> int:
+    return _run_filetype(args, "fw_verify_filetype_preset")
 
 
 def _run_filetypeobj_delete_batch(args: argparse.Namespace) -> int:

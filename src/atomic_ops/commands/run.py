@@ -162,6 +162,8 @@ FILETYPE_OPS = (
     "fw_config_filetype",
     "fw_update_filetype",
     "fw_delete_filetype",
+    "fw_verify_filetype",
+    "fw_verify_filetype_preset",
     "fw_config_filetypeobj",
     "fw_update_filetypeobj",
     "fw_verify_filetypeobj",

@@ -1,0 +1,72 @@
+schema_version: "1.1"
+op_id: fw_verify_filetype_preset
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_filetype_preset
+description: Query NGFW preset file types through /api/v1/appsec/filetype with type=predefine and an optional keyword filter.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be appsec_filetype for this operation.
+  keywords:
+    type: string
+    required: false
+    description: Keyword filter matched as a name or description substring.
+  params:
+    type: json
+    required: true
+    description: File type query envelope; GET sends no JSON body and returns count and vals.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: appsec_filetype
+  keywords: XLW
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<filetype-preset-state-ref>"
+    full_config_ref: "<filetype-preset-full-config-ref>"
+    vals_ref: "<filetype-preset-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: filetype_preset_query_returns_list
+      input_ref: "<filetype-preset-query-result-ref>"
+      expected_result: the device returns count and vals with name, type, classify, refcnt, config_source and description fields; preset entries carry type=false and config_source=18.
+  summary_ref: "<filetype-preset-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Query result and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - filetype
+  - preset
+  - verification
+aliases:
+  - file-type-preset
+  - appsec-filetype-predefine
+  - preset-filetype
+since_version: "1.12.0"

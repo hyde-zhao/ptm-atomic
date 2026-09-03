@@ -19,16 +19,24 @@ FILETYPE_ENDPOINTS = {
     "fw_config_filetype": ("POST", "/api/v1/appsec/filetype"),
     "fw_update_filetype": ("PUT", "/api/v1/appsec/filetype"),
     "fw_delete_filetype": ("DELETE", "/api/v1/appsec/filetype"),
+    "fw_verify_filetype": ("GET", "/api/v1/appsec/filetype"),
+    "fw_verify_filetype_preset": ("GET", "/api/v1/appsec/filetype"),
     "fw_config_filetypeobj": ("POST", "/api/v1/appsec/filetypeObj"),
     "fw_update_filetypeobj": ("PUT", "/api/v1/appsec/filetypeObj"),
     "fw_verify_filetypeobj": ("GET", "/api/v1/appsec/filetypeObj"),
     "fw_delete_batch_filetypeobj": ("POST", "/api/v1/batch"),
 }
-GET_OPS = {"fw_verify_filetypeobj"}
+GET_OPS = {"fw_verify_filetypeobj", "fw_verify_filetype", "fw_verify_filetype_preset"}
 DELETE_OPS = {"fw_delete_filetype"}
 BATCH_OPS = {"fw_delete_batch_filetypeobj"}
 NO_BODY_OPS = GET_OPS | DELETE_OPS
-PAGINATED_OPS = GET_OPS
+# Only the file type group query is paginated; the file type object query
+# takes a fixed type discriminator (predefine | custom) and ignores page/size.
+PAGINATED_OPS = {"fw_verify_filetypeobj"}
+FILETYPE_TYPE_QUERIES = {
+    "fw_verify_filetype": "custom",
+    "fw_verify_filetype_preset": "predefine",
+}
 FILETYPE_RESOURCE = "/api/v1/appsec/filetype"
 FILETYPEOBJ_RESOURCE = "/api/v1/appsec/filetypeObj"
 
@@ -239,7 +247,14 @@ def _request_url(
 ) -> str:
     _method, path = _method_path(op_id)
     url = f"{normalize_base_url(base_url)}{path}"
-    if op_id in PAGINATED_OPS:
+    if op_id in FILETYPE_TYPE_QUERIES:
+        # File type object query: type is fixed per op (custom / predefine),
+        # optional keywords filters by name or description substring.
+        query: dict[str, Any] = {"type": FILETYPE_TYPE_QUERIES[op_id]}
+        if keywords:
+            query["keywords"] = keywords
+        url = f"{url}?{urlencode(query, doseq=True)}"
+    elif op_id in PAGINATED_OPS:
         _validate_pagination(page, size)
         query: dict[str, Any] = {"page": page, "size": size}
         if keywords:

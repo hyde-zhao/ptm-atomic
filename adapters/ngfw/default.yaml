@@ -4256,6 +4256,53 @@ operations:
         - GET takes page, size and optional keywords query parameters and returns count and vals.
         - GET requests send no JSON body.
         - Each val entry carries objid, name, count, des and filetype fields.
+  fw_verify_filetype:
+    atom_ref: atoms/fw/fw_verify_filetype.yaml
+    intent: Build a custom file type query request (type=custom).
+    request:
+      method: GET
+      path: /api/v1/appsec/filetype
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <filetype-custom-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query type is fixed to custom; GET sends no JSON body.
+        - Optional keywords filters vals by name or description substring.
+        - Response shape is {"vals": [...], "count": N}; custom entries carry type=true and config_source=0 (55.63 probe 2026-09-03).
+  fw_verify_filetype_preset:
+    atom_ref: atoms/fw/fw_verify_filetype_preset.yaml
+    intent: Build a preset file type query request (type=predefine).
+    request:
+      method: GET
+      path: /api/v1/appsec/filetype
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <filetype-preset-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Query type is fixed to predefine; GET sends no JSON body.
+        - Optional keywords filters vals by name or description substring.
+        - Response shape is {"vals": [...], "count": N}; preset entries carry type=false and config_source=18; 113 preset rows on 55.63 (probe 2026-09-03).
+        - A missing or invalid type value is rejected with 400 文件类型参数错误; page/size parameters are ignored by the device.
   fw_delete_batch_filetypeobj:
     atom_ref: atoms/fw/fw_delete_batch_filetypeobj.yaml
     intent: Build a batch file type group delete request.
