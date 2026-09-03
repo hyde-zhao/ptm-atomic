@@ -1,0 +1,83 @@
+schema_version: "1.1"
+op_id: fw_export_object_policy
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_export_object_policy
+description: Generate an object module template/export file through PUT /api/v1/ip4policy/exportpolicy.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  module:
+    type: string
+    required: true
+    description: uploadType value; documented values are ippool, ip6pool and ip4group.
+  output_path:
+    type: string
+    required: false
+    description: Local path where the generated template file is written; the response names the file at temp/<module>_tmp.xlsx.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  module: ippool
+  output_path: /tmp/ippool_export.xlsx
+  idempotency_key: "<idempotency-key>"
+side_effect: observation
+returns:
+  status: success
+  data:
+    module_type: ippool
+    export_file_id: temp/ippool_tmp.xlsx
+    download:
+      file_ref: /tmp/ippool_export.xlsx
+      file_size: 1024
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 120000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: medium
+  categories:
+    - configuration
+    - data_management
+gate:
+  required: true
+  reason: Generated export files may contain object data and require review before leaving the device.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+postconditions:
+  - The trigger refreshes the import template at temp/<module>_tmp.xlsx (response {"filename":...}); the runner downloads that file when --output-path is given.
+tags:
+  - firewall
+  - object
+  - export
+  - data_management
+aliases:
+  - export-policy
+  - exportpolicy
+since_version: "1.12.0"

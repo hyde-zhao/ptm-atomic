@@ -1,0 +1,78 @@
+schema_version: "1.1"
+op_id: fw_download_object_file
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_download_object_file
+description: Download a system template or generated object export file from GET /api/v1/downloadfile by its server id.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  file_id:
+    type: string
+    required: true
+    description: Server file id/path, e.g. temp/macpool_tmp.xlsx or exportDir/ippool_20260903_151226.xlsx.
+  output_path:
+    type: string
+    required: true
+    description: Local path where the downloaded file is written.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  file_id: temp/macpool_tmp.xlsx
+  output_path: /tmp/macpool_tmp.xlsx
+  idempotency_key: "<idempotency-key>"
+side_effect: observation
+returns:
+  status: success
+  data:
+    file_id: temp/macpool_tmp.xlsx
+    file_ref: /tmp/macpool_tmp.xlsx
+    file_size: 1024
+    sha256: "<sha256-of-file>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 60000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: low
+  categories:
+    - configuration
+    - data_management
+gate:
+  required: false
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - The file id names an existing system template or a previously generated export file.
+postconditions:
+  - The file bytes are written to output_path; contents are never parsed by the runner.
+tags:
+  - firewall
+  - object
+  - download
+  - data_management
+aliases:
+  - download-object-file
+  - get-template
+since_version: "1.12.0"

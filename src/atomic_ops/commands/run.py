@@ -184,6 +184,12 @@ GEOIP_OPS = (
     "fw_delete_batch_geoip",
     "fw_verify_geoip",
 )
+OBJECT_TRANSFER_OPS = (
+    "fw_import_object_file",
+    "fw_export_object_policy",
+    "fw_export_object_data",
+    "fw_download_object_file",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
@@ -213,6 +219,7 @@ SUPPORTED_OPS = (
     *FILETYPE_OPS,
     *CERT_OPS,
     *GEOIP_OPS,
+    *OBJECT_TRANSFER_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -384,6 +391,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_iptun as run_iptun
     from atomic_ops.commands import run_operation_log as run_operation_log
     from atomic_ops.commands import run_config_transfer as run_config_transfer
+    from atomic_ops.commands import run_object_transfer as run_object_transfer
     from atomic_ops.commands import run_reboot as run_reboot
     from atomic_ops.commands import run_ha as run_ha
     from atomic_ops.commands import run_trex as run_trex
@@ -505,6 +513,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_iptun.build_subtree(),
         *run_operation_log.build_subtree(),
         *run_config_transfer.build_subtree(),
+        *run_object_transfer.build_subtree(),
         *run_reboot.build_subtree(),
         *run_ha.build_subtree(),
         *run_dns.build_subtree(),

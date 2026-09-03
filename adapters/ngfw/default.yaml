@@ -1968,6 +1968,119 @@ operations:
         - Batch body contains only DELETE /api/v1/iptun items with body.id as a non-empty list.
         - Batch IP tunnel deletion is independent from single tunnel DELETE /api/v1/iptun.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_import_object_file:
+    atom_ref: atoms/fw/fw_import_object_file.yaml
+    intent: Import an object module Excel file by uploading it and starting the async data import task.
+    request:
+      method: POST
+      path: /api/v1/upload
+      content_type: multipart/form-data
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        module: "{{ params.module }}"
+        file: "{{ params.file }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <object-import-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner uploads the .xlsx to POST /api/v1/upload as multipart fields module + file, then POSTs /api/v1/dataimport with val.file_name, val.module_type and val.is_skip_dup.
+        - Documented module values are ippool, ip6pool, ip6group, macpool, domainpool, geoip, serpool, sergrouppool, appObject and urlObject; ip4group has no documented import flow.
+        - The staged server path is parsed from the upload response; when the response carries no path the runner falls back to /userdata/userfile/policyfile/<module>/<filename>.
+        - /api/v1/dataimport is asynchronous; {"data":"导入任务启动成功"} confirms the task was accepted, not that rows landed.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_export_object_policy:
+    atom_ref: atoms/fw/fw_export_object_policy.yaml
+    intent: Generate an object module template/export file through the policy export endpoint.
+    request:
+      method: PUT
+      path: /api/v1/ip4policy/exportpolicy
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "0"
+        val:
+          uploadType: "{{ params.module }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <policy-export-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Documented uploadType values are ippool, ip6pool and ip4group.
+        - The trigger creates/refreshes the import template at temp/<module>_tmp.xlsx; the device response names it, e.g. {"filename":"temp/ippool_tmp.xlsx"} (55.63 probe 2026-09-03).
+        - With --output-path the runner downloads the returned file id from GET /api/v1/downloadfile?id=<urlencoded id> and errors if the response does not name the file.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_export_object_data:
+    atom_ref: atoms/fw/fw_export_object_data.yaml
+    intent: Generate an object module export file through the dedicated data export endpoint.
+    request:
+      method: GET
+      path: /api/v1/dataexport
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        query:
+          type: "{{ params.module }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <data-export-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The spec documents type=ip6pool; 55.63 probes (2026-09-03) also confirmed ippool, macpool and geoip answer with {"data":{"filename":"exportDir/<module>_<timestamp>.xlsx"}}.
+        - With --output-path the runner downloads the exportDir file returned in the response from GET /api/v1/downloadfile.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_download_object_file:
+    atom_ref: atoms/fw/fw_download_object_file.yaml
+    intent: Download a system template or generated object export file by its server id.
+    request:
+      method: GET
+      path: /api/v1/downloadfile
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        query:
+          id: "{{ params.file_id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <download-file-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The id is an absolute or relative server path such as temp/macpool_tmp.xlsx or exportDir/ippool_20260903_151226.xlsx and is URL-encoded before the request.
+        - Static template ids exist at temp/<module>_tmp.xlsx for ip6group, macpool, domainpool, geoip, serpool, sergrouppool, appObject and urlObject; temp/ippool_tmp.xlsx also exists on 55.63 although the spec only documents the exportpolicy route for ippool.
+        - The device answers with a JSON content-type label but serves zip/xlsx bytes; the runner writes the bytes to output_path and never parses contents.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_export_file:
     atom_ref: atoms/fw/fw_config_export_file.yaml
     intent: Build a configuration export workflow that starts a download task, polls it, and downloads the file.
