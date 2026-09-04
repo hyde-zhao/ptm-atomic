@@ -2078,7 +2078,7 @@ operations:
       runner_required: true
       notes:
         - The id is an absolute or relative server path such as temp/macpool_tmp.xlsx or exportDir/ippool_20260903_151226.xlsx and is URL-encoded before the request.
-        - Static template ids exist at temp/<module>_tmp.xlsx for ip6group, macpool, domainpool, geoip, serpool, sergrouppool, appObject and urlObject; temp/ippool_tmp.xlsx also exists on 55.63 although the spec only documents the exportpolicy route for ippool.
+        - Static import-template ids exist at temp/<module>_tmp.xlsx for all 11 corpus modules (55.63, 2026-09-04 probe): ippool, ip6pool, ip4group, ip6group, macpool, domainpool, geoip, serpool, sergrouppool, appObject, urlObject.
         - The device answers with a JSON content-type label but serves zip/xlsx bytes; the runner writes the bytes to output_path and never parses contents.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_export_file:
