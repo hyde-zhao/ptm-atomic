@@ -66,6 +66,11 @@ risk:
 gate:
   required: false
   reason: Static ARP entry updates are low-risk and reversible.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - An existing neighbor entry identified by interface, ipAddress, and physAddress exists.

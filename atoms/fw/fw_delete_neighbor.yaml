@@ -60,6 +60,11 @@ risk:
 gate:
   required: false
   reason: Deleting a static ARP entry is reversible by re-creating it.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - The neighbor entry identified by interface, ipAddress, and physAddress exists.
