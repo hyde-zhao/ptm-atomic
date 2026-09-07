@@ -40,6 +40,9 @@ BVI_CONFIG_COMMAND_TEMPLATE = (
 BVI_CONFIG_SUCCESS_PATTERN = r"\S+"
 BRIDGE_DOMAIN_COMMAND = "/opt/dbappsecurity/bin/vppctl show bridge-domain"
 BRIDGE_DOMAIN_SUCCESS_PATTERN = r"\S+"
+
+NEIGHBOR_PROBE_COMMAND = "/opt/dbappsecurity/bin/vppctl show ip neighbor"
+NEIGHBOR_PROBE_SUCCESS_PATTERN = r"Time\s+IP"
 BRIDGE_DOMAIN_MAC_AGE_SET_TEMPLATE = (
     "/opt/dbappsecurity/bin/vppctl set bridge-domain mac-age {{bridge_domain_id}} {{age_minutes}}"
 )
@@ -103,6 +106,19 @@ def evaluate_success(result: ShellCommandResult, success_pattern: str) -> bool:
     cannot accidentally satisfy the success pattern.
     """
     if result.exit_code != 0:
+        return False
+    pattern = re.compile(success_pattern)
+    return bool(pattern.search(result.stdout))
+
+
+def _shell_output_succeeded(
+    result: ShellCommandResult,
+    success_pattern: str,
+    *,
+    acceptable_exit_codes: set[int],
+) -> bool:
+    """Return True when the exit code is acceptable AND stdout matches the pattern."""
+    if result.exit_code not in acceptable_exit_codes:
         return False
     pattern = re.compile(success_pattern)
     return bool(pattern.search(result.stdout))
@@ -1849,3 +1865,177 @@ def execute_dns_diag(
         credential_env=credential_env,
         timeout=timeout,
     )
+
+
+# ── fw_verify_neighbor_probe ──────────────────────────────
+
+
+def parse_neighbor_probe_output(stdout: str) -> list[dict[str, Any]]:
+    """Parse `vppctl show ip neighbor` stdout into structured neighbor rows.
+
+    Each data row renders the Probes column as two tokens ("0 /3"), so a row is
+    10 whitespace-separated tokens:
+    Time, IP, Flags, Ethernet, Interface, Phase, ProbesNum, ProbesDen, NextProbe(S), Age(S).
+    The header row is skipped because its first token ("Time") is not numeric.
+    A 9-token row (Probes rendered as a single token) is accepted for robustness.
+    """
+    rows: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        tokens = line.split()
+        if len(tokens) not in (9, 10):
+            continue
+        try:
+            float(tokens[0])
+        except ValueError:
+            continue  # header row
+        if len(tokens) == 10:
+            probes = f"{tokens[6]}/{tokens[7].lstrip('/')}"
+            next_probe_s, age_s = tokens[8], tokens[9]
+        else:
+            probes = tokens[6]
+            next_probe_s, age_s = tokens[7], tokens[8]
+        rows.append(
+            {
+                "time": tokens[0],
+                "ip": tokens[1],
+                "flags": tokens[2],
+                "mac": tokens[3],
+                "interface": tokens[4],
+                "phase": tokens[5],
+                "probes": probes,
+                "next_probe_s": next_probe_s,
+                "age_s": age_s,
+            }
+        )
+    return rows
+
+
+def build_verify_neighbor_probe_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    expected_ip: str | None,
+    expected_interface: str | None,
+    expected_phase: str | None,
+    timeout: float,
+    username: str | None = None,
+) -> dict[str, Any]:
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    resolved_user = username or _username_from_session(session_payload)
+    return {
+        "op_id": "fw_verify_neighbor_probe",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": NEIGHBOR_PROBE_COMMAND,
+            "host": target_host,
+            "port": target_port,
+            "username": resolved_user,
+            "success_pattern": NEIGHBOR_PROBE_SUCCESS_PATTERN,
+            "expected_ip": expected_ip or None,
+            "expected_interface": expected_interface or None,
+            "expected_phase": expected_phase or None,
+        },
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_neighbor_probe(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    credential_env: str,
+    expected_ip: str | None,
+    expected_interface: str | None,
+    expected_phase: str | None,
+    timeout: float,
+    username: str | None = None,
+) -> dict[str, Any]:
+    session_payload = read_session_file(session_file)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    resolved_user = username or _username_from_session(session_payload)
+    credential = _read_credential_env(credential_env)
+
+    result = _run_shell_command(
+        transport=transport,
+        host=target_host,
+        port=target_port,
+        username=resolved_user,
+        credential=credential,
+        command=NEIGHBOR_PROBE_COMMAND,
+        timeout=timeout,
+    )
+    # vppctl does not propagate a standard exit status through the paramiko exec
+    # channel on this device (observed exit_code=-1 while stdout is populated).
+    # Treat exit_code -1 as success when the neighbor-table header is present.
+    if not _shell_output_succeeded(
+        result, NEIGHBOR_PROBE_SUCCESS_PATTERN, acceptable_exit_codes={0, -1}
+    ):
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "Shell command output did not match the neighbor probe success pattern.",
+            {
+                "op_id": "fw_verify_neighbor_probe",
+                "transport": transport,
+                "exit_code": result.exit_code,
+                "stdout_preview": (result.stdout[:200] if result.stdout else ""),
+                "stderr_preview": (result.stderr[:200] if result.stderr else ""),
+            },
+        )
+
+    neighbors = parse_neighbor_probe_output(result.stdout)
+    matches_expected = _match_neighbor_expectations(neighbors, expected_ip, expected_interface, expected_phase)
+    return {
+        "op_id": "fw_verify_neighbor_probe",
+        "status": "success",
+        "transport": transport,
+        "data": {
+            "neighbor_probe_raw": result.stdout.strip(),
+            "neighbors": neighbors,
+            "matches_expected": matches_expected,
+        },
+        "request": {
+            "command": NEIGHBOR_PROBE_COMMAND,
+            "host": target_host,
+            "port": target_port,
+            "username": resolved_user,
+        },
+        "response": {
+            "exit_code": result.exit_code,
+            "stdout_ref": "<neighbor-probe-raw-ref>",
+            "stderr_ref": "<diag-snapshot-ref>",
+        },
+        "diag_snapshot_ref": "<diag-snapshot-ref>",
+    }
+
+
+def _match_neighbor_expectations(
+    neighbors: list[dict[str, Any]],
+    expected_ip: str | None,
+    expected_interface: str | None,
+    expected_phase: str | None,
+) -> bool:
+    """Return True when every provided expectation is satisfied by some row.
+
+    With no expectations, every query matches (observation only).
+    """
+    for row in neighbors:
+        if expected_ip and row["ip"] != expected_ip:
+            continue
+        if expected_interface and row["interface"] != expected_interface:
+            continue
+        if expected_phase and row["phase"].lower() != str(expected_phase).lower():
+            continue
+        return True
+    return False

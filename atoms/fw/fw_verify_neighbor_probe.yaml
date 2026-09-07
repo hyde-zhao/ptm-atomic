@@ -1,0 +1,90 @@
+schema_version: "1.1"
+op_id: fw_verify_neighbor_probe
+device_type: fw
+transport: ssh
+description: Query the VPP IP neighbor table to verify ARP neighbor phase and aging probes.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_neighbor_probe
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when telnet target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  username:
+    type: string
+    required: false
+    description: SSH login user; defaults to the web session username (admin). The FW CLI user is usually 'root'.
+  expected_ip:
+    type: string
+    required: false
+    description: Optional neighbor IP to assert present in the VPP neighbor table.
+  expected_interface:
+    type: string
+    required: false
+    description: Optional interface to filter the asserted neighbor rows.
+  expected_phase:
+    type: string
+    required: false
+    description: Optional phase value to assert on the matched rows (e.g. alive, probing, dead).
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  expected_ip: ""
+  expected_interface: ""
+  expected_phase: ""
+side_effect: observation
+returns:
+  status: success
+  data:
+    neighbor_probe_raw: "<neighbor-probe-raw-ref>"
+    neighbors: []
+    matches_expected: true
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: neighbor_table_returned
+      input_ref: "<neighbor-probe-raw-ref>"
+      expected_result: The device returns the VPP IP neighbor table as session output.
+  summary_ref: "<neighbor-probe-summary-ref>"
+preconditions:
+  - Device management SSH or Telnet service is reachable.
+  - A valid admin credential is available via the runner credential env var.
+  - The vppctl binary is available at /opt/dbappsecurity/bin/vppctl on the device.
+postconditions:
+  - Neighbor table output and parsed rows are captured in diag_snapshot_ref; nothing is written to the repo.
+tags:
+  - firewall
+  - neighbor
+  - arp
+  - probe
+  - vpp
+  - query
+  - cli
+aliases:
+  - neighbor-probe
+  - arp-probe
+  - neighbor-state
+  - ip-neighbor
+  - vpp-neighbor
+  - aging-probe
+since_version: "1.9.0"
