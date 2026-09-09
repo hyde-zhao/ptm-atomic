@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, credential_missing_error
 from atomic_ops.runner.session import read_session_file
 
 
@@ -154,11 +154,9 @@ def _read_credential_env(env_name: str) -> str:
     _load_dotenv()
     value = os.environ.get(env_name)
     if value is None or not value:
-        raise RunnerError(
-            "RUNNER_CREDENTIAL_MISSING",
-            "Runner credential environment variable is not set or is empty.",
-            {"env": env_name},
-        )
+        # STORY-S6-02：.env 已自动加载仍缺失，属环境变量未注入；与认证失败分层，
+        # 消息点名环境变量并附注入指引，不回显凭据值
+        raise credential_missing_error(env_name)
     return value
 
 

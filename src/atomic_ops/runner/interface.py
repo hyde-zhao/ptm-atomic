@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from ipaddress import AddressValueError, IPv4Address, IPv6Address, ip_address, ip_interface
 from pathlib import Path
@@ -9,14 +10,18 @@ from typing import Any
 from urllib.parse import urlencode
 
 from atomic_ops.runner._payload import load_json_payload
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, credential_missing_error
 from atomic_ops.runner.http import request_json
-from atomic_ops.runner.ngfw_login import normalize_base_url
+from atomic_ops.runner.ngfw_login import _encrypt_password, normalize_base_url
 from atomic_ops.runner.session import read_session_file
 
 
 SUCCESS_STATUS = {200, 201, 202}
 GET_SUCCESS_STATUS = {200}
+# PPPoE 拨号密码占位符：与 runner/pppoe.py 同值（pppoe-config 快捷命令与
+# interface create/update --interface-kind pppoe 是同一设备端点的两套表达，
+# execute 时统一由密码环境变量经 RSA(PKCS1v15) 加密后替换占位符）。
+PPPOE_PASSWORD_PLACEHOLDER = "<encrypted-at-execute>"
 INTERFACE_ENDPOINTS = {
     "fw_config_interface": ("POST", "/api/v1/intf"),
     "fw_update_interface": ("PUT", "/api/v1/intf"),
@@ -70,7 +75,6 @@ def build_interface_payload(
     bond_mode: int = 5,
     bond_lb: int = 0,
     pppoe_username: str | None = None,
-    pppoe_password: str | None = None,
     link_type: int | None = None,
     pvid: int = 1,
     allow_pass: str | None = None,
@@ -113,7 +117,7 @@ def build_interface_payload(
     elif interface_kind == "bond":
         _apply_bond(val, entry_id, bond_id, bond_members or [], bond_mode, bond_lb)
     elif interface_kind == "pppoe":
-        _apply_pppoe(val, entry_id, pppoe_username, pppoe_password)
+        _apply_pppoe(val, entry_id, pppoe_username)
     elif interface_kind == "tunnel":
         _apply_tunnel(
             val, entry_id, tunnel_type, src_addr, dst_addr,
@@ -224,6 +228,45 @@ def build_interface_dry_run(
     }
 
 
+def _inject_pppoe_secret(
+    payload: dict[str, Any] | None,
+    *,
+    base_url: str,
+    pppoe_password_env: str | None,
+    timeout: float,
+    verify_tls: bool,
+) -> bool:
+    """execute 前把 pppoe 块中的占位符替换为 RSA 密文（方案 A，对齐 pppoe.py）。
+
+    仅处理构建路径产生的占位符（PPPOE_PASSWORD_PLACEHOLDER）；通过
+    --payload-json/--payload-file 显式直传的完整 payload 若 password 不是占位符
+    则原样放行（调用方自带密文或自担风险），不在此加密也不回写明文。
+    """
+    if payload is None:
+        return False
+    val = payload.get("val")
+    pppoe = val.get("pppoe") if isinstance(val, dict) else None
+    if not isinstance(pppoe, dict) or pppoe.get("password") != PPPOE_PASSWORD_PLACEHOLDER:
+        return False
+    if not pppoe_password_env:
+        raise RunnerError(
+            "RUNNER_CREDENTIAL_MISSING",
+            "PPPoE dial password environment variable name is required when "
+            "using --execute with a PPPoE interface.",
+            {"missing": "pppoe_password_env"},
+            suggestion="Pass --pppoe-password-env <ENV> holding the dial password; "
+            "the runner reads it at execute time and never prints it.",
+        )
+    dial_secret = os.environ.get(pppoe_password_env)
+    if dial_secret is None or not dial_secret:
+        raise credential_missing_error(pppoe_password_env)
+    encrypted_secret = _encrypt_password(
+        base_url, dial_secret, timeout=timeout, verify_tls=verify_tls
+    )
+    pppoe["password"] = encrypted_secret
+    return True
+
+
 def execute_interface(
     *,
     op_id: str,
@@ -233,8 +276,18 @@ def execute_interface(
     payload: dict[str, Any] | None,
     verify_tls: bool,
     timeout: float,
+    pppoe_password_env: str | None = None,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
+    password_encrypted = False
+    if op_id not in NO_BODY_OPS and payload is not None:
+        password_encrypted = _inject_pppoe_secret(
+            payload,
+            base_url=base_url,
+            pppoe_password_env=pppoe_password_env,
+            timeout=timeout,
+            verify_tls=verify_tls,
+        )
     session_payload = read_session_file(session_file)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
@@ -260,7 +313,7 @@ def execute_interface(
                 "response_keys": sorted(response_payload.keys()),
             },
         )
-    return {
+    result: dict[str, Any] = {
         "op_id": op_id,
         "status": "success",
         "status_code": status_code,
@@ -271,6 +324,9 @@ def execute_interface(
         },
         "response": response_payload,
     }
+    if password_encrypted:
+        result["password_encrypted"] = True
+    return result
 
 
 def _request_url(base_url: str, op_id: str, *, payload: dict[str, Any] | None = None) -> str:
@@ -400,15 +456,17 @@ def _apply_pppoe(
     val: dict[str, Any],
     entry_id: str,
     pppoe_username: str | None,
-    pppoe_password: str | None,
 ) -> None:
     # PPPoE 叠加在物理接口上（type=3），另设 pppoe 子对象（username/password）
     # 并将 IPv4 地址模式置为 2（PPPoE 动态获取，对齐 DUT2 TE0_8 已调通配置）。
     # 接口 ID 沿用物理口命名（如 TE0_8），不做格式校验，直接透传。
+    # 2026-09 起 password 不再接受明文（原 --pppoe-password / pppoe_password 参数已
+    # 删除，见 run_interface.py 的 --pppoe-password-env）：构建期只放占位符，
+    # execute 时由 execute_interface 读取密码环境变量并 RSA 加密后替换，
+    # 明文从不进入 payload 构造/输出（对齐 pppoe-config 安全口径）。
     _validate_non_empty("pppoe_username", pppoe_username or "")
-    _validate_non_empty("pppoe_password", pppoe_password or "")
     val["type"] = 3
-    val["pppoe"] = {"username": pppoe_username, "password": pppoe_password}
+    val["pppoe"] = {"username": pppoe_username, "password": PPPOE_PASSWORD_PLACEHOLDER}
     val["ipv4_address_mode_config"]["address_mode"] = 2
 
 

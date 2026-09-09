@@ -19,6 +19,18 @@ from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.session import resolve_session_file
 
 
+class _RemovedPppoePasswordAction(argparse.Action):
+    # 2026-09：--pppoe-password 明文入口已删除（明文不进入 CLI 参数/进程列表/payload
+    # 构造，安全口径对齐 pppoe-config）。保留参数名仅为让既有调用获得可诊断错误并
+    # 指路环境变量注入方式；传值即 argparse error（exit 2），不静默忽略。
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error(
+            f"{option_string} is removed: plaintext PPPoE passwords are not accepted. "
+            "Supply the dial password through an environment variable and rerun with "
+            "--pppoe-password-env <ENV> --execute."
+        )
+
+
 def build_subtree() -> tuple[CommandSpec, ...]:
     return (
         CommandSpec(name="create", help="Create a new network interface.", description="Create a new NGFW network interface.", handler=_run_create, add_args=_add_interface_args),
@@ -48,7 +60,17 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bond-mode", type=int, default=5, help="Bond mode field.")
     parser.add_argument("--bond-lb", type=int, default=0, help="Bond load-balance field.")
     parser.add_argument("--pppoe-username", help="PPPoE username (pppoe kind only).")
-    parser.add_argument("--pppoe-password", help="PPPoE password (pppoe kind only).")
+    parser.add_argument(
+        "--pppoe-password", action=_RemovedPppoePasswordAction,
+        metavar="PASSWORD",
+        help="[REMOVED] Plaintext PPPoE passwords are not accepted; use --pppoe-password-env.",
+    )
+    parser.add_argument(
+        "--pppoe-password-env",
+        help="Name of the environment variable holding the PPPoE dial password "
+        "(pppoe kind only). Required for --execute; the runner RSA-encrypts the "
+        "value with the login public key before sending.",
+    )
     parser.add_argument("--link-type", type=int, help="Interface linkType field.")
     parser.add_argument("--pvid", type=int, default=1, help="Switch/Pair/Monitor mode PVID.")
     parser.add_argument("--allow-pass", help="Switch/Pair/Monitor mode allowPass field.")
@@ -197,7 +219,6 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                     bond_mode=int(getattr(args, "bond_mode", 5)),
                     bond_lb=int(getattr(args, "bond_lb", 0)),
                     pppoe_username=getattr(args, "pppoe_username"),
-                    pppoe_password=getattr(args, "pppoe_password"),
                     link_type=getattr(args, "link_type"),
                     pvid=int(getattr(args, "pvid", 1)),
                     allow_pass=getattr(args, "allow_pass"),
@@ -224,6 +245,7 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                 auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
+                pppoe_password_env=getattr(args, "pppoe_password_env", None),
             )
         _write_output(_to_run_envelope(result), output_format)
         return 0
