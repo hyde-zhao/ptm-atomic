@@ -4766,6 +4766,169 @@ class PppoeCliTests(unittest.TestCase):
             )
 
 
+class InterfacePppoeSecretTests(unittest.TestCase):
+    """interface create/update --interface-kind pppoe 的密码密文化（方案 A）。
+
+    覆盖：构建期占位符（明文参数已删除）、--pppoe-password 拒绝指路、execute 时
+    env -> RSA 加密注入、env/参数缺失的凭据分层出口（对齐 CredentialAuthSplit）。
+    """
+
+    PPPOE_ENV = "PTM_TEST_INTERFACE_PPPOE_PW"
+
+    def test_cli_interface_pppoe_kind_dry_run_uses_placeholder(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", "https://192.0.2.1",
+                 "interface", "create", "--id", "TE0_8", "--interface-kind", "pppoe",
+                 "--pppoe-username", "user01"]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        request_payload = payload["data"]["request"]["payload"]
+        self.assertEqual(request_payload["id"], "TE0_8")
+        self.assertEqual(request_payload["val"]["type"], 3)
+        self.assertEqual(request_payload["val"]["mode"], "Route")
+        self.assertEqual(request_payload["val"]["pppoe"]["username"], "user01")
+        self.assertEqual(
+            request_payload["val"]["pppoe"]["password"], "<encrypted-at-execute>"
+        )
+
+    def test_cli_interface_rejects_removed_plaintext_pppoe_password_flag(self) -> None:
+        with self.assertRaises(SystemExit) as context:
+            cli_main(
+                ["run", "--base-url", "https://192.0.2.1",
+                 "interface", "create", "--id", "TE0_8", "--interface-kind", "pppoe",
+                 "--pppoe-username", "user01", "--pppoe-password", "Pass@123"]
+            )
+        self.assertEqual(context.exception.code, 2)
+
+    def _build_pppoe_payload(self) -> dict:
+        from atomic_ops.runner.interface import build_interface_payload
+
+        return build_interface_payload(
+            interface_kind="pppoe", entry_id="TE0_8",
+            pppoe_username="user01",
+        )
+
+    def test_execute_interface_pppoe_injects_encrypted_secret(self) -> None:
+        from atomic_ops.runner.interface import execute_interface
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.interface._encrypt_password", return_value="CIPHERTEXT") as encrypt:
+                with patch("atomic_ops.runner.interface.request_json", return_value=(200, {"ok": True}, "{}")) as request:
+                    with patch.dict(os.environ, {self.PPPOE_ENV: "Pass@123"}, clear=False):
+                        result = execute_interface(
+                            op_id="fw_config_interface",
+                            base_url="https://192.0.2.1",
+                            session_file=session_file,
+                            auth_header="Authorization",
+                            payload=self._build_pppoe_payload(),
+                            verify_tls=False,
+                            timeout=10,
+                            pppoe_password_env=self.PPPOE_ENV,
+                        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["password_encrypted"])
+        _, kwargs = request.call_args
+        sent = kwargs["json_payload"]["val"]["pppoe"]
+        self.assertEqual(sent["username"], "user01")
+        self.assertEqual(sent["password"], "CIPHERTEXT")
+        self.assertNotIn("Pass@123", json.dumps(kwargs["json_payload"]))
+        encrypt.assert_called_once()
+        self.assertEqual(encrypt.call_args.args[1], "Pass@123")
+
+    def test_execute_interface_pppoe_requires_password_env_name(self) -> None:
+        from atomic_ops.runner.interface import execute_interface
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.interface.request_json", return_value=(200, {"ok": True}, "{}")) as request:
+                with self.assertRaises(RunnerError) as context:
+                    execute_interface(
+                        op_id="fw_config_interface",
+                        base_url="https://192.0.2.1",
+                        session_file=session_file,
+                        auth_header="Authorization",
+                        payload=self._build_pppoe_payload(),
+                        verify_tls=False,
+                        timeout=10,
+                        pppoe_password_env=None,
+                    )
+        self.assertEqual(context.exception.error_code, "RUNNER_CREDENTIAL_MISSING")
+        self.assertEqual(context.exception.details["missing"], "pppoe_password_env")
+        request.assert_not_called()
+
+    def test_execute_interface_pppoe_env_unset_uses_credential_missing_error(self) -> None:
+        from atomic_ops.runner.interface import execute_interface
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.interface.request_json", return_value=(200, {"ok": True}, "{}")) as request:
+                with self.assertRaises(RunnerError) as context:
+                    execute_interface(
+                        op_id="fw_update_interface",
+                        base_url="https://192.0.2.1",
+                        session_file=session_file,
+                        auth_header="Authorization",
+                        payload=self._build_pppoe_payload(),
+                        verify_tls=False,
+                        timeout=10,
+                        pppoe_password_env="PTM_TEST_INTERFACE_PPPOE_PW_UNSET",
+                    )
+        self.assertEqual(context.exception.error_code, "RUNNER_CREDENTIAL_MISSING")
+        self.assertEqual(
+            context.exception.details["env"], "PTM_TEST_INTERFACE_PPPOE_PW_UNSET"
+        )
+        request.assert_not_called()
+
+    def test_execute_interface_non_pppoe_payload_ignores_env(self) -> None:
+        """非 pppoe payload 传了 pppoe env 名也不触发注入/报错（no-op）。"""
+        from atomic_ops.runner.interface import build_interface_payload, execute_interface
+
+        payload = build_interface_payload(
+            interface_kind="bvi", entry_id="bvi1", bvi_instance=1,
+            ip_addresses=["10.0.0.1/24"],
+        )
+        self.assertNotIn("pppoe", payload["val"])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file, base_url="https://192.0.2.1", username="admin",
+                session_value="abc123", source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.interface.request_json", return_value=(200, {"ok": True}, "{}")) as request:
+                with patch.dict(os.environ, {self.PPPOE_ENV: "Pass@123"}, clear=False):
+                    result = execute_interface(
+                        op_id="fw_config_interface",
+                        base_url="https://192.0.2.1",
+                        session_file=session_file,
+                        auth_header="Authorization",
+                        payload=payload,
+                        verify_tls=False,
+                        timeout=10,
+                        pppoe_password_env=self.PPPOE_ENV,
+                    )
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn("password_encrypted", result)
+        _, kwargs = request.call_args
+        self.assertEqual(kwargs["json_payload"]["val"]["type"], 14)
+
+
 class SshDnsOpsCliTests(unittest.TestCase):
     def test_cli_verify_process_state_dry_run_builds_anchored_pgrep(self) -> None:
         stdout = io.StringIO()
