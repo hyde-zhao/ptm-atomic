@@ -4278,7 +4278,7 @@ operations:
       notes:
         - Query type is fixed to custom; GET sends no JSON body.
         - Optional keywords filters vals by name or description substring.
-        - Response shape is {"vals": [...], "count": N}; custom entries carry type=true and config_source=0 (55.63 probe 2026-09-03).
+        - 'Response shape is {"vals": [...], "count": N}; custom entries carry type=true and config_source=0 (55.63 probe 2026-09-03).'
   fw_verify_filetype_preset:
     atom_ref: atoms/fw/fw_verify_filetype_preset.yaml
     intent: Build a preset file type query request (type=predefine).
@@ -4301,7 +4301,7 @@ operations:
       notes:
         - Query type is fixed to predefine; GET sends no JSON body.
         - Optional keywords filters vals by name or description substring.
-        - Response shape is {"vals": [...], "count": N}; preset entries carry type=false and config_source=18; 113 preset rows on 55.63 (probe 2026-09-03).
+        - 'Response shape is {"vals": [...], "count": N}; preset entries carry type=false and config_source=18; 113 preset rows on 55.63 (probe 2026-09-03).'
         - A missing or invalid type value is rejected with 400 文件类型参数错误; page/size parameters are ignored by the device.
   fw_delete_batch_filetypeobj:
     atom_ref: atoms/fw/fw_delete_batch_filetypeobj.yaml
@@ -6023,3 +6023,115 @@ operations:
       runner_required: true
       notes:
         - Requires SSH access to the NGFW device; parses vppctl show zone output for zone/interface consistency.
+  fw_verify_neighbor_probe:
+    atom_ref: atoms/fw/fw_verify_neighbor_probe.yaml
+    intent: Query the VPP IP neighbor table to verify ARP neighbor phase and aging probes.
+    transport: ssh
+    shell:
+      command_template: "/opt/dbappsecurity/bin/vppctl show ip neighbor"
+      success_pattern: "Time\\s+IP"
+      prompt_timeout_ms: 30000
+      privilege_level: user
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Read-only observation; the command writes nothing to the device.
+        - 'Output columns: Time, IP, Flags, Ethernet, Interface, Phase, Probes (x/3), NextProbe(S), Age(S).'
+        - Phase (alive/probing/dead) and Probes (attempt/3) directly support SR-47077(2) aging-probe assertions.
+        - The runner MUST shell-escape every {{param}} placeholder; this template has no placeholders.
+        - Session output is captured into diag_snapshot_ref and never written to the repo.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+        - The runner selects SSH (paramiko) or Telnet (telnetlib) based on the transport parameter; the profile's transport field is the default.
+  fw_config_arp_scan:
+    atom_ref: atoms/fw/fw_config_arp_scan.yaml
+    intent: Build an ARP scan interface and CIDR nets configuration request.
+    request:
+      method: PUT
+      path: /api/v1/neighbor/scan/intf
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: neighbor_scan_intf
+        val:
+          intfs: "{{ params.val.intfs }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <arp-scan-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/neighbor/scan/intf configures per-interface ARP scan (enable + CIDR nets).
+        - Each intfs item is {name, enable, nets[]}; nets values are CIDR strings.
+        - GET /api/v1/neighbor/scan/intf returns the same structure under vals for read-back.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_trigger_arp_scan:
+    atom_ref: atoms/fw/fw_trigger_arp_scan.yaml
+    intent: Build an ARP scan trigger or periodic schedule request.
+    request:
+      method: PUT
+      path: /api/v1/neighbor/scan/trigger
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: neighbor_scan_trigger
+        val:
+          is_periodic: "{{ params.val.is_periodic }}"
+          period_in_seconds: "{{ params.val.period_in_seconds }}"
+          start_at_once: "{{ params.val.start_at_once }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <arp-scan-trigger-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/neighbor/scan/trigger handles both immediate scan and periodic scan.
+        - is_periodic selects periodic mode; period_in_seconds is in seconds (UI shows minutes).
+        - start_at_once true triggers a scan immediately once.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_garp_rate_limit:
+    atom_ref: atoms/fw/fw_config_garp_rate_limit.yaml
+    intent: Build a gratuitous ARP rate limit configuration request.
+    request:
+      method: PUT
+      path: /api/v1/neighbor/garplimitrate
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "0"
+        val:
+          rate: "{{ params.val.rate }}"
+          capacity: "{{ params.val.capacity }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <garp-rate-limit-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/neighbor/garplimitrate configures gratuitous ARP send rate limit.
+        - rate is in pps (device range 1-4096); capacity is the burst capacity (observed fixed at 16).
+        - id is fixed to "0"; the backend locates the setting by the val object.
+        - GET /api/v1/neighbor/garplimitrate returns {"vals":[{"rate":...,"capacity":...}]} for read-back.
+        - Interface-level gratuitous ARP enable (enable_garp_timed_send / garp_send_interval) is covered by fw_config_interface / fw_update_interface over PUT /api/v1/intf.
+        - ptm-atomic run can execute this request only when --execute is explicit.

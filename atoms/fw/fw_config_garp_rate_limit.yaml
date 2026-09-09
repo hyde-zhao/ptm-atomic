@@ -1,0 +1,90 @@
+schema_version: "1.1"
+op_id: fw_config_garp_rate_limit
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_garp_rate_limit
+description: Configure gratuitous ARP rate limit through /api/v1/neighbor/garplimitrate.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be garp_rate_limit for this operation.
+  params:
+    type: json
+    required: true
+    description: Gratuitous ARP rate limit settings with rate and capacity.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: garp_rate_limit
+  params:
+    val:
+      rate: 64
+      capacity: 16
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: garp_rate_limit
+      applied_ref: "<garp-rate-limit-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - network
+gate:
+  required: true
+  reason: Gratuitous ARP rate limit changes ARP broadcast behavior on the firewall and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - The target rate is within the device-supported range (1-4096 pps).
+postconditions:
+  - Gratuitous ARP rate limit is configured and the result reference is available to the caller.
+tags:
+  - firewall
+  - network
+  - arp
+  - gratuitous-arp
+  - rate-limit
+  - configuration
+aliases:
+  - garp
+  - gratuitous-arp
+  - free-arp
+  - garp-rate-limit
+  - arp-rate-limit
+since_version: "1.9.0"

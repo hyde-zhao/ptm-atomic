@@ -192,6 +192,13 @@ OBJECT_TRANSFER_OPS = (
     "fw_export_object_data",
     "fw_download_object_file",
 )
+ARP_SCAN_OPS = (
+    "fw_config_arp_scan",
+    "fw_trigger_arp_scan",
+)
+GARP_OPS = (
+    "fw_config_garp_rate_limit",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
@@ -216,6 +223,9 @@ SUPPORTED_OPS = (
     *IP6POOL_GROUP_OPS,
     *TIMEOBJECT_OPS,
     *NEIGHBOR_OPS,
+    *ARP_SCAN_OPS,
+    *GARP_OPS,
+    "fw_verify_neighbor_probe",
     *MACPOOL_OPS,
     *DOMAINPOOL_OPS,
     *FILETYPE_OPS,
@@ -283,6 +293,7 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_verify_l2fib": ("cli", "verify-l2fib"),
     "fw_config_bridge_domain_mac_age": ("cli", "set-mac-age"),
     "fw_verify_bridge_domain_mac_age": ("cli", "verify-mac-age"),
+    "fw_verify_neighbor_probe": ("cli", "verify-neighbor-probe"),
     # Deprecated legacy op_id aliases (merged into the unified transport op)
     "fw_verify_system_version_cli": ("cli", "verify-system-version"),
     "fw_verify_system_version_telnet": ("cli", "verify-system-version"),
@@ -297,6 +308,9 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_verify_neighbor": ("neighbor", "verify"),
     "fw_delete_neighbor": ("neighbor", "delete"),
     "fw_delete_batch_neighbor": ("neighbor", "delete-batch"),
+    "fw_config_arp_scan": ("arp-scan", "config"),
+    "fw_trigger_arp_scan": ("arp-scan", "trigger"),
+    "fw_config_garp_rate_limit": ("garp", "rate-limit"),
 }
 
 # 共享参数名列表（子命令通过 getattr 从父解析器结果中读取）
@@ -406,6 +420,8 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_filetype as run_filetype
     from atomic_ops.commands import run_cert as run_cert
     from atomic_ops.commands import run_geoip as run_geoip
+    from atomic_ops.commands import run_arp_scan as run_arp_scan
+    from atomic_ops.commands import run_garp as run_garp
 
     return (
         CommandGroup(
@@ -521,6 +537,8 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         *run_dns.build_subtree(),
         *run_trex.build_subtree(),
         *run_neighbor.build_subtree(),
+        *run_arp_scan.build_subtree(),
+        *run_garp.build_subtree(),
         *run_ues.build_subtree(),
         CommandGroup(
             name="mac-pool",

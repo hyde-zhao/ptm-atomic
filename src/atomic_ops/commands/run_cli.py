@@ -121,6 +121,13 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             handler=_run_verify_mac_age,
             add_args=_add_verify_mac_age_args,
         ),
+        CommandSpec(
+            name="verify-neighbor-probe",
+            help="Query VPP IP neighbor table to verify ARP phase/aging probes over SSH/Telnet.",
+            description="Read the VPP IP neighbor table (vppctl show ip neighbor) and optionally assert an IP/interface/phase.",
+            handler=_run_verify_neighbor_probe,
+            add_args=_add_verify_neighbor_probe_args,
+        ),
     )
 
 
@@ -630,6 +637,88 @@ def _run_mac_age(args: argparse.Namespace, op_id: str) -> int:
                     bridge_domain_id=bridge_domain_id,
                     timeout=float(ctx.get("timeout", 10.0)),
                 )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _add_verify_neighbor_probe_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--username",
+        default=None,
+        help="SSH login user; defaults to the web session username (admin). "
+             "The FW CLI user is usually 'root'.",
+    )
+    parser.add_argument(
+        "--expected-ip",
+        help="Optional neighbor IP to assert present in the VPP neighbor table.",
+    )
+    parser.add_argument(
+        "--expected-interface",
+        help="Optional interface to filter the asserted neighbor rows.",
+    )
+    parser.add_argument(
+        "--expected-phase",
+        help="Optional phase value to assert on the matched rows (e.g. alive, probing, dead).",
+    )
+
+
+def _run_verify_neighbor_probe(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_neighbor_probe_dry_run,
+        execute_verify_neighbor_probe,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        expected_ip = getattr(args, "expected_ip", None)
+        expected_interface = getattr(args, "expected_interface", None)
+        expected_phase = getattr(args, "expected_phase", None)
+        username = getattr(args, "username", None)
+        if not ctx.get("execute"):
+            result = build_verify_neighbor_probe_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                expected_ip=expected_ip,
+                expected_interface=expected_interface,
+                expected_phase=expected_phase,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = getattr(args, "credential_env", None)
+            if not credential_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--credential-env is required when using --execute.",
+                    {"missing": "credential_env"},
+                )
+            result = execute_verify_neighbor_probe(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                credential_env=credential_env,
+                expected_ip=expected_ip,
+                expected_interface=expected_interface,
+                expected_phase=expected_phase,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
         _write_output(_to_run_envelope(result), output_format)
         return 0
     except RunnerError as exc:
