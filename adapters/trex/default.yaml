@@ -256,6 +256,31 @@ operations:
         - This operation uses a dedicated GET /api/v1/ownership endpoint, not the POST /api/v1/ops/{op_id} dispatch endpoint.
         - The response is a raw {count, ownerships} object, not an OperationEnvelope; HTTP 200 alone determines success.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_query_port_status:
+    atom_ref: atoms/tg/tg_query_port_status.yaml
+    intent: Build a read-only TRex port status diagnostics query (zero acquire, no ownership change) returning link/status/mac/src_ipv4 per port; ports omitted queries all ports.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_query_port_status
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        ports: "{{ params.ports }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-query-port-status-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
+        - This is a read-only diagnostics operation; it never acquires or releases ports and leaves no lease behind.
+        - gateway_mac is null when the neighbor literal is 'unresolved' (peer ARP/ND not answered); use it to pre-check TG port health before traffic steps.
   tg_config_stateful_interface:
     atom_ref: atoms/tg/tg_config_stateful_interface.yaml
     intent: Build an ASTF interface configuration request that sets port IPs, learns gateway MACs via ARP, and announces the template IP pool via gratuitous ARP.

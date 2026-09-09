@@ -553,7 +553,12 @@ def _validate_pppoe_val(val: dict[str, Any]) -> None:
             {"field": "type", "actual": val.get("type")},
         )
     pppoe = val.get("pppoe")
-    if not isinstance(pppoe, dict) or not pppoe.get("username") or not pppoe.get("password"):
+    # 2026-09-09：enabled=false（断开/下接口）免凭据——断开不重配凭据，且设备重启
+    # 密钥轮换后旧密文不可解密（现场 eIntfPppoeDecryptError 实证）；type/address_mode
+    # 校验保留。enable/配置路径仍强制 pppoe 块（username+password）。
+    if val.get("enabled") is not False and (
+        not isinstance(pppoe, dict) or not pppoe.get("username") or not pppoe.get("password")
+    ):
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "PPPoE interface requires a pppoe object with username and password.",

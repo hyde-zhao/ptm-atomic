@@ -85,6 +85,13 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                             add_args=_add_release_ports_args,
                         ),
                         CommandSpec(
+                            name="query-port-status",
+                            help="Query TRex port status (read-only diagnostics).",
+                            description="Read-only TRex port status query (zero acquire): link/status/mac/src_ipv4 per port.",
+                            handler=_run_query_port_status,
+                            add_args=_add_query_port_status_args,
+                        ),
+                        CommandSpec(
                             name="verify-ownership",
                             help="Query TRex port ownership across all users.",
                             description="Query the trex-api ownership registry for current port occupation by all users.",
@@ -255,6 +262,16 @@ def _add_verify_ownership_args(parser: argparse.ArgumentParser) -> None:
     _add_payload_args(parser)
 
 
+def _add_query_port_status_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    parser.add_argument(
+        "--ports",
+        default=None,
+        help="Comma-separated logical port names to query, e.g. 2_1,2_2. If omitted, queries all ports.",
+    )
+    _add_payload_args(parser)
+
+
 def _add_config_stateful_interface_args(parser: argparse.ArgumentParser) -> None:
     _add_user_id_arg(parser)
     parser.add_argument(
@@ -343,6 +360,10 @@ def _run_release_ports(args: argparse.Namespace) -> int:
     return _run_trex(args, "tg_release_ports")
 
 
+def _run_query_port_status(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_query_port_status")
+
+
 def _run_verify_ownership(args: argparse.Namespace) -> int:
     return _run_trex(args, "tg_verify_ownership")
 
@@ -428,6 +449,12 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
         return params
     if op_id == "tg_verify_ownership":
         return {}
+    if op_id == "tg_query_port_status":
+        params: dict[str, Any] = {"user_id": getattr(args, "user_id", "default")}
+        ports_str = getattr(args, "ports", None)
+        if ports_str:
+            params["ports"] = _parse_ports(ports_str)
+        return params
     if op_id == "tg_config_interface":
         return {
             "user_id": getattr(args, "user_id", "default"),

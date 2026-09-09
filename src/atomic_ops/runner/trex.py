@@ -46,6 +46,7 @@ TREX_OPS: dict[str, tuple[str, str]] = {
         "tg_stop_traffic_stream",
         "tg_delete_traffic_template",
         "tg_release_ports",
+        "tg_query_port_status",
     )
 }
 # ownership 走独立 GET 端点，非 /api/v1/ops/{op_id} 调度
@@ -68,6 +69,7 @@ _USER_ID_FORWARD_OPS = {
     "tg_verify_traffic_loss",
     "tg_stop_traffic_stream",
     "tg_delete_traffic_template",
+    "tg_query_port_status",
 }
 # Stateful (ASTF) ops also forward user_id
 _USER_ID_FORWARD_OPS.update(TREX_STATEFUL_OPS)
@@ -205,6 +207,12 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
     elif op_id == "tg_verify_ownership":
         # GET 查询无请求体
         payload: dict[str, Any] = {}
+    elif op_id == "tg_query_port_status":
+        # 只读诊断查询：ports 可选（缺省=全部），user_id 仅选池内 client
+        payload = {}
+        ports = params.get("ports")
+        if ports:
+            payload["ports"] = ports
     else:
         raise RunnerError(
             "RUNNER_UNSUPPORTED_OP",
@@ -354,6 +362,14 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
     elif op_id == "tg_verify_ownership":
         # GET 查询无请求体，无需校验
         pass
+    elif op_id == "tg_query_port_status":
+        ports = payload.get("ports")
+        if ports is not None and (not isinstance(ports, list) or not ports):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ports must be a non-empty list or omitted to query all.",
+                {"field": "ports"},
+            )
     else:
         raise RunnerError(
             "RUNNER_UNSUPPORTED_OP",

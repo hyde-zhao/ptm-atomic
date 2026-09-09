@@ -1,0 +1,69 @@
+schema_version: "1.1"
+op_id: tg_query_port_status
+device_type: tg
+description: Read-only TRex port status diagnostics (zero acquire, no ownership change); returns link/status/mac/src_ipv4/gateway_mac per port. Ports omitted queries all ports.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_query_port_status
+parameters:
+  user_id:
+    type: string
+    required: false
+    description: Pool client selector (does not change port ownership).
+  ports:
+    type: array
+    required: false
+    description: Logical port names to query (e.g. ["2_1","2_2"]); omit to query all ports.
+returns:
+  status: success
+  data:
+    status: queried
+    count: 2
+    ports:
+      - port: "2_3"
+        physical_port: 2
+        link: UP
+        status: IDLE
+        owner: ""
+        rx_filter_mode: "off"
+        service_mode: false
+        promiscuous: false
+        src_mac: "02:00:00:00:00:02"
+        src_ipv4: "10.0.0.12"
+        gateway: "10.0.0.1"
+        arp_state: "unresolved"
+        gateway_mac: null
+      - port: "2_4"
+        physical_port: 3
+        link: UP
+        status: IDLE
+        owner: ""
+        rx_filter_mode: "off"
+        service_mode: false
+        promiscuous: false
+        src_mac: "02:00:00:00:00:03"
+        src_ipv4: "10.0.0.13"
+        gateway: "10.0.0.1"
+        arp_state: "aa:bb:cc:dd:ee:01"
+        gateway_mac: "aa:bb:cc:dd:ee:01"
+  error_type: NONE
+  diag_snapshot_ref: ""
+idempotent: true
+side_effect: observation
+dry_run_supported: true
+risk_level: low
+timeout_ms: 15000
+error_types:
+  - INVALID_PARAM
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - The trex-api service is reachable.
+postconditions:
+  - The response reflects the live TRex port state; no port is acquired, released, or reconfigured.
+notes:
+  - gateway_mac is null when TRex reports the neighbor literal 'unresolved' (peer ARP/ND not answered); arp_state keeps the raw literal for diagnosis.
+tags:
+  - traffic
+  - trex
+  - port_diagnostics
+since_version: "1.2.0"
