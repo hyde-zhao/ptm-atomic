@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from atomic_ops.cli import main as cli_main
-from atomic_ops.commands.run import _to_run_envelope
+from atomic_ops.commands.run import _read_secret_env, _to_run_envelope
 from atomic_ops.rollback import readiness_report, validate_rollback_contract
 from atomic_ops.aliases_lookup import extract_alias_keywords, find_ops_by_alias
 from atomic_ops.runner.errors import RunnerError
@@ -5240,6 +5240,123 @@ class UesCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 49)  # ERROR_RUNNER_VALIDATION_FAILED 退出码
         payload = json.loads(stderr.getvalue().splitlines()[-1])
         self.assertEqual(payload["error_code"], "RUNNER_VALIDATION_FAILED")
+
+
+class CredentialAuthSplitTests(unittest.TestCase):
+    """STORY-S6-02：凭据缺失（环境变量未注入/为空）与认证失败（口令/凭据被拒）分层出口。
+
+    - 凭据缺失 -> RUNNER_CREDENTIAL_MISSING（exit 43），消息点名环境变量并附注入指引；
+    - 认证失败 -> RUNNER_LOGIN_FAILED（exit 44），消息说明被设备拒绝（认证环节）；
+    - 文案安全口径：不出现独立词 password/token（输出层整行 REDACT），不回显凭据值。
+    """
+
+    def test_read_secret_env_missing_var_is_credential_class_with_hint(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(RunnerError) as context:
+                _read_secret_env("FW_WEB_PASSWORD", "password_env")
+        self.assertEqual(context.exception.error_code, "RUNNER_CREDENTIAL_MISSING")
+        # 消息点名未注入的环境变量并附注入指引
+        self.assertIn("FW_WEB_PASSWORD", context.exception.message)
+        self.assertIn("credential not injected", context.exception.message)
+        self.assertIn("set -a; source .env; set +a", context.exception.suggestion or "")
+
+    def test_read_secret_env_empty_value_is_credential_class(self) -> None:
+        with patch.dict(os.environ, {"FW_SSH_PASSWORD": ""}):
+            with self.assertRaises(RunnerError) as context:
+                _read_secret_env("FW_SSH_PASSWORD", "password_env")
+        self.assertEqual(context.exception.error_code, "RUNNER_CREDENTIAL_MISSING")
+        self.assertEqual(context.exception.details.get("env"), "FW_SSH_PASSWORD")
+
+    def test_read_secret_env_set_value_returns_value(self) -> None:
+        with patch.dict(os.environ, {"FW_SSH_PASSWORD": "unit-test-value"}):
+            self.assertEqual(_read_secret_env("FW_SSH_PASSWORD", "password_env"), "unit-test-value")
+
+    def test_ssh_read_credential_env_missing_is_credential_class(self) -> None:
+        from atomic_ops.runner.ssh import _read_credential_env
+
+        with patch("atomic_ops.runner.ssh._load_dotenv"), patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(RunnerError) as context:
+                _read_credential_env("FW_TELNET_PASSWORD")
+        self.assertEqual(context.exception.error_code, "RUNNER_CREDENTIAL_MISSING")
+        self.assertIn("FW_TELNET_PASSWORD", context.exception.message)
+        self.assertIn("set -a; source .env; set +a", context.exception.suggestion or "")
+
+    def test_login_wrong_credential_is_auth_rejected_class(self) -> None:
+        # 设备返回 errCode（口令错/凭据失效）-> RUNNER_LOGIN_FAILED，与凭据缺失（43）分层
+        with patch("atomic_ops.runner.ngfw_login._encrypt_password", return_value="encrypted"):
+            with patch(
+                "atomic_ops.runner.ngfw_login.request_json",
+                return_value=(200, {"errCode": "eUserOrPwdError", "errMsg": "unit"}, "{}"),
+            ):
+                with self.assertRaises(RunnerError) as context:
+                    login(
+                        base_url="https://10.0.0.1",
+                        username="admin",
+                        password_value="pw",
+                        timeout=10,
+                        verify_tls=False,
+                        change_default_password=False,
+                        replacement_value=None,
+                    )
+        self.assertEqual(context.exception.error_code, "RUNNER_LOGIN_FAILED")
+        self.assertIn("Authentication rejected", context.exception.message)
+        self.assertEqual(context.exception.details.get("err_code"), "eUserOrPwdError")
+
+    def test_login_http_401_is_auth_rejected_class(self) -> None:
+        with patch("atomic_ops.runner.ngfw_login._encrypt_password", return_value="encrypted"):
+            with patch(
+                "atomic_ops.runner.ngfw_login.request_json",
+                return_value=(401, {}, "{}"),
+            ):
+                with self.assertRaises(RunnerError) as context:
+                    login(
+                        base_url="https://10.0.0.1",
+                        username="admin",
+                        password_value="pw",
+                        timeout=10,
+                        verify_tls=False,
+                        change_default_password=False,
+                        replacement_value=None,
+                    )
+        self.assertEqual(context.exception.error_code, "RUNNER_LOGIN_FAILED")
+        self.assertIn("Authentication rejected", context.exception.message)
+        self.assertIn("401", context.exception.message)
+
+    def test_login_without_err_code_keeps_response_message(self) -> None:
+        # 无 errCode 也无会话引用：保持响应异常语义（非认证被拒）
+        with patch("atomic_ops.runner.ngfw_login._encrypt_password", return_value="encrypted"):
+            with patch(
+                "atomic_ops.runner.ngfw_login.request_json",
+                return_value=(200, {"foo": "bar"}, "{}"),
+            ):
+                with self.assertRaises(RunnerError) as context:
+                    login(
+                        base_url="https://10.0.0.1",
+                        username="admin",
+                        password_value="pw",
+                        timeout=10,
+                        verify_tls=False,
+                        change_default_password=False,
+                        replacement_value=None,
+                    )
+        self.assertEqual(context.exception.error_code, "RUNNER_LOGIN_FAILED")
+        self.assertIn("did not contain a session reference", context.exception.message)
+
+    def test_credential_message_survives_output_redaction(self) -> None:
+        # 凭据缺失文案可安全通过输出脱敏层（不被整行 REDACT），且只含变量名不含凭据值
+        from atomic_ops.errors import CliError, write_error
+        from atomic_ops.runner.errors import credential_missing_error
+
+        error = credential_missing_error("FW_WEB_PASSWORD", field_name="password_env")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            write_error(
+                CliError(error.error_code, error.message, error.details, suggestion=error.suggestion),
+                "json",
+            )
+        payload = json.loads(stderr.getvalue())
+        self.assertIn("FW_WEB_PASSWORD", payload["message"])
+        self.assertIn("set -a; source .env; set +a", payload["suggestion"])
 
 
 if __name__ == "__main__":

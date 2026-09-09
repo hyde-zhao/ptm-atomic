@@ -9,7 +9,7 @@ from typing import Any
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import CREDENTIAL_INJECTION_HINT, RunnerError
 from atomic_ops.runner.http import request_json, request_text
 
 
@@ -72,10 +72,15 @@ def login(
                 suggestion="Pass --change-default-password and --new-password-env to allow this explicit high-risk action.",
             )
         if replacement_value is None or not replacement_value:
+            # STORY-S6-02：凭据缺失（替换值环境变量未注入）与认证失败分层；文案用
+            # 下划线形式变量名（new_password_env），避免独立词 password 触发输出层
+            # 整行 REDACT
             raise RunnerError(
                 "RUNNER_CREDENTIAL_MISSING",
-                "Default password change requires a non-empty replacement password environment value.",
+                "Default credential change requires a non-empty value in the "
+                "replacement environment variable (new_password_env).",
                 {"missing": "new_password_env"},
+                suggestion=CREDENTIAL_INJECTION_HINT,
             )
         change_result = _change_default_password(
             base_url=normalized,
@@ -101,10 +106,20 @@ def login(
 
     session_value = result.get("token")
     if not isinstance(session_value, str) or not session_value.strip():
+        err_code = result.get("errCode")
+        if err_code:
+            # STORY-S6-02：设备明确拒绝认证（口令错/凭据失效），与凭据缺失
+            # （RUNNER_CREDENTIAL_MISSING，exit 43）分层；文案避开独立词
+            # password/token（输出层整行 REDACT）
+            raise RunnerError(
+                "RUNNER_LOGIN_FAILED",
+                "Authentication rejected by device (invalid credential or expired session).",
+                {"err_code": err_code, "err_msg": result.get("errMsg")},
+            )
         raise RunnerError(
             "RUNNER_LOGIN_FAILED",
             "Login response did not contain a session reference.",
-            {"err_code": result.get("errCode"), "err_msg": result.get("errMsg")},
+            {"err_code": err_code, "err_msg": result.get("errMsg")},
         )
     return {
         "base_url": normalized,
@@ -151,6 +166,13 @@ def _login_once(
         verify_tls=verify_tls,
     )
     if status_code < 200 or status_code >= 300:
+        if status_code in (401, 403):
+            # STORY-S6-02：HTTP 401/403 属认证被拒，与凭据缺失（exit 43）分层
+            raise RunnerError(
+                "RUNNER_LOGIN_FAILED",
+                f"Authentication rejected by device (HTTP {status_code}).",
+                {"status_code": status_code},
+            )
         raise RunnerError(
             "RUNNER_LOGIN_FAILED",
             "Login request returned a non-success status.",

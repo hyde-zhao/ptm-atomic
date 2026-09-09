@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, credential_missing_error
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import _encrypt_password, normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -111,11 +111,8 @@ def execute_pppoe_config(
     _validate_required("username", username)
     dial_secret = os.environ.get(password_env)
     if dial_secret is None or not dial_secret:
-        raise RunnerError(
-            "RUNNER_CREDENTIAL_MISSING",
-            "PPPoE password environment variable is not set or is empty.",
-            {"env": password_env},
-        )
+        # STORY-S6-02：拨号凭据缺失（环境变量未注入/为空）与认证失败分层出口
+        raise credential_missing_error(password_env)
     encrypted_secret = _encrypt_password(base_url, dial_secret, timeout=timeout, verify_tls=verify_tls)
     payload = build_pppoe_payload(intf_id=intf_id, username=username, dial_secret=encrypted_secret)
 

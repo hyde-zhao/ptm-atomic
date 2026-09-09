@@ -18,7 +18,7 @@ from atomic_ops.commands import CommandGroup, CommandSpec
 from atomic_ops.errors import CliError, write_error, write_warning
 from atomic_ops.repository import Repository
 from atomic_ops.rollback import run_rollback_context
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, credential_missing_error
 from atomic_ops.runner.session import DEFAULT_SESSION_FILE
 
 # ── 受支持操作列表（维护旧格式兼容映射） ─────────────────
@@ -1239,11 +1239,9 @@ def _read_secret_env(env_name: str | None, field_name: str) -> str:
         )
     value = os.environ.get(env_name)
     if value is None or not value:
-        raise RunnerError(
-            "RUNNER_CREDENTIAL_MISSING",
-            "Runner credential environment variable is not set or is empty.",
-            {"env": env_name},
-        )
+        # STORY-S6-02：凭据缺失（未注入/为空）与认证失败分层出口；消息点名环境
+        # 变量并附注入指引，不回显凭据值
+        raise credential_missing_error(env_name, field_name=field_name)
     return value
 
 
