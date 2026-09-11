@@ -52,9 +52,9 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     interface_enabled_group.add_argument("--interface-enabled", dest="interface_enabled", action="store_true", default=True, help="Enable the NGFW interface.")
     interface_enabled_group.add_argument("--interface-disabled", dest="interface_enabled", action="store_false", help="Disable the NGFW interface.")
     parser.add_argument("--ip-address", action="append", default=[], help="Interface CIDR address. May be repeated for IPv4 and IPv6.")
-    parser.add_argument("--parent-name", help="Subinterface parent interface name.")
+    parser.add_argument("--parent-name", help="Subinterface parent interface name, or optional BVI bridge member interface name (bvi kind). When given, the member port must be Switch mode with pvid equal to the BVI instance and linkType 1; prepare it with 'interface update' first.")
     parser.add_argument("--sub-id", type=int, help="Subinterface VLAN/sub id.")
-    parser.add_argument("--bvi-instance", type=int, help="BVI instance id.")
+    parser.add_argument("--bvi-instance", type=int, help="BVI instance id. Member port pvid must equal this value.")
     parser.add_argument("--bond-id", type=int, help="Bond id.")
     parser.add_argument("--bond-member", action="append", default=[], help="Physical interface member for a bond. May be repeated.")
     parser.add_argument("--bond-mode", type=int, default=5, help="Bond mode field.")
@@ -71,7 +71,7 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
         "(pppoe kind only). Required for --execute; the runner RSA-encrypts the "
         "value with the login public key before sending.",
     )
-    parser.add_argument("--link-type", type=int, help="Interface linkType field.")
+    parser.add_argument("--link-type", type=int, help="Interface linkType field. BVI bridge member ports require 1 (access); the device defaults to 2 (trunk) when omitted, which is rejected as a BVI member.")
     parser.add_argument("--pvid", type=int, default=1, help="Switch/Pair/Monitor mode PVID.")
     parser.add_argument("--allow-pass", help="Switch/Pair/Monitor mode allowPass field.")
     parser.add_argument("--tunnel-type", choices=("4over6", "6over4", "gre"), help="IP tunnel variant (tunnel kind only). 4over6 maps to type 15, 6over4 to type 16, gre to type 11.")
@@ -81,6 +81,8 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--gre-key", type=int, default=0, help="GRE key field (gre only).")
     parser.add_argument("--gre-check-sum", action="store_true", default=False, help="Enable GRE checksum (gre only).")
     parser.add_argument("--gre-keepalive-enable", action="store_true", default=False, help="Enable GRE keepalive (gre only).")
+    parser.add_argument("--ip6-nd-prefix", action="append", default=None, help="IPv6 ND prefix for val.ip6_nd.ip_prefix (bvi/sub only), e.g. 66::/96. May be repeated. Omitted from the payload when not set.")
+    parser.add_argument("--ip6-racfg-suppress", type=int, help="val.ip6_racfg.suppress flag, 0 or 1 (bvi/sub only). Omitted from the payload when not set.")
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
 
@@ -93,6 +95,8 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", action="append", help="Entry id.")
+    parser.add_argument("--page", type=int, help="Page number for the paginated interface query (fw_verify_interface).")
+    parser.add_argument("--size", type=int, help="Page size for the paginated interface query (fw_verify_interface).")
 
 
 def _add_pppoe_args(parser: argparse.ArgumentParser) -> None:
@@ -165,6 +169,27 @@ def _run_verify(args: argparse.Namespace) -> int:
     return _run_interface(args, "fw_verify_interface")
 
 
+def _verify_query(args: argparse.Namespace, op_id: str) -> dict[str, int] | None:
+    if op_id != "fw_verify_interface":
+        return None
+    page = getattr(args, "page", None)
+    size = getattr(args, "size", None)
+    if page is None and size is None:
+        return None
+    query: dict[str, int] = {}
+    for name, value in (("page", page), ("size", size)):
+        if value is None:
+            continue
+        if value < 1:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Interface pagination parameter must be a positive integer.",
+                {"field": name, "value": value},
+            )
+        query[name] = value
+    return query
+
+
 def _run_interface(args: argparse.Namespace, op_id: str) -> int:
     from atomic_ops.runner.interface import (
         build_interface_batch_delete_payload,
@@ -229,6 +254,8 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                     gre_key=int(getattr(args, "gre_key", 0)),
                     gre_check_sum=bool(getattr(args, "gre_check_sum", False)),
                     gre_keepalive_enable=bool(getattr(args, "gre_keepalive_enable", False)),
+                    ip6_nd_prefixes=list(getattr(args, "ip6_nd_prefix") or []) or None,
+                    ip6_racfg_suppress=getattr(args, "ip6_racfg_suppress"),
                 )
             payload = validate_interface_payload(payload, op_id=op_id)
 
@@ -238,6 +265,7 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                 auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
+                query=_verify_query(args, op_id),
             )
         else:
             result = execute_interface(
@@ -245,6 +273,7 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                 auth_header=ctx.get("auth_header", "Authorization"), payload=payload,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
+                query=_verify_query(args, op_id),
                 pppoe_password_env=getattr(args, "pppoe_password_env", None),
             )
         _write_output(_to_run_envelope(result), output_format)

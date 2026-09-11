@@ -184,7 +184,25 @@ class InterfacePayloadTests(unittest.TestCase):
         self.assertEqual(payload["val"]["mode"], "Route")
         self.assertEqual(payload["val"]["bvi"]["instance"], 109)
         self.assertEqual(payload["val"]["bvi"]["bridge"]["name"], "bvi109")
+        self.assertEqual(payload["val"]["bvi"]["bridge"]["interfaces"], [])
         self.assertEqual(payload["val"]["ip_addresses"], ["191.109.0.31/24", "2091:109::31/64"])
+
+    def test_build_bvi_route_payload_with_parent_name(self) -> None:
+        payload = build_interface_payload(
+            interface_kind="bvi",
+            entry_id="bvi88",
+            bvi_instance=11,
+            parent_name="GE0_2",
+            ip_addresses=["192.88.0.31/24"],
+        )
+
+        self.assertEqual(payload["val"]["type"], 14)
+        self.assertEqual(payload["val"]["bvi"]["instance"], 11)
+        self.assertEqual(
+            payload["val"]["bvi"]["bridge"]["interfaces"],
+            [{"name": "GE0_2", "bridged_virtual_interface": False, "split_horizon_group": 0}],
+        )
+        self.assertEqual(payload["val"]["bvi"]["bridge"]["name"], "bvi88")
 
     def test_build_subinterface_route_payload(self) -> None:
         payload = build_interface_payload(
@@ -195,8 +213,88 @@ class InterfacePayloadTests(unittest.TestCase):
 
         self.assertEqual(payload["val"]["type"], 1)
         self.assertEqual(payload["val"]["sub"], {"parent_name": "GE0_2", "sub_id": 106})
-        self.assertEqual(payload["val"]["ip6_nd"], {"ip_prefix": []})
-        self.assertEqual(payload["val"]["ip6_racfg"], {"suppress": 0})
+        self.assertNotIn("ip6_nd", payload["val"])
+        self.assertNotIn("ip6_racfg", payload["val"])
+
+    def test_build_bvi_payload_with_ip6_nd_and_racfg(self) -> None:
+        payload = build_interface_payload(
+            interface_kind="bvi",
+            entry_id="bvi88",
+            ip6_nd_prefixes=["66::/96"],
+            ip6_racfg_suppress=1,
+        )
+
+        self.assertEqual(payload["val"]["ip6_nd"], {"ip_prefix": ["66::/96"]})
+        self.assertEqual(payload["val"]["ip6_racfg"], {"suppress": 1})
+
+    def test_build_sub_payload_with_ip6_nd_only(self) -> None:
+        payload = build_interface_payload(
+            interface_kind="sub",
+            entry_id="GE0_2.106",
+            ip6_nd_prefixes=["66::/96", "2001:db8::/64"],
+        )
+
+        self.assertEqual(payload["val"]["ip6_nd"], {"ip_prefix": ["66::/96", "2001:db8::/64"]})
+        self.assertNotIn("ip6_racfg", payload["val"])
+
+    def test_rejects_invalid_ip6_nd_prefix(self) -> None:
+        for bad in ("192.0.2.0/24", "66::", "not-a-prefix"):
+            with self.assertRaises(RunnerError) as context:
+                build_interface_payload(
+                    interface_kind="bvi",
+                    entry_id="bvi88",
+                    ip6_nd_prefixes=[bad],
+                )
+            self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_rejects_invalid_ip6_racfg_suppress(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_interface_payload(
+                interface_kind="bvi",
+                entry_id="bvi88",
+                ip6_racfg_suppress=2,
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_rejects_ip6_nd_on_unsupported_kind(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_interface_payload(
+                interface_kind="bond",
+                entry_id="bond1",
+                bond_members=["GE0_3"],
+                ip6_nd_prefixes=["66::/96"],
+            )
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_validate_payload_rejects_invalid_ip6_racfg_suppress(self) -> None:
+        payload = {
+            "id": "bvi88",
+            "val": {
+                "name": "bvi88",
+                "type": 14,
+                "mode": "Route",
+                "bvi": {"instance": 11, "bridge": {"name": "bvi88", "interfaces": []}},
+                "ip6_nd": {"ip_prefix": ["66::/96"]},
+                "ip6_racfg": {"suppress": 9},
+            },
+        }
+        with self.assertRaises(RunnerError) as context:
+            validate_interface_payload(payload, op_id="fw_config_interface")
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_validate_payload_accepts_ip6_nd_and_racfg(self) -> None:
+        payload = {
+            "id": "bvi88",
+            "val": {
+                "name": "bvi88",
+                "type": 14,
+                "mode": "Route",
+                "bvi": {"instance": 11, "bridge": {"name": "bvi88", "interfaces": []}},
+                "ip6_nd": {"ip_prefix": ["66::/96"]},
+                "ip6_racfg": {"suppress": 1},
+            },
+        }
+        self.assertEqual(validate_interface_payload(payload, op_id="fw_config_interface"), payload)
 
     def test_build_physical_monitor_payload(self) -> None:
         payload = build_interface_payload(interface_kind="physical", entry_id="GE0_18", mode="Monitor")
@@ -1965,6 +2063,58 @@ class Ospfv2ExecuteTests(unittest.TestCase):
         self.assertIsNone(kwargs["json_payload"])
 
 
+class InterfaceCliTests(unittest.TestCase):
+    def test_cli_interface_get_with_page_and_size(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "interface",
+                    "verify",
+                    "--page",
+                    "2",
+                    "--size",
+                    "20",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["data"]["request"]["method"], "GET")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/intf?page=2&size=20"))
+        self.assertEqual(payload["data"]["request"]["query"], {"page": 2, "size": 20})
+        self.assertIsNone(payload["data"]["request"]["payload"])
+
+    def test_cli_interface_get_rejects_invalid_page(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                [
+                    "run",
+                    "--format",
+                    "json",
+                    "--base-url",
+                    "https://192.0.2.1",
+                    "interface",
+                    "verify",
+                    "--page",
+                    "0",
+                ]
+            )
+
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn("must be a positive integer", stderr.getvalue())
+
+
 class InterfaceExecuteTests(unittest.TestCase):
     def test_execute_interface_get_sends_no_json_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1991,6 +2141,35 @@ class InterfaceExecuteTests(unittest.TestCase):
         args, kwargs = request.call_args
         self.assertEqual(args[0], "GET")
         self.assertTrue(args[1].endswith("/api/v1/intf"))
+        self.assertIsNone(kwargs["json_payload"])
+
+    def test_execute_interface_get_applies_page_and_size_query(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            with patch("atomic_ops.runner.interface.request_json", return_value=(200, {"vals": []}, "{}")) as request:
+                result = execute_interface(
+                    op_id="fw_verify_interface",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=None,
+                    verify_tls=False,
+                    timeout=10,
+                    query={"page": 2, "size": 20},
+                )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["request"]["query"], {"page": 2, "size": 20})
+        args, kwargs = request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertTrue(args[1].endswith("/api/v1/intf?page=2&size=20"))
         self.assertIsNone(kwargs["json_payload"])
 
     def test_execute_interface_delete_uses_query_id(self) -> None:
@@ -2020,6 +2199,115 @@ class InterfaceExecuteTests(unittest.TestCase):
         self.assertTrue(args[1].endswith("/api/v1/intf?id=GE0_2.106"))
         self.assertIsNone(kwargs["json_payload"])
         self.assertEqual(kwargs["headers"]["AuthorizationToken"], "abc123")
+
+    def test_execute_interface_bvi_member_rejection_suggests_member_port_setup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            payload = build_interface_payload(
+                interface_kind="bvi",
+                entry_id="bvi67",
+                mode="Route",
+                ip_addresses=[],
+                name=None,
+                desc="",
+                enabled=True,
+                parent_name="GE0_2",
+                sub_id=None,
+                bvi_instance=67,
+                bond_id=None,
+                bond_members=[],
+                bond_mode=5,
+                bond_lb=0,
+                link_type=None,
+                pvid=1,
+                allow_pass=None,
+                tunnel_type=None,
+                src_addr=None,
+                dst_addr=None,
+                gre_tunnel_type=1,
+                gre_key=0,
+                gre_check_sum=False,
+                gre_keepalive_enable=False,
+            )
+            with patch(
+                "atomic_ops.runner.interface.request_json",
+                return_value=(400, {"errCode": "eRequestParam", "errMsg": "添加Vlan接口失败"}, "{}"),
+            ):
+                with self.assertRaises(RunnerError) as context:
+                    execute_interface(
+                        op_id="fw_config_interface",
+                        base_url="https://192.0.2.1",
+                        session_file=session_file,
+                        auth_header="AuthorizationToken",
+                        payload=payload,
+                        verify_tls=False,
+                        timeout=10,
+                    )
+
+        self.assertEqual(context.exception.error_code, "RUNNER_CONFIG_REJECTED")
+        self.assertIsNotNone(context.exception.suggestion)
+        self.assertIn("Switch mode", context.exception.suggestion)
+        self.assertIn("linkType 1", context.exception.suggestion)
+
+    def test_execute_interface_bvi_without_member_rejection_has_no_member_suggestion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            payload = build_interface_payload(
+                interface_kind="bvi",
+                entry_id="bvi67",
+                mode="Route",
+                ip_addresses=[],
+                name=None,
+                desc="",
+                enabled=True,
+                parent_name=None,
+                sub_id=None,
+                bvi_instance=67,
+                bond_id=None,
+                bond_members=[],
+                bond_mode=5,
+                bond_lb=0,
+                link_type=None,
+                pvid=1,
+                allow_pass=None,
+                tunnel_type=None,
+                src_addr=None,
+                dst_addr=None,
+                gre_tunnel_type=1,
+                gre_key=0,
+                gre_check_sum=False,
+                gre_keepalive_enable=False,
+            )
+            with patch(
+                "atomic_ops.runner.interface.request_json",
+                return_value=(400, {"errCode": "eRequestParam", "errMsg": "添加Vlan接口失败"}, "{}"),
+            ):
+                with self.assertRaises(RunnerError) as context:
+                    execute_interface(
+                        op_id="fw_config_interface",
+                        base_url="https://192.0.2.1",
+                        session_file=session_file,
+                        auth_header="AuthorizationToken",
+                        payload=payload,
+                        verify_tls=False,
+                        timeout=10,
+                    )
+
+        self.assertIsNone(context.exception.suggestion)
 
 
 class Ospfv3BfdExecuteTests(unittest.TestCase):

@@ -30,6 +30,7 @@ operations:
       notes:
         - BVI and subinterface payloads only support Route mode.
         - Physical interfaces are not created; use fw_update_interface for existing physical interfaces.
+        - BVI bridge member ports are optional; when specified they must be Switch mode with pvid equal to the BVI instance and linkType 1 (access), prepared with fw_update_interface before creation.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_interface:
     atom_ref: atoms/fw/fw_update_interface.yaml
@@ -57,10 +58,11 @@ operations:
       notes:
         - Physical and bond interfaces support Route, Switch, Pair, and Monitor modes.
         - BVI and subinterface payloads only support Route mode.
+        - Switch-mode ports used as optional BVI bridge members need pvid equal to the BVI instance and linkType 1 (access); the device defaults omitted linkType to 2, which is rejected as a BVI member.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_interface:
     atom_ref: atoms/fw/fw_verify_interface.yaml
-    intent: Build an all-interface query request.
+    intent: Build an interface query request with optional pagination.
     request:
       method: GET
       path: /api/v1/intf
@@ -69,6 +71,9 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
       payload_template: {}
     response:
       success_status:
@@ -79,6 +84,7 @@ operations:
       runner_required: true
       notes:
         - GET /api/v1/intf returns all interfaces and sends no JSON body.
+        - GET supports optional page and size query parameters; page=N&size=M returns the Nth page of vals while count keeps the total.
   fw_delete_interface:
     atom_ref: atoms/fw/fw_delete_interface.yaml
     intent: Build a single-interface delete request by query id.

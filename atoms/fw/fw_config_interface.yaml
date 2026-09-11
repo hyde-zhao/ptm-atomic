@@ -76,6 +76,7 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk interface configuration is used.
+  - BVI bridge member ports (val.bvi.bridge.interfaces) are optional; when specified, they must already be Switch mode with pvid equal to the BVI instance and linkType 1 (access), prepared with fw_update_interface first.
 postconditions:
   - Interface creation result and diagnostic references are available to the caller.
 tags:

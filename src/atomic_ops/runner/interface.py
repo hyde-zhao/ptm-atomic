@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from ipaddress import AddressValueError, IPv4Address, IPv6Address, ip_address, ip_interface
+from ipaddress import AddressValueError, IPv4Address, IPv6Address, IPv6Network, NetmaskValueError, ip_address, ip_interface
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -85,6 +85,8 @@ def build_interface_payload(
     gre_key: int = 0,
     gre_check_sum: bool = False,
     gre_keepalive_enable: bool = False,
+    ip6_nd_prefixes: list[str] | None = None,
+    ip6_racfg_suppress: int | None = None,
 ) -> dict[str, Any]:
     interface_kind = _validate_interface_kind(interface_kind)
     mode = _validate_mode(interface_kind, mode)
@@ -109,7 +111,7 @@ def build_interface_payload(
         link_type=link_type,
     )
     if interface_kind == "bvi":
-        _apply_bvi(val, entry_id, bvi_instance)
+        _apply_bvi(val, entry_id, bvi_instance, parent_name)
     elif interface_kind == "sub":
         _apply_sub(val, entry_id, parent_name, sub_id)
     elif interface_kind == "physical":
@@ -124,6 +126,14 @@ def build_interface_payload(
             gre_tunnel_type=gre_tunnel_type, gre_key=gre_key,
             gre_check_sum=gre_check_sum, gre_keepalive_enable=gre_keepalive_enable,
         )
+
+    # ip6_nd / ip6_racfg：可选参数，未指定时不下发（bvi/sub 专用）。
+    _apply_ip6_nd_racfg(
+        val,
+        interface_kind=interface_kind,
+        ip6_nd_prefixes=ip6_nd_prefixes,
+        ip6_racfg_suppress=ip6_racfg_suppress,
+    )
 
     _apply_mode_fields(val, interface_kind, mode, pvid=pvid, allow_pass=allow_pass, link_type=link_type)
     payload = {"id": entry_id, "val": val}
@@ -178,6 +188,7 @@ def validate_interface_payload(payload: dict[str, Any], *, op_id: str) -> dict[s
                 "Interface payload type does not match the interface id style.",
                 {"field": "type", "interface_kind": kind, "expected": expected_type, "actual": val.get("type")},
             )
+    _validate_ip6_nd_racfg_payload(val, kind)
     _validate_ip_addresses(list(val.get("ip_addresses") or []))
     if op_id == "fw_config_interface" and kind in {"physical", "tunnel"}:
         raise RunnerError(
@@ -209,6 +220,7 @@ def build_interface_dry_run(
     payload: dict[str, Any] | None,
     verify_tls: bool,
     timeout: float,
+    query: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     method, _path = _method_path(op_id)
     return {
@@ -217,10 +229,11 @@ def build_interface_dry_run(
         "execute_required": True,
         "request": {
             "method": method,
-            "url": _request_url(base_url, op_id, payload=payload),
+            "url": _request_url(base_url, op_id, payload=payload, query=query),
             "auth": {"name": auth_header, "value": "<session-ref>"},
             "content_type": "application/json",
             "payload": None if op_id in NO_BODY_OPS else payload,
+            "query": dict(query) if query else None,
         },
         "session_file": str(session_file),
         "verify_tls": verify_tls,
@@ -277,6 +290,7 @@ def execute_interface(
     verify_tls: bool,
     timeout: float,
     pppoe_password_env: str | None = None,
+    query: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
     password_encrypted = False
@@ -294,7 +308,7 @@ def execute_interface(
     headers = {"Content-Type": "application/json", auth_header: header_value}
     status_code, response_payload, _text = request_json(
         method,
-        _request_url(base_url, op_id, payload=payload),
+        _request_url(base_url, op_id, payload=payload, query=query),
         headers=headers,
         json_payload=None if op_id in NO_BODY_OPS else payload,
         timeout=timeout,
@@ -312,6 +326,7 @@ def execute_interface(
                 "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
                 "response_keys": sorted(response_payload.keys()),
             },
+            suggestion=_interface_error_suggestion(payload, response_payload),
         )
     result: dict[str, Any] = {
         "op_id": op_id,
@@ -321,6 +336,7 @@ def execute_interface(
             "method": method,
             "path": path,
             "auth": {"name": auth_header, "value": "<session-ref>"},
+            "query": dict(query) if query else None,
         },
         "response": response_payload,
     }
@@ -329,13 +345,44 @@ def execute_interface(
     return result
 
 
-def _request_url(base_url: str, op_id: str, *, payload: dict[str, Any] | None = None) -> str:
+def _interface_error_suggestion(
+    payload: dict[str, Any] | None,
+    response_payload: dict[str, Any],
+) -> str | None:
+    # 设备实测（2026-09-11，<DUT_IP>）：bridge.interfaces 带成员创建/更新 BVI 被
+    # eRequestParam（"添加Vlan接口失败"/"创建Vlan接口失败"）拒绝的唯一原因是成员口状态
+    # 不满足：成员口必须是 Switch 模式、pvid 等于 BVI instance、linkType 为 1（access）。
+    # linkType 为 2（trunk）或 pvid 不匹配都会被拒；省略 --link-type 时设备默认为 2。
+    val = (payload or {}).get("val")
+    bvi = val.get("bvi") if isinstance(val, dict) else None
+    bridge = bvi.get("bridge") if isinstance(bvi, dict) else None
+    has_member = isinstance(bridge, dict) and bool(bridge.get("interfaces"))
+    if has_member and response_payload.get("errCode") == "eRequestParam":
+        return (
+            "BVI bridge member ports must be Switch mode with pvid equal to the BVI "
+            "instance and linkType 1 (access) before the BVI is created. Prepare the "
+            "member port with fw_update_interface (--mode Switch --pvid <bvi-instance> "
+            "--link-type 1) first, then retry this operation."
+        )
+    return None
+
+
+def _request_url(
+    base_url: str,
+    op_id: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    query: dict[str, Any] | None = None,
+) -> str:
     _method, path = _method_path(op_id)
     url = f"{normalize_base_url(base_url)}{path}"
     if op_id == "fw_delete_interface":
         entry_id = str((payload or {}).get("id") or "")
         _validate_deletable_interface_id(entry_id)
         url = f"{url}?{urlencode({'id': entry_id})}"
+    elif op_id == "fw_verify_interface" and query:
+        # 设备实测（2026-09-10）：GET /api/v1/intf?page=N&size=M 返回分页 vals，count 保持总数
+        url = f"{url}?{urlencode(query)}"
     return url
 
 
@@ -387,7 +434,12 @@ def _base_val(
     return val
 
 
-def _apply_bvi(val: dict[str, Any], entry_id: str, bvi_instance: int | None) -> None:
+def _apply_bvi(
+    val: dict[str, Any],
+    entry_id: str,
+    bvi_instance: int | None,
+    parent_name: str | None = None,
+) -> None:
     # 透传：id 格式不做强校验（DUT 校验无效值），正则仅用于提取 instance。
     # 提取不到且未显式传 bvi_instance 时回退 0，不拒绝。
     match = BVI_ID_RE.match(entry_id)
@@ -398,6 +450,14 @@ def _apply_bvi(val: dict[str, Any], entry_id: str, bvi_instance: int | None) -> 
     else:
         digits = re.search(r"(\d+)", entry_id)
         instance = int(digits.group(1)) if digits else 0
+    # bridge.interfaces 成员结构（真相源：Web UI 手工添加成员的真实下发报文，2026-09-10）：
+    # [{"name": "GE0_2", "bridged_virtual_interface": false, "split_horizon_group": 0}]
+    # --parent-name 提供可选成员接口名；未提供时为空（无成员 BVI）。
+    interfaces: list[dict[str, Any]] = []
+    if parent_name:
+        interfaces = [
+            {"name": parent_name, "bridged_virtual_interface": False, "split_horizon_group": 0}
+        ]
     val.update(
         {
             "linkType": val.get("linkType", 0),
@@ -406,7 +466,7 @@ def _apply_bvi(val: dict[str, Any], entry_id: str, bvi_instance: int | None) -> 
                 "instance": instance,
                 "bridge": {
                     "name": entry_id,
-                    "interfaces": [],
+                    "interfaces": interfaces,
                     "flood": True,
                     "unknown_unicast_flood": True,
                     "forward": True,
@@ -415,8 +475,6 @@ def _apply_bvi(val: dict[str, Any], entry_id: str, bvi_instance: int | None) -> 
                     "arp_termination_table": [],
                 },
             },
-            "ip6_nd": {"ip_prefix": []},
-            "ip6_racfg": {"suppress": 0},
         }
     )
 
@@ -440,10 +498,94 @@ def _apply_sub(val: dict[str, Any], entry_id: str, parent_name: str | None, sub_
             "linkType": val.get("linkType", 0),
             "type": 1,
             "sub": {"parent_name": parent, "sub_id": parsed_sub_id},
-            "ip6_nd": {"ip_prefix": []},
-            "ip6_racfg": {"suppress": 0},
         }
     )
+
+
+def _apply_ip6_nd_racfg(
+    val: dict[str, Any],
+    *,
+    interface_kind: str,
+    ip6_nd_prefixes: list[str] | None,
+    ip6_racfg_suppress: int | None,
+) -> None:
+    # ip6_nd / ip6_racfg 仅 bvi/sub 支持；均为可选，未指定时不下发对应字段。
+    if interface_kind not in {"bvi", "sub"}:
+        if ip6_nd_prefixes or ip6_racfg_suppress is not None:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ip6_nd and ip6_racfg parameters support bvi and sub interfaces only.",
+                {"interface_kind": interface_kind, "field": "ip6_nd/ip6_racfg"},
+            )
+        return
+    if ip6_nd_prefixes:
+        val["ip6_nd"] = {"ip_prefix": _validate_ip6_nd_prefixes(ip6_nd_prefixes)}
+    if ip6_racfg_suppress is not None:
+        val["ip6_racfg"] = {"suppress": _validate_ip6_racfg_suppress(ip6_racfg_suppress)}
+
+
+def _validate_ip6_nd_racfg_payload(val: dict[str, Any], kind: str) -> None:
+    # 透传完整 payload（--payload-json/--payload-file）时校验 ip6_nd/ip6_racfg 字段。
+    has_nd = "ip6_nd" in val
+    has_racfg = "ip6_racfg" in val
+    if not (has_nd or has_racfg):
+        return
+    if kind not in {"bvi", "sub"}:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ip6_nd and ip6_racfg parameters support bvi and sub interfaces only.",
+            {"interface_kind": kind, "field": "ip6_nd/ip6_racfg"},
+        )
+    if has_nd:
+        ip6_nd = val["ip6_nd"]
+        if not isinstance(ip6_nd, dict) or not isinstance(ip6_nd.get("ip_prefix"), list):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ip6_nd must be an object like {ip_prefix: [<ipv6-cidr>, ...]}.",
+                {"field": "ip6_nd"},
+            )
+        _validate_ip6_nd_prefixes(list(ip6_nd["ip_prefix"]))
+    if has_racfg:
+        ip6_racfg = val["ip6_racfg"]
+        if not isinstance(ip6_racfg, dict) or "suppress" not in ip6_racfg:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ip6_racfg must be an object like {suppress: 0|1}.",
+                {"field": "ip6_racfg"},
+            )
+        _validate_ip6_racfg_suppress(ip6_racfg["suppress"])
+
+
+def _validate_ip6_nd_prefixes(prefixes: list[str]) -> list[str]:
+    validated: list[str] = []
+    for item in prefixes:
+        if not isinstance(item, str) or "/" not in item:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ip6_nd prefix must be an IPv6 CIDR string.",
+                {"field": "ip6_nd.ip_prefix", "value": item},
+            )
+        try:
+            IPv6Network(item, strict=False)
+        except (AddressValueError, NetmaskValueError, ValueError) as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ip6_nd prefix must be a valid IPv6 CIDR network.",
+                {"field": "ip6_nd.ip_prefix", "value": item},
+            ) from exc
+        validated.append(item)
+    return validated
+
+
+def _validate_ip6_racfg_suppress(value: int) -> int:
+    parsed = _validate_non_negative_int("ip6_racfg.suppress", value)
+    if parsed not in (0, 1):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ip6_racfg.suppress must be 0 or 1.",
+            {"field": "ip6_racfg.suppress", "value": parsed},
+        )
+    return parsed
 
 
 def _apply_physical(val: dict[str, Any], entry_id: str) -> None:
