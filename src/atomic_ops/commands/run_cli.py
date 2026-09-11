@@ -245,6 +245,12 @@ def _add_check_bridge_domain_args(parser: argparse.ArgumentParser) -> None:
 def _add_process_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
     parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (process ops run in the Linux shell, "
+             "not the FW CLI interactive shell).",
+    )
+    parser.add_argument(
         "--process",
         choices=("vpp", "dnsmasq", "agent"),
         required=True,
@@ -254,6 +260,12 @@ def _add_process_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_kill_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (process ops run in the Linux shell, "
+             "not the FW CLI interactive shell).",
+    )
     parser.add_argument(
         "--process",
         choices=("vpp", "dnsmasq", "agent"),
@@ -296,6 +308,7 @@ def _run_verify_process_state(args: argparse.Namespace) -> int:
         host = getattr(args, "host", None)
         port = getattr(args, "port", None)
         process = getattr(args, "process")
+        username = getattr(args, "username", "root")
         if not ctx.get("execute"):
             result = build_verify_process_state_dry_run(
                 base_url=ctx["base_url"],
@@ -303,6 +316,7 @@ def _run_verify_process_state(args: argparse.Namespace) -> int:
                 transport=transport,
                 host=host,
                 port=port,
+                username=username,
                 process=process,
                 timeout=float(ctx.get("timeout", 10.0)),
             )
@@ -320,6 +334,7 @@ def _run_verify_process_state(args: argparse.Namespace) -> int:
                 transport=transport,
                 host=host,
                 port=port,
+                username=username,
                 credential_env=credential_env,
                 process=process,
                 timeout=float(ctx.get("timeout", 10.0)),
@@ -348,6 +363,7 @@ def _run_kill_process(args: argparse.Namespace) -> int:
         port = getattr(args, "port", None)
         process = getattr(args, "process")
         pid = getattr(args, "pid")
+        username = getattr(args, "username", "root")
         if not ctx.get("execute"):
             result = build_kill_process_dry_run(
                 base_url=ctx["base_url"],
@@ -355,6 +371,7 @@ def _run_kill_process(args: argparse.Namespace) -> int:
                 transport=transport,
                 host=host,
                 port=port,
+                username=username,
                 process=process,
                 pid=pid,
                 timeout=float(ctx.get("timeout", 10.0)),
@@ -373,6 +390,7 @@ def _run_kill_process(args: argparse.Namespace) -> int:
                 transport=transport,
                 host=host,
                 port=port,
+                username=username,
                 credential_env=credential_env,
                 process=process,
                 pid=pid,

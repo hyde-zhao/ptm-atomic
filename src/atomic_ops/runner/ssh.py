@@ -1613,12 +1613,13 @@ def build_verify_process_state_dry_run(
     transport: str,
     host: str | None,
     port: int | None,
+    username: str | None = None,
     process: str,
     timeout: float,
 ) -> dict[str, Any]:
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
-    username = _username_preview(session_file)
+    effective_username = username or _username_preview(session_file)
     command = _process_command(process)
     return {
         "op_id": "fw_verify_process_state",
@@ -1629,7 +1630,7 @@ def build_verify_process_state_dry_run(
             "command": command,
             "host": target_host,
             "port": target_port,
-            "username": username,
+            "username": effective_username,
             "success_pattern": PROCESS_SUCCESS_PATTERN,
         },
         "process": process,
@@ -1645,6 +1646,7 @@ def execute_verify_process_state(
     transport: str,
     host: str | None,
     port: int | None,
+    username: str | None = None,
     credential_env: str,
     process: str,
     timeout: float,
@@ -1663,6 +1665,7 @@ def execute_verify_process_state(
         port=port,
         credential_env=credential_env,
         timeout=timeout,
+        username=username,
     )
     pid = result["data"]["pid"]
     result["data"]["running"] = bool(re.search(r"\d+", pid))
@@ -1684,13 +1687,14 @@ def build_kill_process_dry_run(
     transport: str,
     host: str | None,
     port: int | None,
+    username: str | None = None,
     process: str,
     pid: str,
     timeout: float,
 ) -> dict[str, Any]:
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
-    username = _username_preview(session_file)
+    effective_username = username or _username_preview(session_file)
     command = render_command(KILL_COMMAND_TEMPLATE, {"pid": pid})
     return {
         "op_id": "fw_kill_process",
@@ -1701,7 +1705,7 @@ def build_kill_process_dry_run(
             "command": command,
             "host": target_host,
             "port": target_port,
-            "username": username,
+            "username": effective_username,
             "success_pattern": KILL_SUCCESS_PATTERN,
         },
         "process": process,
@@ -1718,6 +1722,7 @@ def execute_kill_process(
     transport: str,
     host: str | None,
     port: int | None,
+    username: str | None = None,
     credential_env: str,
     process: str,
     pid: str,
@@ -1726,7 +1731,7 @@ def execute_kill_process(
     session_payload = read_session_file(session_file)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
-    username = _username_from_session(session_payload)
+    effective_username = username or _username_from_session(session_payload)
     credential = _read_credential_env(credential_env)
     command = render_command(KILL_COMMAND_TEMPLATE, {"pid": pid})
 
@@ -1734,7 +1739,7 @@ def execute_kill_process(
         transport=transport,
         host=target_host,
         port=target_port,
-        username=username,
+        username=effective_username,
         credential=credential,
         command=command,
         timeout=timeout,
