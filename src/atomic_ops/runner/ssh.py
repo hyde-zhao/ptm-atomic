@@ -427,7 +427,7 @@ def _execute_shell_op(
     under ``data[result_key]``. ``username`` overrides the session-file
     username (e.g. root for vppctl); None falls back to the session file.
     """
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     effective_username = username or _username_from_session(session_payload)
@@ -491,7 +491,7 @@ def build_verify_system_version_dry_run(
     expected_version: str | None,
     timeout: float,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     username = _username_from_session(session_payload)
@@ -524,7 +524,7 @@ def execute_verify_system_version(
     expected_version: str | None,
     timeout: float,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     username = _username_from_session(session_payload)
@@ -594,7 +594,7 @@ def build_check_bvi_interface_config_dry_run(
     bvi_id: str,
     timeout: float,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     username = _username_from_session(session_payload)
@@ -657,7 +657,7 @@ def build_check_bridge_domain_dry_run(
     port: int | None,
     timeout: float,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     username = _username_from_session(session_payload)
@@ -1125,7 +1125,7 @@ def build_verify_l2fib_dry_run(
     port: int | None,
     timeout: float,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     username = _username_from_session(session_payload)
@@ -1164,7 +1164,7 @@ def execute_verify_l2fib(
     credential_env: str,
     timeout: float,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     username = _username_from_session(session_payload)
@@ -1313,7 +1313,7 @@ def build_verify_bridge_domain_mac_age_dry_run(
     command = render_command(
         BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE, {"bridge_domain_id": bridge_domain_id}
     )
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     effective_username = username or _username_from_session(session_payload)
@@ -1350,7 +1350,7 @@ def execute_verify_bridge_domain_mac_age(
     command = render_command(
         BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE, {"bridge_domain_id": bridge_domain_id}
     )
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     effective_username = username or _username_from_session(session_payload)
@@ -1437,7 +1437,7 @@ def build_config_bridge_domain_mac_age_dry_run(
     show_command = render_command(
         BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE, {"bridge_domain_id": bridge_domain_id}
     )
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     effective_username = username or _username_from_session(session_payload)
@@ -1496,7 +1496,7 @@ def execute_config_bridge_domain_mac_age(
     show_command = render_command(
         BRIDGE_DOMAIN_MAC_AGE_SHOW_TEMPLATE, {"bridge_domain_id": bridge_domain_id}
     )
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     effective_username = username or _username_from_session(session_payload)
@@ -1728,7 +1728,7 @@ def execute_kill_process(
     pid: str,
     timeout: float,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     effective_username = username or _username_from_session(session_payload)
@@ -1926,7 +1926,7 @@ def build_verify_neighbor_probe_dry_run(
     timeout: float,
     username: str | None = None,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     resolved_user = username or _username_from_session(session_payload)
@@ -1964,7 +1964,7 @@ def execute_verify_neighbor_probe(
     timeout: float,
     username: str | None = None,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
     resolved_user = username or _username_from_session(session_payload)

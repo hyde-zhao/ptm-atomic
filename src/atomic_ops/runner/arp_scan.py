@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -190,7 +190,7 @@ def execute_arp_scan(
     timeout: float,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {"Content-Type": "application/json", auth_header: header_value}
@@ -203,6 +203,7 @@ def execute_arp_scan(
         verify_tls=verify_tls,
     )
     if status_code not in SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response_payload)
         raise RunnerError(
             "RUNNER_CONFIG_REJECTED",
             "ARP scan device request did not return a success status.",

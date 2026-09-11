@@ -286,7 +286,8 @@ def logout(
     from atomic_ops.runner.session import read_session_file
 
     normalized = normalize_base_url(base_url)
-    session_payload = read_session_file(session_file)
+    # CR-059：logout 也校验 session 文件与目标设备 base_url 绑定
+    session_payload = read_session_file(session_file, expect_base_url=normalized)
     session_value = str(session_payload["session_value"])
     headers = {auth_header: f"Bearer {session_value}"}
     status_code, result, _text = request_json(

@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
 from atomic_ops.runner.http import request_bytes, request_json, request_multipart
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -237,8 +237,9 @@ def derive_import_path(module: str, uploaded_name: str) -> str:
 # ── auth / HTTP wrappers ──────────────────────────────────
 
 
-def _auth_headers(session_file: Path, auth_header: str) -> dict[str, str]:
-    session_payload = read_session_file(session_file)
+def _auth_headers(session_file: Path, auth_header: str, *, base_url: str) -> dict[str, str]:
+    # CR-059：session 文件必须属于本次请求的 base_url（调用方透传）
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     return {"Content-Type": "application/json", auth_header: header_value}
@@ -251,6 +252,7 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any], timeo
         method, url, headers=headers, json_payload=payload, timeout=timeout, verify_tls=verify_tls,
     )
     if status_code not in SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response)
         raise RunnerError(
             "RUNNER_OBJECT_TRANSFER_REJECTED",
             f"Object transfer request was rejected ({label}).",
@@ -264,6 +266,7 @@ def _get_json(url: str, headers: dict[str, str], timeout: float, verify_tls: boo
         "GET", url, headers=headers, json_payload=None, timeout=timeout, verify_tls=verify_tls,
     )
     if status_code not in GET_SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response)
         raise RunnerError(
             "RUNNER_RESPONSE_INVALID",
             f"Object transfer query did not return a success status ({label}).",
@@ -450,7 +453,7 @@ def execute_object_import(
     _is_module(module, IMPORT_MODULES, "module")
     in_path = Path(input_path).expanduser()
     _is_xlsx_path(in_path)
-    headers = _auth_headers(session_file, auth_header)
+    headers = _auth_headers(session_file, auth_header, base_url=base_url)
 
     # 步骤 1：multipart 上传到 /api/v1/upload
     upload_headers = {auth_header: headers[auth_header], "X-Requested-With": "XMLHttpRequest"}
@@ -538,7 +541,7 @@ def _run_export_trigger(
     if output_path and export_file_id:
         result.update(_download_and_store(
             export_file_id, Path(output_path).expanduser(),
-            base_url=base_url, headers=_auth_headers(session_file, auth_header),
+            base_url=base_url, headers=_auth_headers(session_file, auth_header, base_url=base_url),
             timeout=timeout, verify_tls=verify_tls, auth_header=auth_header,
         ))
     elif output_path:
@@ -562,7 +565,7 @@ def execute_object_export_policy(
     timeout: float,
 ) -> dict[str, Any]:
     payload = validate_export_policy_payload(build_export_policy_payload(module=module))
-    headers = _auth_headers(session_file, auth_header)
+    headers = _auth_headers(session_file, auth_header, base_url=base_url)
     status_code, response = _post_json(
         f"{normalize_base_url(base_url)}{EXPORT_POLICY_PATH}", headers, payload, timeout, verify_tls, "exportpolicy",
         method="PUT",
@@ -587,7 +590,7 @@ def execute_object_export_data(
     timeout: float,
 ) -> dict[str, Any]:
     _is_module(module, DATA_EXPORT_MODULES, "module")
-    headers = _auth_headers(session_file, auth_header)
+    headers = _auth_headers(session_file, auth_header, base_url=base_url)
     url = f"{normalize_base_url(base_url)}{DATA_EXPORT_PATH}?type={module}"
     response = _get_json(url, headers, timeout, verify_tls, "dataexport")
     return _run_export_trigger(
@@ -613,7 +616,7 @@ def execute_object_download(
     out_path = _validate_output_path(output_path)
     result = _download_and_store(
         file_id, out_path,
-        base_url=base_url, headers=_auth_headers(session_file, auth_header),
+        base_url=base_url, headers=_auth_headers(session_file, auth_header, base_url=base_url),
         timeout=timeout, verify_tls=verify_tls, auth_header=auth_header,
     )
     return {

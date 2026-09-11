@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from atomic_ops.runner._payload import load_json_payload
-from atomic_ops.runner.errors import RunnerError, credential_missing_error
+from atomic_ops.runner.errors import RunnerError, credential_missing_error, raise_if_device_session_rejected
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import _encrypt_password, normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -302,7 +302,7 @@ def execute_interface(
             timeout=timeout,
             verify_tls=verify_tls,
         )
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {"Content-Type": "application/json", auth_header: header_value}
@@ -316,6 +316,7 @@ def execute_interface(
     )
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
+        raise_if_device_session_rejected(status_code, response_payload)
         raise RunnerError(
             "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
             "Interface device request did not return a success status.",
