@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_verify_interface
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_interface
-description: Query all NGFW interface entries from /api/v1/intf.
+description: Query NGFW interface entries from /api/v1/intf with optional pagination.
 parameters:
   session_ref:
     type: string
@@ -12,9 +12,19 @@ parameters:
     type: string
     required: true
     description: Must be interface for this operation.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the paginated interface query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the paginated interface query.
 inputs:
   session_ref: "<session-ref>"
   query_domain: interface
+  page: 1
+  size: 100
 side_effect: observation
 returns:
   status: success
@@ -42,6 +52,7 @@ preconditions:
   - External orchestration holds a valid session_ref or runner session file.
 postconditions:
   - All interface entries are available to the caller.
+  - When page and size are supplied, the query returns the requested page of vals while count keeps the total.
 tags:
   - firewall
   - capacity
