@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -69,7 +69,7 @@ def execute_operation_log(
     timeout: float,
 ) -> dict[str, Any]:
     method, path = OPERATION_LOG_ENDPOINT
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {"Content-Type": "application/json", auth_header: header_value}
@@ -89,6 +89,7 @@ def execute_operation_log(
         verify_tls=verify_tls,
     )
     if status_code not in SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response_payload)
         raise RunnerError(
             "RUNNER_RESPONSE_INVALID",
             "Operation-log device request did not return a success status.",

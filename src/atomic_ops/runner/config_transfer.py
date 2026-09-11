@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
 from atomic_ops.runner.http import request_bytes, request_json, request_multipart
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.polling import poll_until
@@ -238,7 +238,7 @@ def execute_export_file(
 ) -> dict[str, Any]:
     payload = validate_export_payload(build_export_payload(moduletype=moduletype, filetype=filetype, data_id=data_id))
     out_path = validate_output_path(output_path)
-    headers = _auth_headers(session_file, auth_header)
+    headers = _auth_headers(session_file, auth_header, base_url=base_url)
 
     # 步骤 1：发起下载任务，取 downloadtaskid
     status_code, response = _post_json(
@@ -304,7 +304,7 @@ def execute_import_file(
         )
     )
     in_path = validate_input_path(input_path)
-    headers = _auth_headers(session_file, auth_header)
+    headers = _auth_headers(session_file, auth_header, base_url=base_url)
     # multipart 上传不要带 Content-Type，requests 会自动设置 boundary
     upload_headers = {auth_header: headers[auth_header]}
 
@@ -351,8 +351,9 @@ def execute_import_file(
 # ── HTTP wrappers (centralize error mapping for multi-step flows) ──
 
 
-def _auth_headers(session_file: Path, auth_header: str) -> dict[str, str]:
-    session_payload = read_session_file(session_file)
+def _auth_headers(session_file: Path, auth_header: str, *, base_url: str) -> dict[str, str]:
+    # CR-059：session 文件必须属于本次请求的 base_url（调用方透传）
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     return {"Content-Type": "application/json", auth_header: header_value}
@@ -363,6 +364,7 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any], timeo
         "POST", url, headers=headers, json_payload=payload, timeout=timeout, verify_tls=verify_tls,
     )
     if status_code not in SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response)
         raise RunnerError(
             "RUNNER_CONFIG_REJECTED",
             "Config transfer request did not return a success status.",
@@ -376,6 +378,7 @@ def _get_json(url: str, headers: dict[str, str], timeout: float, verify_tls: boo
         "GET", url, headers=headers, json_payload=None, timeout=timeout, verify_tls=verify_tls,
     )
     if status_code not in GET_SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response)
         raise RunnerError(
             "RUNNER_RESPONSE_INVALID",
             "Config transfer query did not return a success status.",
@@ -396,6 +399,7 @@ def _post_multipart(
         url, fields=fields, files=files, headers=headers, timeout=timeout, verify_tls=verify_tls,
     )
     if status_code not in SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response)
         raise RunnerError(
             "RUNNER_CONFIG_REJECTED",
             "Config upload did not return a success status.",

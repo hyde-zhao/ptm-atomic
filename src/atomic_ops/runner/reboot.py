@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -60,7 +60,7 @@ def execute_reboot(
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
-    session_payload = read_session_file(session_file)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {auth_header: header_value}
@@ -88,6 +88,7 @@ def execute_reboot(
         raise
 
     if status_code not in SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response)
         raise RunnerError(
             "RUNNER_CONFIG_REJECTED",
             "Reboot request did not return a success status.",
