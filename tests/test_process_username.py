@@ -96,8 +96,11 @@ class VerifyProcessStateUsernameTests(_SessionFixture):
 
     def test_execute_passes_username_to_shell_op(self) -> None:
         """execute 路径把显式 username 透传给底层 shell 执行器。"""
+        # CR-060/C-1：`_execute_shell_op` 的结果键平铺在顶层（与 dry-run 同形），
+        # 不再自建内层 "data" —— 否则 CLI 出口 `_to_run_envelope` 会再包一层，
+        # 对外成为 envelope.data.data.<key>，而 atom returns 声明的是单层。
         with patch.object(
-            ssh, "_execute_shell_op", return_value={"data": {"pid": "4321"}}
+            ssh, "_execute_shell_op", return_value={"pid": "4321"}
         ) as shell_op:
             result = ssh.execute_verify_process_state(
                 base_url="https://192.0.2.1",
@@ -111,8 +114,9 @@ class VerifyProcessStateUsernameTests(_SessionFixture):
                 timeout=10.0,
             )
         self.assertEqual(shell_op.call_args.kwargs["username"], "root")
-        self.assertTrue(result["data"]["running"])
-        self.assertEqual(result["data"]["process"], "vpp")
+        self.assertNotIn("data", result)
+        self.assertTrue(result["running"])
+        self.assertEqual(result["process"], "vpp")
 
 
 class KillProcessUsernameTests(_SessionFixture):
@@ -170,7 +174,7 @@ class KillProcessUsernameTests(_SessionFixture):
     def test_execute_explicit_username_wins(self) -> None:
         effective, result = self._execute("root")
         self.assertEqual(effective, "root")
-        self.assertTrue(result["data"]["killed"])
+        self.assertTrue(result["killed"])
 
     def test_execute_none_falls_back_to_session(self) -> None:
         effective, _ = self._execute(None)

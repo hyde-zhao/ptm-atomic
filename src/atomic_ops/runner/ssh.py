@@ -424,8 +424,14 @@ def _execute_shell_op(
 
     Selects the transport primitive based on ``transport`` (ssh/telnet),
     asserts the success pattern against stdout, and returns the raw output
-    under ``data[result_key]``. ``username`` overrides the session-file
-    username (e.g. root for vppctl); None falls back to the session file.
+    under ``result[result_key]`` —— 与 dry-run 构造同形的**顶层**键。
+    ``username`` overrides the session-file username (e.g. root for vppctl);
+    None falls back to the session file.
+
+    注意：调用方 run_cli 出口 ``_to_run_envelope`` 会把 payload 剩余字段整体
+    包进 ``envelope["data"]``，本函数若再自建一层 ``"data"``，对外就变成
+    ``envelope.data.data.<key>``，而 atom 的 ``returns`` 声明的是单层
+    ``data.<key>`` → ``${STEP.n.<key>}`` 恒解析失败。故此处一律平铺。
     """
     session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
@@ -460,9 +466,7 @@ def _execute_shell_op(
         "op_id": op_id,
         "status": "success",
         "transport": transport,
-        "data": {
-            result_key: result.stdout.strip(),
-        },
+        result_key: result.stdout.strip(),
         "request": {
             "command": command,
             "host": target_host,
@@ -562,10 +566,8 @@ def execute_verify_system_version(
         "op_id": "fw_verify_system_version",
         "status": "success",
         "transport": transport,
-        "data": {
-            "version_raw": version_raw,
-            "matches_expected": matches_expected,
-        },
+        "version_raw": version_raw,
+        "matches_expected": matches_expected,
         "request": {
             "command": VERSION_COMMAND,
             "host": target_host,
@@ -1199,14 +1201,12 @@ def execute_verify_l2fib(
         "op_id": "fw_verify_l2fib",
         "status": "success",
         "transport": transport,
-        "data": {
-            "l2fib_raw": result.stdout,
-            "l2fib_entries": parsed["l2fib_entries"],
-            "entry_count": parsed["entry_count"],
-            "total_entries": parsed["total_entries"],
-            "learned_entries": parsed["learned_entries"],
-            "learn_limit": parsed["learn_limit"],
-        },
+        "l2fib_raw": result.stdout,
+        "l2fib_entries": parsed["l2fib_entries"],
+        "entry_count": parsed["entry_count"],
+        "total_entries": parsed["total_entries"],
+        "learned_entries": parsed["learned_entries"],
+        "learn_limit": parsed["learn_limit"],
         "request": {
             "command": L2FIB_COMMAND,
             "host": target_host,
@@ -1395,11 +1395,9 @@ def execute_verify_bridge_domain_mac_age(
         "op_id": "fw_verify_bridge_domain_mac_age",
         "status": "success",
         "transport": transport,
-        "data": {
-            "bridge_domain_id": bridge_domain_id,
-            "age_minutes": rows[0].get("age_minutes", ""),
-            "bridge_domain_raw": result.stdout,
-        },
+        "bridge_domain_id": bridge_domain_id,
+        "age_minutes": rows[0].get("age_minutes", ""),
+        "bridge_domain_raw": result.stdout,
         "request": {
             "command": command,
             "host": target_host,
@@ -1561,13 +1559,11 @@ def execute_config_bridge_domain_mac_age(
         "op_id": "fw_config_bridge_domain_mac_age",
         "status": "success",
         "transport": transport,
-        "data": {
-            "bridge_domain_id": bridge_domain_id,
-            "age_minutes": age_minutes,
-            "age_minutes_actual": age_minutes_actual,
-            "verify_match": verify_match,
-            "bridge_domain_raw": show_result.stdout,
-        },
+        "bridge_domain_id": bridge_domain_id,
+        "age_minutes": age_minutes,
+        "age_minutes_actual": age_minutes_actual,
+        "verify_match": verify_match,
+        "bridge_domain_raw": show_result.stdout,
         "request": {
             "command": set_command,
             "verify_command": show_command,
@@ -1667,9 +1663,9 @@ def execute_verify_process_state(
         timeout=timeout,
         username=username,
     )
-    pid = result["data"]["pid"]
-    result["data"]["running"] = bool(re.search(r"\d+", pid))
-    result["data"]["process"] = process
+    pid = result["pid"]
+    result["running"] = bool(re.search(r"\d+", pid))
+    result["process"] = process
     return result
 
 
@@ -1761,12 +1757,10 @@ def execute_kill_process(
         "op_id": "fw_kill_process",
         "status": "success",
         "transport": transport,
-        "data": {
-            "killed": True,
-            "process": process,
-            "pid": pid,
-            "auto_restart": True,
-        },
+        "killed": True,
+        "process": process,
+        "pid": pid,
+        "auto_restart": True,
         "request": {
             "command": command,
             "host": target_host,
@@ -1854,7 +1848,7 @@ def execute_dns_diag(
     timeout: float,
 ) -> dict[str, Any]:
     command = _diag_command(mode, domain)
-    return _execute_shell_op(
+    result = _execute_shell_op(
         op_id="fw_config_dns_diag",
         transport=transport,
         command=command,
@@ -1868,6 +1862,14 @@ def execute_dns_diag(
         credential_env=credential_env,
         timeout=timeout,
     )
+    # CR-060/C-1：补齐 atom `returns.data` 声明但 execute 从未产出的三个键
+    # （dry-run 只给 mode/domain，diag_output 只在 execute 侧 —— 两半合起来才是
+    # 完整契约）。`resolution_ok` 与成功模式同义：`_execute_shell_op` 内已按
+    # success_pattern 断言，能走到这里即代表域名解析并拿到回包。
+    result["mode"] = mode
+    result["domain"] = domain
+    result["resolution_ok"] = True
+    return result
 
 
 # ── fw_verify_neighbor_probe ──────────────────────────────
@@ -2003,11 +2005,9 @@ def execute_verify_neighbor_probe(
         "op_id": "fw_verify_neighbor_probe",
         "status": "success",
         "transport": transport,
-        "data": {
-            "neighbor_probe_raw": result.stdout.strip(),
-            "neighbors": neighbors,
-            "matches_expected": matches_expected,
-        },
+        "neighbor_probe_raw": result.stdout.strip(),
+        "neighbors": neighbors,
+        "matches_expected": matches_expected,
         "request": {
             "command": NEIGHBOR_PROBE_COMMAND,
             "host": target_host,

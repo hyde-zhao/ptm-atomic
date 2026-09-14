@@ -314,10 +314,12 @@ def execute_vpp_verify(
     return {
         "op_id": "fw_verify_security_zone_vpp",
         "status": "success",
-        "data": {
-            "zone_name": zone_name or zone_found or "<all>",
-            "vpp_output": vpp_output[:4096],
-            "interfaces_found": interfaces_found,
-            "vpp_api_consistent": vpp_api_consistent,
-        },
+        # 结果字段平铺到顶层：run_security_zone 出口 `_to_run_envelope` 会把
+        # payload 剩余字段整体包进 envelope["data"]，此处若再自建一层 "data"，
+        # 对外就是 envelope.data.data.<key>，而 atom 的 returns 声明的是单层
+        # data.<key> → ${STEP.n.<key>} 恒解析失败。
+        "zone_name": zone_name or zone_found or "<all>",
+        "vpp_output": vpp_output[:4096],
+        "interfaces_found": interfaces_found,
+        "vpp_api_consistent": vpp_api_consistent,
     }

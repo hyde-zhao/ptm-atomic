@@ -33,6 +33,20 @@ def _resolve_credential_env(credential_env: str | None, *, default: str = DEFAUL
     return credential_env or default
 
 
+def _default_credential_env(username: str | None) -> str:
+    """Derive the default credential key from the effective login identity.
+
+    # 上游台账 §3.3 建议 1：兑现 ``--credential-env`` 的 help 承诺
+    # （"defaults to the operation's credential key: FW_WEB_PASSWORD for admin ops,
+    # FW_SSH_PASSWORD for root vppctl ops"）。此前实现是「--execute 时必需」，与文案
+    # 不符：默认登录身份每变一次，调用方就要全量刷用例（现场 P2-30 把进程类 op 的
+    # 默认身份由 admin 改为 root 后，用例侧 credential_env 全部要跟着改）。
+    # root（Linux shell / vppctl）-> FW_SSH_PASSWORD；其余（Web 会话 admin，含未声明
+    # ``--username`` 的 op）-> FW_WEB_PASSWORD。显式 ``--credential-env`` 始终优先。
+    """
+    return MAC_AGE_CREDENTIAL_ENV if (username or "").strip() == "root" else DEFAULT_CREDENTIAL_ENV
+
+
 def _add_transport_args(parser: argparse.ArgumentParser) -> None:
     """Register the shared --transport / --host / --port / --credential-env args."""
     parser.add_argument(
@@ -321,13 +335,9 @@ def _run_verify_process_state(args: argparse.Namespace) -> int:
                 timeout=float(ctx.get("timeout", 10.0)),
             )
         else:
-            credential_env = getattr(args, "credential_env", None)
-            if not credential_env:
-                raise RunnerError(
-                    "RUNNER_CREDENTIAL_MISSING",
-                    "--credential-env is required when using --execute.",
-                    {"missing": "credential_env"},
-                )
+            credential_env = getattr(args, "credential_env", None) or _default_credential_env(
+                getattr(args, "username", None)
+            )
             result = execute_verify_process_state(
                 base_url=ctx["base_url"],
                 session_file=session_file,
@@ -377,13 +387,9 @@ def _run_kill_process(args: argparse.Namespace) -> int:
                 timeout=float(ctx.get("timeout", 10.0)),
             )
         else:
-            credential_env = getattr(args, "credential_env", None)
-            if not credential_env:
-                raise RunnerError(
-                    "RUNNER_CREDENTIAL_MISSING",
-                    "--credential-env is required when using --execute.",
-                    {"missing": "credential_env"},
-                )
+            credential_env = getattr(args, "credential_env", None) or _default_credential_env(
+                getattr(args, "username", None)
+            )
             result = execute_kill_process(
                 base_url=ctx["base_url"],
                 session_file=session_file,
@@ -432,13 +438,9 @@ def _run_config_dns_diag(args: argparse.Namespace) -> int:
                 timeout=float(ctx.get("timeout", 10.0)),
             )
         else:
-            credential_env = getattr(args, "credential_env", None)
-            if not credential_env:
-                raise RunnerError(
-                    "RUNNER_CREDENTIAL_MISSING",
-                    "--credential-env is required when using --execute.",
-                    {"missing": "credential_env"},
-                )
+            credential_env = getattr(args, "credential_env", None) or _default_credential_env(
+                getattr(args, "username", None)
+            )
             result = execute_dns_diag(
                 base_url=ctx["base_url"],
                 session_file=session_file,
@@ -717,13 +719,9 @@ def _run_verify_neighbor_probe(args: argparse.Namespace) -> int:
                 timeout=float(ctx.get("timeout", 10.0)),
             )
         else:
-            credential_env = getattr(args, "credential_env", None)
-            if not credential_env:
-                raise RunnerError(
-                    "RUNNER_CREDENTIAL_MISSING",
-                    "--credential-env is required when using --execute.",
-                    {"missing": "credential_env"},
-                )
+            credential_env = getattr(args, "credential_env", None) or _default_credential_env(
+                getattr(args, "username", None)
+            )
             result = execute_verify_neighbor_probe(
                 base_url=ctx["base_url"],
                 session_file=session_file,
