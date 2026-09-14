@@ -91,12 +91,20 @@ def _add_config_batch_args(parser: argparse.ArgumentParser) -> None:
 def _add_delete_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", required=True, action="append", help="Entry id to delete.")
     parser.add_argument("--policy-route-type", choices=("ipv4", "ipv6"), default="ipv4", help="Policy-route address family.")
+    # P2 delete 未就绪缺口：DUT 未就绪时 delete 直达 exit 46（无响应）。--retry 提供
+    # 可选内部重试（默认 0 关闭，向后兼容）；仅对「根本没拿到响应」（46）重试，
+    # 设备拒绝（48）不重试。仅单条 delete 生效；delete-batch 不自动重试。
+    parser.add_argument("--retry", type=int, default=0, help="Optional internal retries when the device is unreachable (exit 46: no response at all). Default 0 (no retry). Applies to single delete only.")
+    parser.add_argument("--retry-backoff", type=float, default=1.0, help="Seconds to wait between delete retries. Default 1.0.")
 
 
 def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--policy-route-type", choices=("ipv4", "ipv6"), default="ipv4", help="Policy-route address family.")
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="Paginated query page size.")
+    # P2 大批量 verify 缺口：--page-size 开启内部翻页聚合，替代 --size 5000 之类的
+    # 单次超大查询（现场会令 DUT 无响应直至连接中断）。默认不传则行为不变。
+    parser.add_argument("--page-size", type=int, help="Aggregate mode: fetch ALL entries with internal pagination of this page size instead of one oversized query (use instead of e.g. --size 5000).")
 
 
 def _add_priority_args(parser: argparse.ArgumentParser) -> None:
@@ -301,6 +309,11 @@ def _run_policy_route(args: argparse.Namespace, op_id: str) -> int:
                 page=int(getattr(args, "page", 1)), size=int(getattr(args, "size", 40)),
                 route_type=route_type, verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
+                # P2 大批量 verify 缺口：--page-size 聚合模式（默认 None 行为不变）
+                aggregate_page_size=getattr(args, "page_size", None),
+                # P2 delete 未就绪缺口：删除类 op 可选内部重试（默认 0）
+                retries=int(getattr(args, "retry", 0) or 0),
+                retry_backoff_seconds=float(getattr(args, "retry_backoff", 1.0)),
             )
         _write_output(_to_run_envelope(result), output_format)
         return 0

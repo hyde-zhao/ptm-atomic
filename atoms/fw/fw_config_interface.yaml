@@ -19,7 +19,11 @@ parameters:
   params:
     type: json
     required: true
-    description: Complete /api/v1/intf interface payload for bvi, subinterface, or bond creation.
+    description: >-
+      Complete /api/v1/intf interface payload for bvi, subinterface, or bond creation. Bond
+      creation (P2-bond-schema): id is bond<N>, val.type is 10, val.bond={id, mode, lb,
+      bonded_interfaces=[{name, is_passive, is_long_timeout}]}; CLI --bond-member must be
+      repeated per member (a comma-joined string is ONE member name).
   idempotency_key:
     type: string
     required: true

@@ -49,16 +49,23 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--name", help="Interface val.name. Defaults to --id.")
     parser.add_argument("--desc", default="", help="Interface description.")
     interface_enabled_group = parser.add_mutually_exclusive_group()
-    interface_enabled_group.add_argument("--interface-enabled", dest="interface_enabled", action="store_true", default=True, help="Enable the NGFW interface.")
-    interface_enabled_group.add_argument("--interface-disabled", dest="interface_enabled", action="store_false", help="Disable the NGFW interface.")
-    parser.add_argument("--ip-address", action="append", default=[], help="Interface CIDR address. May be repeated for IPv4 and IPv6.")
+    # P2-42 告警：fw_update_interface 是覆盖式 PUT（全量替换），未传的字段会被清空。
+    # 只改开关时必须回填 --ip-address，或加 --keep-ip 让 runner 先查现值回填。
+    interface_enabled_group.add_argument("--interface-enabled", dest="interface_enabled", action="store_true", default=True, help="Enable the NGFW interface. WARNING: update is a full-replacement PUT; fields not passed (e.g. --ip-address) are wiped on the device. Use --keep-ip or re-pass --ip-address when only toggling the switch.")
+    interface_enabled_group.add_argument("--interface-disabled", dest="interface_enabled", action="store_false", help="Disable the NGFW interface. WARNING: update is a full-replacement PUT; fields not passed (e.g. --ip-address) are wiped on the device. Use --keep-ip or re-pass --ip-address when only toggling the switch.")
+    parser.add_argument("--ip-address", action="append", default=[], help="Interface CIDR address. May be repeated for IPv4 and IPv6. WARNING: 'interface update' is a full-replacement PUT; omitting this flag wipes existing IPs unless --keep-ip is given.")
+    # P2-42：--keep-ip 让 runner 在 execute 前先 GET 现值 ip_addresses 回填进 payload，
+    # 使「只改 enabled 不传 IP」不再清空设备 IP。默认关闭（保持既有全量覆盖语义）。
+    parser.add_argument("--keep-ip", action="store_true", default=False, help="(interface update only) Before sending, look up the current device ip_addresses for the id and fill them into the PUT payload, so omitting --ip-address does not wipe existing IPs. Requires --execute (dry-run cannot query the device). Explicit --ip-address values always win.")
     parser.add_argument("--parent-name", help="Subinterface parent interface name, or optional BVI bridge member interface name (bvi kind). When given, the member port must be Switch mode with pvid equal to the BVI instance and linkType 1; prepare it with 'interface update' first.")
     parser.add_argument("--sub-id", type=int, help="Subinterface VLAN/sub id.")
     parser.add_argument("--bvi-instance", type=int, help="BVI instance id. Member port pvid must equal this value.")
-    parser.add_argument("--bond-id", type=int, help="Bond id.")
-    parser.add_argument("--bond-member", action="append", default=[], help="Physical interface member for a bond. May be repeated.")
-    parser.add_argument("--bond-mode", type=int, default=5, help="Bond mode field.")
-    parser.add_argument("--bond-lb", type=int, default=0, help="Bond load-balance field.")
+    # P2-bond-schema：bond 字段说明。--bond-member 是 append 参数：多成员必须重复
+    # 传参（--bond-member GE0_1 --bond-member GE0_2）；逗号串会被当成一个成员名下发。
+    parser.add_argument("--bond-id", type=int, help="Bond id (bond kind). Defaults to the number in the entry id, e.g. bond1 -> 1.")
+    parser.add_argument("--bond-member", action="append", default=[], help="Physical interface member for a bond (bond kind). May be repeated for multiple members, e.g. --bond-member GE0_1 --bond-member GE0_2. A comma-joined string is sent as ONE member name, not a list.")
+    parser.add_argument("--bond-mode", type=int, default=5, help="Bond mode field (bond kind, val.bond.mode).")
+    parser.add_argument("--bond-lb", type=int, default=0, help="Bond load-balance field (bond kind, val.bond.lb).")
     parser.add_argument("--pppoe-username", help="PPPoE username (pppoe kind only).")
     parser.add_argument(
         "--pppoe-password", action=_RemovedPppoePasswordAction,
@@ -91,12 +98,19 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", action="append", help="Entry id. May be repeated for fw_delete_batch_interface.")
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
+    # P2 delete 未就绪缺口：DUT 未就绪时 delete 直达 exit 46。--retry 提供可选内部
+    # 重试（默认 0 关闭，向后兼容）；仅单条 delete 生效，delete-batch 不自动重试。
+    parser.add_argument("--retry", type=int, default=0, help="Optional internal retries when the device is unreachable (exit 46: no response at all). Default 0 (no retry). Applies to single delete only.")
+    parser.add_argument("--retry-backoff", type=float, default=1.0, help="Seconds to wait between delete retries. Default 1.0.")
 
 
 def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", action="append", help="Entry id.")
     parser.add_argument("--page", type=int, help="Page number for the paginated interface query (fw_verify_interface).")
     parser.add_argument("--size", type=int, help="Page size for the paginated interface query (fw_verify_interface).")
+    # P2 大批量 verify 缺口：--page-size 开启内部翻页聚合（默认不传行为不变），
+    # 避免 --size 5000 之类的单次超大查询让 DUT 长时间无响应直至连接中断。
+    parser.add_argument("--page-size", type=int, help="Aggregate mode: fetch ALL interfaces with internal pagination of this page size instead of one oversized query (use instead of e.g. --size 5000).")
 
 
 def _add_pppoe_args(parser: argparse.ArgumentParser) -> None:
@@ -196,6 +210,7 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
         build_interface_dry_run,
         build_interface_payload,
         execute_interface,
+        fetch_interface_ip_addresses,
         load_json_payload,
         validate_delete_payload,
         validate_interface_payload,
@@ -228,11 +243,28 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
             else:
                 _require_arg(args, "interface_kind")
                 _require_arg(args, "id")
+                # P2-42：--keep-ip 仅对 fw_update_interface 生效。显式传了 --ip-address
+                # 时以显式值为准；未传且 execute 时先 GET 现值回填，避免覆盖式 PUT 清空
+                # 设备 IP（现场故障：STEP-014 恢复只传 enabled，50.0.0.1/24 被清空）。
+                # dry-run 不发查询请求，ip_addresses 保持 CLI 值，由 dry-run envelope
+                # 的 keep_ip 字段标注意图。
+                keep_ip_requested = bool(getattr(args, "keep_ip", False)) and op_id == "fw_update_interface"
+                explicit_ips = _arg_list(args, "ip_address")
+                effective_ips = explicit_ips
+                if keep_ip_requested and not explicit_ips and ctx.get("execute"):
+                    effective_ips = fetch_interface_ip_addresses(
+                        base_url=ctx["base_url"],
+                        session_file=session_file,
+                        auth_header=ctx.get("auth_header", "Authorization"),
+                        entry_id=_single_arg(args, "id") or "",
+                        verify_tls=bool(ctx.get("verify_tls")),
+                        timeout=float(ctx.get("timeout", 10.0)),
+                    )
                 payload = build_interface_payload(
                     interface_kind=getattr(args, "interface_kind"),
                     entry_id=_single_arg(args, "id"),
                     mode=getattr(args, "mode", "Route"),
-                    ip_addresses=_arg_list(args, "ip_address"),
+                    ip_addresses=effective_ips,
                     name=getattr(args, "name"),
                     desc=getattr(args, "desc", ""),
                     enabled=bool(getattr(args, "interface_enabled", True)),
@@ -266,6 +298,8 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
                 query=_verify_query(args, op_id),
+                # P2-42：dry-run 无法查询现值，仅标注 --keep-ip 意图
+                keep_ip=bool(getattr(args, "keep_ip", False)) and op_id == "fw_update_interface",
             )
         else:
             result = execute_interface(
@@ -275,6 +309,11 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                 timeout=float(ctx.get("timeout", 10.0)),
                 query=_verify_query(args, op_id),
                 pppoe_password_env=getattr(args, "pppoe_password_env", None),
+                # P2 大批量 verify 缺口：--page-size 聚合模式（默认 None 行为不变）
+                aggregate_page_size=getattr(args, "page_size", None),
+                # P2 delete 未就绪缺口：删除类 op 可选内部重试（默认 0）
+                retries=int(getattr(args, "retry", 0) or 0),
+                retry_backoff_seconds=float(getattr(args, "retry_backoff", 1.0)),
             )
         _write_output(_to_run_envelope(result), output_format)
         return 0

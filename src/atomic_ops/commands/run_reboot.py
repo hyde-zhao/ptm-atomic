@@ -35,11 +35,15 @@ def build_subtree() -> tuple[CommandGroup, ...]:
 
 
 def _add_reboot_args(parser: argparse.ArgumentParser) -> None:
+    # P2-39：参数文本从「Informational estimate」提升为显式契约声明。
     parser.add_argument(
         "--expected-unavailable-seconds",
         type=int,
         default=300,
-        help="Informational estimate of how long the device stays unreachable after reboot.",
+        help="CONTRACT: the runner does NOT wait for the device to recover. Callers MUST wait "
+        "this many seconds after the 2xx response before further requests, or the device stays "
+        "unreachable (exit 46). Exposed in the envelope as data.caller_must_wait_seconds and "
+        "data.device_unavailable_until_epoch.",
     )
 
 

@@ -434,6 +434,34 @@ class PolicyRoutePayloadTests(unittest.TestCase):
 
         self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
 
+    def test_rejects_policy_route_with_both_next_hop_and_outgoing_interface(self) -> None:
+        """P2-14（2026-09-14 下游反馈升级项）：两种转发模式互斥，二者同时提供必须前置拒绝。
+
+        现场背景：DUT 对越界组合只给晦涩错误（「仅出接口」ePolicyRouteOutIfModeError、
+        「网关+出接口」ePolicyRouteOutIfNextHopError，两批次 6+5 次一致），且型号能力不同
+        （DAS-TGFW-290 实测仅支持「仅网关」）→ 工具侧显式声明限制并前置拒绝，
+        调用方据 details.fields 立即定位，无需等设备回错。
+        """
+        with self.assertRaises(RunnerError) as context:
+            build_policy_route_payload(
+                source_network="any",
+                source_network_is_group=False,
+                dst_network="any",
+                dst_network_is_group=False,
+                next_hop_ip="18.18.2.2",
+                in_interface="GE0_12",
+                outgoing_interface="tunnel2",
+                service="any",
+                weight=1,
+                time_obj="",
+            )
+
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+        self.assertEqual(
+            context.exception.details.get("fields"),
+            ["next_hop_ip", "outgoing_interface"],
+        )
+
     def test_rejects_next_hop_version_mismatch(self) -> None:
         with self.assertRaises(RunnerError) as context:
             build_policy_route_payload(
@@ -563,23 +591,32 @@ class PolicyRoutePayloadTests(unittest.TestCase):
         self.assertEqual(payload["val"]["applist"], [])
         self.assertEqual(payload["val"]["app_tag_name"], [])
 
-    def test_rejects_policy_route_applist_missing_appid(self) -> None:
-        with self.assertRaises(RunnerError) as context:
-            build_policy_route_payload(
-                source_network="any",
-                source_network_is_group=False,
-                dst_network="any",
-                dst_network_is_group=False,
-                next_hop_ip="1.1.1.1",
-                in_interface="GE0_12",
-                outgoing_interface="",
-                service="any",
-                weight=1,
-                time_obj="",
-                applist=[{"appname": "UDP应用"}],
-            )
+    def test_accepts_policy_route_applist_with_appname_only(self) -> None:
+        """appid 不作强制（透传原则）：仅含 appname 的项原样透传，不自动补全 appid。
 
-        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
+        真相源：runner/policy_route.py `_validate_applist` 注释 —— DUT 实测 2026-08-19
+        接受仅含 appname 的项（如 {"appname":"HTTP"}），强制 appid 会拒绝 DUT 合法请求。
+
+        本测试替代原 `test_rejects_policy_route_applist_missing_appid`：原断言要求
+        「缺 appid 必须拒绝」，与现行透传语义矛盾，属历史整改后的陈旧测试
+        （2026-09-14 经下游反馈核对后改写，非放宽校验）。
+        """
+        payload = build_policy_route_payload(
+            source_network="any",
+            source_network_is_group=False,
+            dst_network="any",
+            dst_network_is_group=False,
+            next_hop_ip="1.1.1.1",
+            in_interface="GE0_12",
+            outgoing_interface="",
+            service="any",
+            weight=1,
+            time_obj="",
+            applist=[{"appname": "UDP应用"}],
+        )
+
+        # 原样透传：既不拒绝，也不自动补 appid（补全会引入 DUT 未请求的匹配条件）
+        self.assertEqual(payload["val"]["applist"], [{"appname": "UDP应用"}])
 
     def test_rejects_policy_route_app_tag_name_empty_item(self) -> None:
         with self.assertRaises(RunnerError) as context:
@@ -2541,16 +2578,27 @@ class InterfaceTunnelCliTests(unittest.TestCase):
         self.assertEqual(payload["error_code"], "RUNNER_VALIDATION_FAILED")
         self.assertIn("PUT and GET only", payload["message"])
 
-    def test_cli_interface_delete_tunnel_rejected(self) -> None:
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
+    def test_cli_interface_delete_tunnel_is_passed_through(self) -> None:
+        """delete 的 id 不做类别强校验（透传原则）：物理口/tunnel 是否可删由 DUT 决定。
+
+        真相源：runner/interface.py `_validate_deletable_interface_id` 注释 ——
+        「物理口/tunnel 是否可删由 DUT 决定，runner 不再拦截」，仅要求 id 非空。
+
+        本测试替代原 `test_cli_interface_delete_tunnel_rejected`：原断言要求 tunnel delete
+        被 runner 拦截，与现行透传语义矛盾，属历史整改后的陈旧测试
+        （2026-09-14 经下游反馈核对后改写，非放宽校验）。
+        """
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
             exit_code = cli_main(
                 ["run", "--format", "json", "--base-url", "https://192.0.2.1", "--verify-tls",
                  "interface", "delete", "--id", "tunnel1"]
             )
-        self.assertNotEqual(exit_code, 0)
-        payload = json.loads(stderr.getvalue())
-        self.assertEqual(payload["error_code"], "RUNNER_VALIDATION_FAILED")
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["op_id"], "fw_delete_interface")
+        self.assertEqual(payload["data"]["request"]["method"], "DELETE")
+        self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/intf?id=tunnel1"))
 
 
 class _FakeAliasOp:

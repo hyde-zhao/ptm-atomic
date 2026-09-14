@@ -71,7 +71,16 @@ def redact(value: Any) -> Any:
 
 
 def write_error(error: CliError, output_format: str) -> int:
-    """Write a CLI error object to stderr and return its fixed exit code."""
+    """Write a CLI error object to stderr and return its fixed exit code.
+
+    P2 探针空响应缺口（下游现场 2026-09-08~09-11）：失败原先只写 stderr，stdout
+    保持为空——消费方（op_mapper._parse_atomic_output / _load_op_decl）把「空
+    stdout」一律按 None 处理，导致「探测失败（如设备不可达 exit 46）」与「本地无
+    该 op 声明」不可区分。现约定：``--format json`` 模式下失败也在 stdout 打印一
+    行机器可读 JSON（status=error + error_code/error_type/retryable/exit_code），
+    使调用方能区分两者；stderr 输出、退出码与非 json 模式输出格式全部保持不变
+    （向后兼容）。
+    """
 
     payload = error.to_dict()
     # run execute 错误：写 exec-log 审计日志（含透传的 err_code/err_msg），
@@ -95,6 +104,24 @@ def write_error(error: CliError, output_format: str) -> int:
         payload["exec_log_path"] = str(run_log_path(ctx.run_id))
     if output_format == "json":
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        # 失败也在 stdout 留机器可读结构：error_type 与 error_code 同值冗余给出，
+        # 便于不同消费方按任一键名读取；retryable 对应错误码表的 retryable 语义
+        # （如 RUNNER_DEVICE_UNREACHABLE=true）。
+        stdout_payload = {
+            "status": "error",
+            "error_code": error.error_code,
+            "error_type": error.error_code,
+            "message": payload.get("message"),
+            "details": payload.get("details"),
+            "retryable": payload.get("retryable", False),
+            "exit_code": error.exit_code,
+        }
+        if payload.get("suggestion"):
+            stdout_payload["suggestion"] = payload["suggestion"]
+        if payload.get("run_id"):
+            stdout_payload["run_id"] = payload["run_id"]
+            stdout_payload["exec_log_path"] = payload["exec_log_path"]
+        print(json.dumps(redact(stdout_payload), ensure_ascii=False, sort_keys=True))
     else:
         details = _details_text(payload["details"])
         suggestion = payload.get("suggestion")

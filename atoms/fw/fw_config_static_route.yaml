@@ -41,6 +41,9 @@ returns:
   status: success
   data:
     created: true
+    static_route_ids: ["<static-route-id>"]
+    created_static_route_id: "<static-route-id>"
+    id_lookup_status: matched
     config_result:
       status: succeeded
       config_domain: static_route
@@ -103,6 +106,12 @@ preconditions:
 postconditions:
   - Configuration result and diagnostic references are available to the caller.
   - A follow-up fw_verify_static_route query can confirm the route exists on the device.
+  - >-
+    The device POST response carries no id. On success the runner automatically re-queries
+    fw_verify_static_route by dst_network (next_hop_addr preferred) and exposes the matched id as
+    data.static_route_ids / data.created_static_route_id with data.id_lookup_status
+    (matched / ambiguous / not_found / failed); when ambiguous or failed, resolve the id explicitly
+    via fw_verify_static_route before fw_delete_static_route.
 tags:
   - firewall
   - capacity

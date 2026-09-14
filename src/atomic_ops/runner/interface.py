@@ -11,13 +11,18 @@ from urllib.parse import urlencode
 
 from atomic_ops.runner._payload import load_json_payload
 from atomic_ops.runner.errors import RunnerError, credential_missing_error, raise_if_device_session_rejected
-from atomic_ops.runner.http import request_json
+from atomic_ops.runner.http import request_json, request_json_with_retries
 from atomic_ops.runner.ngfw_login import _encrypt_password, normalize_base_url
+from atomic_ops.runner.pagination import fetch_all_pages, response_payload_or_raise
 from atomic_ops.runner.session import read_session_file
 
 
 SUCCESS_STATUS = {200, 201, 202}
 GET_SUCCESS_STATUS = {200}
+# P2 delete 未就绪缺口：允许内部重试的删除类 op（DUT 未就绪时 delete 直达 exit 46，
+# 无 backoff/重试循环会让清理步直接失败）。batch delete 不在内——POST /api/v1/batch
+# 部分成功语义复杂，不自动重试。
+RETRYABLE_DELETE_OPS = {"fw_delete_interface"}
 # PPPoE 拨号密码占位符：与 runner/pppoe.py 同值（pppoe-config 快捷命令与
 # interface create/update --interface-kind pppoe 是同一设备端点的两套表达，
 # execute 时统一由密码环境变量经 RSA(PKCS1v15) 加密后替换占位符）。
@@ -205,6 +210,64 @@ def validate_interface_payload(payload: dict[str, Any], *, op_id: str) -> dict[s
     return payload
 
 
+def fetch_interface_ip_addresses(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    entry_id: str,
+    verify_tls: bool,
+    timeout: float,
+) -> list[str]:
+    """P2-42：查询设备上指定接口的现值 ip_addresses（供 ``--keep-ip`` 回填）。
+
+    背景（现场故障 PC-STRATEGYROUTE-MNG-DFX-05-03 STEP-014）：``fw_update_interface``
+    是覆盖式 PUT（payload 全量替换），只传 ``--interface-enabled`` 不带
+    ``--ip-address`` 时设备上的 IP 会被清空。本函数在 execute 前先 GET 一次
+    现值，把 ip_addresses 回填进 payload，使「只改开关」不再丢 IP。
+
+    兼容两种设备返回形状：``vals[i] = {"id":..., "val": {...}}`` 与扁平
+    ``vals[i] = {"id":..., "ip_addresses": [...]}``。
+
+    fail fast 原则：目标 id 在返回中不存在时抛 RUNNER_VALIDATION_FAILED，
+    绝不静默返回空列表继续 PUT——那会把「清空 IP」的现场故障原样复现。
+    """
+    result = execute_interface(
+        op_id="fw_verify_interface",
+        base_url=base_url,
+        session_file=session_file,
+        auth_header=auth_header,
+        payload=None,
+        verify_tls=verify_tls,
+        timeout=timeout,
+    )
+    response = result.get("response")
+    vals = response.get("vals") if isinstance(response, dict) else None
+    if not isinstance(vals, list):
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "Interface keep-ip lookup failed: device response has no vals list.",
+            {"op_id": "fw_verify_interface", "entry_id": entry_id},
+            suggestion="Re-run without --keep-ip and pass --ip-address explicitly.",
+        )
+    for item in vals:
+        if not isinstance(item, dict) or str(item.get("id") or "") != entry_id:
+            continue
+        val = item.get("val") if isinstance(item.get("val"), dict) else item
+        addresses = val.get("ip_addresses")
+        # id 匹配即成功；接口本身没有 IP 时返回空列表（回填空 == 保持无 IP 的现值）。
+        return [str(address) for address in addresses] if isinstance(addresses, list) else []
+    raise RunnerError(
+        "RUNNER_VALIDATION_FAILED",
+        "Interface keep-ip lookup failed: entry id not found in device response.",
+        {"entry_id": entry_id, "vals_count": len(vals)},
+        suggestion=(
+            "The interface id does not exist on the device (or the response is "
+            "paginated). Pass --ip-address explicitly instead of --keep-ip."
+        ),
+    )
+
+
 def validate_delete_payload(payload: dict[str, Any]) -> dict[str, str]:
     entry_id = str(payload.get("id") or "")
     _validate_deletable_interface_id(entry_id)
@@ -221,9 +284,10 @@ def build_interface_dry_run(
     verify_tls: bool,
     timeout: float,
     query: dict[str, Any] | None = None,
+    keep_ip: bool = False,
 ) -> dict[str, Any]:
     method, _path = _method_path(op_id)
-    return {
+    result = {
         "op_id": op_id,
         "status": "dry_run",
         "execute_required": True,
@@ -239,6 +303,16 @@ def build_interface_dry_run(
         "verify_tls": verify_tls,
         "timeout": timeout,
     }
+    # P2-42：dry-run 不发查询请求，无法回填现值 IP；此处只标注 --keep-ip 意图，
+    # 提醒调用方 execute 时会先 GET 现值回填 ip_addresses 再 PUT。
+    if keep_ip:
+        result["keep_ip"] = True
+        result["keep_ip_note"] = (
+            "On --execute the runner looks up the current device ip_addresses for "
+            "this id and fills them into the PUT payload before sending, so that "
+            "omitted --ip-address does not wipe existing IPs (full-replacement PUT)."
+        )
+    return result
 
 
 def _inject_pppoe_secret(
@@ -291,6 +365,9 @@ def execute_interface(
     timeout: float,
     pppoe_password_env: str | None = None,
     query: dict[str, Any] | None = None,
+    retries: int = 0,
+    retry_backoff_seconds: float = 1.0,
+    aggregate_page_size: int | None = None,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
     password_encrypted = False
@@ -306,14 +383,39 @@ def execute_interface(
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {"Content-Type": "application/json", auth_header: header_value}
-    status_code, response_payload, _text = request_json(
-        method,
-        _request_url(base_url, op_id, payload=payload, query=query),
-        headers=headers,
-        json_payload=None if op_id in NO_BODY_OPS else payload,
-        timeout=timeout,
-        verify_tls=verify_tls,
-    )
+
+    def _fetch_single(page_number: int | None, page_size: int | None) -> tuple[int, dict[str, Any], str]:
+        # 聚合模式下按内部翻页参数拼 query；非聚合路径（page_number=None）保持既有
+        # query 透传行为不变（verify 带 page/size 时分页、不带时全量）。
+        page_query = dict(query) if query else None
+        if op_id == "fw_verify_interface" and page_number is not None:
+            page_query = {"page": page_number, "size": page_size}
+        return request_json(
+            method,
+            _request_url(base_url, op_id, payload=payload, query=page_query),
+            headers=headers,
+            json_payload=None if op_id in NO_BODY_OPS else payload,
+            timeout=timeout,
+            verify_tls=verify_tls,
+        )
+
+    # P2 大批量 verify 缺口：--page-size 开启内部翻页聚合（默认 None 行为不变），
+    # 避免 --size 5000 之类的单次超大查询让 DUT 长时间无响应直至连接中断。
+    if aggregate_page_size is not None and method == "GET":
+        response_payload = fetch_all_pages(
+            lambda page_number, page_size: response_payload_or_raise(
+                op_id, method, _fetch_single(page_number, page_size)
+            ),
+            page_size=aggregate_page_size,
+        )
+        status_code = 200
+    else:
+        # P2 delete 未就绪缺口：删除类 op 支持可选内部重试（默认 retries=0 行为不变）。
+        status_code, response_payload, _text = request_json_with_retries(
+            lambda: _fetch_single(None, None),
+            retries=retries if op_id in RETRYABLE_DELETE_OPS else 0,
+            backoff_seconds=retry_backoff_seconds,
+        )
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload)

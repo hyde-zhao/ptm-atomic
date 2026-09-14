@@ -10,6 +10,7 @@
 | v0.4 | 2026-05-20 | Codex | Add OSPFv3 and BFD method-level adapter operations. |
 | v0.5 | 2026-07-17 | meta-dev | Add trex.default adapter profile for tg TRex operations. |
 | v0.6 | 2026-07-30 | meta-dev | Add tg_acquire_ports/tg_release_ports/tg_verify_ownership operations and user_id field for multi-user port ownership. |
+| v0.7 | 2026-09-14 | meta-dev | Align schema with implemented runner behaviour: `request.content_type` admits `multipart/form-data` (file-upload operations), `request.query_params` models paginated GETs, and `shell.privilege_level` admits `privileged`/`root` for appliance SSH targets. |
 
 ## Purpose
 
@@ -50,7 +51,9 @@ Adapter profiles may describe:
 | Area | Allowed form |
 |---|---|
 | Operation link | Atom file path and operation id. |
-| Request shape | HTTP method, endpoint path, content type, and placeholder payload template. |
+| Request shape | HTTP method, endpoint path, content type, optional query parameters, and placeholder payload template. |
+| Multipart upload | `content_type: multipart/form-data` with the form parts declared in `payload_template`; the HTTP client appends the boundary, so the profile never sets the header itself. |
+| Pagination | Optional `query_params` map appended to `path`; each value is a template the runner URL-encodes. |
 | External session reference | Public header name with a placeholder value such as `<session-ref>`. |
 | Response shape | Expected success status codes and a non-sensitive result reference. |
 | Safety notes | Static notes stating that the runner owns runtime execution inputs. |
@@ -80,7 +83,7 @@ MUST declare a `shell` block instead of an HTTP `request` block:
 | `shell.command_template` | Yes | Shell command template with `{{param}}` placeholders. Runner shell-escapes every placeholder. |
 | `shell.success_pattern` | Yes | Regex matched against stdout/stderr to indicate success. |
 | `shell.prompt_timeout_ms` | No | Max wait for device prompt. Defaults to the atom `timeout_ms`. |
-| `shell.privilege_level` | No | `user`, `enable`, or `configure`. Defaults to `enable`. |
+| `shell.privilege_level` | No | `user`, `enable`, `configure`, `privileged`, or `root`. Defaults to `enable`. `user`/`enable`/`configure` describe network-CLI mode escalation; `privileged`/`root` describe OS-level privilege on appliance SSH targets (for example `vppctl`). Descriptive metadata only — the runner does not perform escalation from this field. |
 
 Security rules:
 

@@ -9,13 +9,16 @@ from typing import Any
 from urllib.parse import urlencode
 
 from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
-from atomic_ops.runner.http import request_json
+from atomic_ops.runner.http import request_json, request_json_with_retries
 from atomic_ops.runner.ngfw_login import normalize_base_url
+from atomic_ops.runner.pagination import fetch_all_pages, response_payload_or_raise
 from atomic_ops.runner.session import read_session_file
 
 
 SUCCESS_STATUS = {200, 201, 202}
 GET_SUCCESS_STATUS = {200}
+# P2 delete 未就绪缺口：删除类 op 允许可选内部重试（--retry，默认 0 不重试）。
+RETRYABLE_DELETE_OPS = {"fw_delete_object", "fw_delete_ip6pool_object"}
 
 OBJECT_ENDPOINTS = {
     "fw_config_object": ("POST", "/api/v1/ippool"),
@@ -343,22 +346,45 @@ def execute_object(
     timeout: float,
     keywords: str = "",
     types: list[str] | None = None,
+    aggregate_page_size: int | None = None,
+    retries: int = 0,
+    retry_backoff_seconds: float = 1.0,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
     session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {"Content-Type": "application/json", auth_header: header_value}
-    status_code, response_payload, _text = request_json(
-        method,
-        _request_url(
-            base_url, op_id, page=page, size=size, keywords=keywords, types=types, payload=payload
-        ),
-        headers=headers,
-        json_payload=None if op_id in NO_BODY_OPS else payload,
-        timeout=timeout,
-        verify_tls=verify_tls,
-    )
+
+    def _fetch_single(page_number: int, page_size: int) -> tuple[int, dict[str, Any], str]:
+        return request_json(
+            method,
+            _request_url(
+                base_url, op_id, page=page_number, size=page_size,
+                keywords=keywords, types=types, payload=payload,
+            ),
+            headers=headers,
+            json_payload=None if op_id in NO_BODY_OPS else payload,
+            timeout=timeout,
+            verify_tls=verify_tls,
+        )
+
+    # P2 大批量 verify 缺口：--page-size 开启内部翻页聚合（默认 None 行为不变）。
+    if aggregate_page_size is not None and op_id in GET_OPS:
+        response_payload = fetch_all_pages(
+            lambda page_number, page_size: response_payload_or_raise(
+                op_id, method, _fetch_single(page_number, page_size)
+            ),
+            page_size=aggregate_page_size,
+        )
+        status_code = 200
+    else:
+        # P2 delete 未就绪缺口：删除类 op 支持可选内部重试（默认 retries=0 行为不变）。
+        status_code, response_payload, _text = request_json_with_retries(
+            lambda: _fetch_single(page, size),
+            retries=retries if op_id in RETRYABLE_DELETE_OPS else 0,
+            backoff_seconds=retry_backoff_seconds,
+        )
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload)

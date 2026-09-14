@@ -76,6 +76,10 @@ def _add_object_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_delete_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--object-name", required=True, help="Address-object name to delete.")
+    # P2 delete 未就绪缺口：可选内部重试（默认 0 关闭，向后兼容）；仅对「根本没拿到
+    # 响应」（46）重试，设备拒绝（48）不重试。
+    parser.add_argument("--retry", type=int, default=0, help="Optional internal retries when the device is unreachable (exit 46: no response at all). Default 0 (no retry).")
+    parser.add_argument("--retry-backoff", type=float, default=1.0, help="Seconds to wait between delete retries. Default 1.0.")
 
 
 def _add_delete_batch_args(parser: argparse.ArgumentParser) -> None:
@@ -90,6 +94,8 @@ def _add_delete_batch_args(parser: argparse.ArgumentParser) -> None:
 def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="Paginated query page size.")
+    # P2 大批量 verify 缺口：--page-size 开启内部翻页聚合（默认不传行为不变）。
+    parser.add_argument("--page-size", type=int, help="Aggregate mode: fetch ALL entries with internal pagination of this page size instead of one oversized query (use instead of e.g. --size 5000).")
 
 
 def _parse_json_list(raw: str | None) -> list[dict[str, Any]] | None:
@@ -205,6 +211,11 @@ def _run_object(args: argparse.Namespace, op_id: str) -> int:
                 size=size,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
+                # P2 大批量 verify 缺口：--page-size 聚合模式（默认 None 行为不变）
+                aggregate_page_size=getattr(args, "page_size", None),
+                # P2 delete 未就绪缺口：删除类 op 可选内部重试（默认 0）
+                retries=int(getattr(args, "retry", 0) or 0),
+                retry_backoff_seconds=float(getattr(args, "retry_backoff", 1.0)),
             )
         _write_output(_to_run_envelope(result), output_format)
         return 0

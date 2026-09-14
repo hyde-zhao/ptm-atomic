@@ -9,13 +9,17 @@ from typing import Any
 from urllib.parse import urlencode
 
 from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
-from atomic_ops.runner.http import request_json
+from atomic_ops.runner.http import request_json, request_json_with_retries
 from atomic_ops.runner.ngfw_login import normalize_base_url
+from atomic_ops.runner.pagination import fetch_all_pages, response_payload_or_raise
 from atomic_ops.runner.session import read_session_file
 
 
 SUCCESS_STATUS = {200, 201, 202}
 GET_SUCCESS_STATUS = {200}
+# P2 delete 未就绪缺口：删除类 op 允许可选内部重试（--retry，默认 0 不重试）。
+# batch delete（POST /api/v1/batch）部分成功语义复杂，不自动重试。
+RETRYABLE_DELETE_OPS = {"fw_delete_policy_route"}
 POLICY_ROUTE_ENDPOINTS = {
     "fw_config_policy_route": ("POST", "/api/v1/policyroute"),
     "fw_update_policy_route": ("PUT", "/api/v1/policyroute"),
@@ -75,6 +79,18 @@ def build_policy_route_payload(
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "Policy-route forwarding path requires next-hop IP or outgoing interface.",
+            {"fields": ["next_hop_ip", "outgoing_interface"]},
+        )
+    # P2-14（2026-09-14，下游反馈升级项）：两种转发模式**互斥** ——「仅网关」（next_hop_ip）
+    # 与「仅出接口」（outgoing_interface）只能二选一，同时提供即前置拒绝，不再下发给设备。
+    # 背景：DUT 侧对越界组合只给晦涩错误（「仅出接口」ePolicyRouteOutIfModeError、
+    # 「网关+出接口」ePolicyRouteOutIfNextHopError，现场两批次 6+5 次一致），且型号能力
+    # 不同（DUT3/DAS-TGFW-290 实测仅支持「仅网关」）→ 工具侧显式声明该限制并前置拒绝，
+    # 调用方据 RUNNER_VALIDATION_FAILED.details.fields 可立即定位，无需等设备回错。
+    if next_hop_ip and outgoing_interface:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Policy-route forwarding path accepts either next-hop IP or outgoing interface, not both.",
             {"fields": ["next_hop_ip", "outgoing_interface"]},
         )
     if next_hop_ip:
@@ -280,6 +296,9 @@ def execute_policy_route(
     route_type: str,
     verify_tls: bool,
     timeout: float,
+    aggregate_page_size: int | None = None,
+    retries: int = 0,
+    retry_backoff_seconds: float = 1.0,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
     session_payload = read_session_file(session_file, expect_base_url=base_url)
@@ -289,15 +308,37 @@ def execute_policy_route(
         "Content-Type": "application/json",
         auth_header: header_value,
     }
-    url = _request_url(base_url, op_id, page=page, size=size, route_type=route_type, payload=payload)
-    status_code, response_payload, _text = request_json(
-        method,
-        url,
-        headers=headers,
-        json_payload=None if op_id in NO_BODY_OPS else payload,
-        timeout=timeout,
-        verify_tls=verify_tls,
-    )
+
+    def _fetch_single(page_number: int, page_size: int) -> tuple[int, dict[str, Any], str]:
+        return request_json(
+            method,
+            _request_url(
+                base_url, op_id, page=page_number, size=page_size,
+                route_type=route_type, payload=payload,
+            ),
+            headers=headers,
+            json_payload=None if op_id in NO_BODY_OPS else payload,
+            timeout=timeout,
+            verify_tls=verify_tls,
+        )
+
+    # P2 大批量 verify 缺口：--page-size 开启内部翻页聚合（默认 None 行为不变），
+    # 避免 --size 5000 之类的单次超大查询让 DUT 长时间无响应直至连接中断。
+    if aggregate_page_size is not None and op_id in GET_OPS:
+        response_payload = fetch_all_pages(
+            lambda page_number, page_size: response_payload_or_raise(
+                op_id, method, _fetch_single(page_number, page_size)
+            ),
+            page_size=aggregate_page_size,
+        )
+        status_code = 200
+    else:
+        # P2 delete 未就绪缺口：删除类 op 支持可选内部重试（默认 retries=0 行为不变）。
+        status_code, response_payload, _text = request_json_with_retries(
+            lambda: _fetch_single(page, size),
+            retries=retries if op_id in RETRYABLE_DELETE_OPS else 0,
+            backoff_seconds=retry_backoff_seconds,
+        )
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload)

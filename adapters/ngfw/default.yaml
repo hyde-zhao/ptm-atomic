@@ -56,6 +56,20 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
+        # 注意：notes 各项必须是纯字符串；句中避免「key: value」形态（否则 YAML 会把
+        # 整条解析成 dict），冒号后不跟空格或改用「-」连接。
+        - >-
+          Full-replacement PUT semantics (P2-42) — PUT /api/v1/intf replaces the complete val
+          object; fields omitted from val (ip_addresses, desc, level, service, mtus, ...) are
+          wiped on the device.
+        - >-
+          Therefore --interface-enabled / --interface-disabled without --ip-address clears
+          existing interface IPs; re-pass --ip-address, or use --keep-ip so the runner looks up
+          current device IPs and backfills them before the PUT.
+        - >-
+          Bond interfaces use val.type=10 with val.bond={id, mode, lb,
+          bonded_interfaces=[{name, is_passive, is_long_timeout}]}; --bond-member is an append
+          flag and must be repeated per member (a comma-joined string is one member name).
         - Physical and bond interfaces support Route, Switch, Pair, and Monitor modes.
         - BVI and subinterface payloads only support Route mode.
         - Switch-mode ports used as optional BVI bridge members need pvid equal to the BVI instance and linkType 1 (access); the device defaults omitted linkType to 2, which is rejected as a BVI member.
@@ -480,7 +494,8 @@ operations:
       runner_required: true
       notes:
         - Adapter profiles describe endpoint and payload shape without runtime values.
-        - type must be ipv4 or ipv6; forwarding_paths entries require next_hop_ip or outgoing_interface.
+        - type must be ipv4 or ipv6; forwarding_paths entries require exactly one of next_hop_ip (gateway mode) or outgoing_interface (outgoing-interface mode).
+        - 'The two forwarding modes are mutually exclusive: providing both (or neither) is rejected as RUNNER_VALIDATION_FAILED before any HTTP request. Device models may support only one mode — DAS-TGFW-290 supports gateway mode only and rejects outgoing-interface mode with ePolicyRouteOutIfModeError.'
         - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - source_network and dst_network are address object names unless the matching is_group flag is true.
         - applist and app_tag_name are optional application match criteria; omit to match no application.
@@ -532,7 +547,8 @@ operations:
       runner_required: true
       notes:
         - PUT updates an existing policy-route id on /api/v1/policyroute.
-        - type must be ipv4 or ipv6; forwarding_paths entries require next_hop_ip or outgoing_interface.
+        - type must be ipv4 or ipv6; forwarding_paths entries require exactly one of next_hop_ip (gateway mode) or outgoing_interface (outgoing-interface mode).
+        - 'The two forwarding modes are mutually exclusive: providing both (or neither) is rejected as RUNNER_VALIDATION_FAILED before any HTTP request. Device models may support only one mode — DAS-TGFW-290 supports gateway mode only and rejects outgoing-interface mode with ePolicyRouteOutIfModeError.'
         - next_hop_ip may be empty for outgoing-interface forwarding mode, but must match the selected IP version when provided.
         - applist and app_tag_name are optional application match criteria; omit to match no application.
         - 'health_check is an empty object unless ip_link_name is provided, then it becomes {type: iplink, name: <ip_link_name>}.'
@@ -2084,7 +2100,7 @@ operations:
       runner_required: true
       notes:
         - The id is an absolute or relative server path such as temp/macpool_tmp.xlsx or exportDir/ippool_20260903_151226.xlsx and is URL-encoded before the request.
-        - Static import-template ids exist at temp/<module>_tmp.xlsx for all 11 corpus modules (55.63, 2026-09-04 probe): ippool, ip6pool, ip4group, ip6group, macpool, domainpool, geoip, serpool, sergrouppool, appObject, urlObject.
+        - 'Static import-template ids exist at temp/<module>_tmp.xlsx for all 11 corpus modules (55.63, 2026-09-04 probe): ippool, ip6pool, ip4group, ip6group, macpool, domainpool, geoip, serpool, sergrouppool, appObject, urlObject.'
         - The device answers with a JSON content-type label but serves zip/xlsx bytes; the runner writes the bytes to output_path and never parses contents.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_export_file:
@@ -2175,6 +2191,11 @@ operations:
       notes:
         - A 2xx response means the reboot has been initiated; the device tears down the session and becomes unreachable.
         - The runner never issues follow-up requests after a successful reboot to avoid mistaking the expected disconnect for a failure.
+        - >-
+          P2-39 contract — the runner does NOT wait for recovery. Callers MUST wait
+          expected_unavailable_seconds (data.caller_must_wait_seconds) or until
+          data.device_unavailable_until_epoch before further requests; earlier requests fail
+          with DEVICE_UNREACHABLE (exit 46).
         - A fresh fw_login_web_management session is required before any further run command.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_hasync:
@@ -3043,7 +3064,7 @@ operations:
       notes:
         - Mutating command; the runner asserts exit_code 0 and no error text on stderr (vppctl reports parameter errors on stderr, e.g. 'expecting ageing time in minutes').
         - The runner re-reads the domain with 'vppctl show bridge-domain <id>' after the set and reports the actual Age(min) as age_minutes_actual.
-        - Requires root privileges; the runner reads the password from the FW_SSH_PASSWORD credential env var by default.
+        - Requires root privileges; the runner resolves the credential from the FW_SSH_* environment variable by default.
         - The runner MUST shell-escape every {{param}} placeholder; this template has two placeholders {{bridge_domain_id}} and {{age_minutes}}.
         - Connection inputs come from runner input and the session file; the profile carries no runtime values.
         - Session output is captured into diag_snapshot_ref and never written to the repo.
@@ -3062,7 +3083,7 @@ operations:
       runner_required: true
       notes:
         - Read-only observation; the command writes nothing to the device.
-        - Requires root privileges; the runner reads the password from the FW_SSH_PASSWORD credential env var by default.
+        - Requires root privileges; the runner resolves the credential from the FW_SSH_* environment variable by default.
         - The runner MUST shell-escape every {{param}} placeholder; this template has one placeholder {{bridge_domain_id}}.
         - Connection inputs come from runner input and the session file; the profile carries no runtime values.
         - Session output is captured into diag_snapshot_ref and never written to the repo.
@@ -3081,7 +3102,7 @@ operations:
       runner_required: true
       notes:
         - Read-only observation; the command writes nothing to the device.
-        - The runner connects interactively: login as admin, wait for the DAS-TGFW> prompt, send the command, and capture output until the prompt returns.
+        - 'The runner connects interactively: login as admin, wait for the DAS-TGFW> prompt, send the command, and capture output until the prompt returns.'
         - Connection inputs come from runner input and the session file; the profile carries no runtime values.
         - Session output is captured into diag_snapshot_ref and never written to the repo.
         - ptm-atomic run can execute this command only when --execute is explicit.
@@ -5945,55 +5966,6 @@ operations:
       runner_required: true
       notes:
         - GET requests send no JSON body; returns all zones with name, desc, interfaces, and refcnt.
-  fw_config_policy_match_mode:
-    atom_ref: atoms/fw/fw_config_policy_match_mode.yaml
-    intent: Switch the IPv4 policy match relation (set policy-match-mode and|or) on the Dbapp interactive CLI.
-    transport: cli
-    shell:
-      command_template: "set policy-match-mode {{mode}}"
-      success_pattern: "配置成功|当前已经处于(OR|AND)模式"
-      prompt_timeout_ms: 30000
-      privilege_level: admin
-      interactive: true
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Requires a PTY interactive session (paramiko invoke_shell); exec_command cannot run Dbapp CLI commands.
-        - Idempotent: re-setting the current mode outputs 当前已经处于X模式 and counts as success.
-  fw_verify_policy_match_mode:
-    atom_ref: atoms/fw/fw_verify_policy_match_mode.yaml
-    intent: Verify the policy match mode via an idempotent set probe.
-    transport: cli
-    shell:
-      command_template: "set policy-match-mode {{expected_mode}}"
-      success_pattern: "当前已经处于(OR|AND)模式"
-      prompt_timeout_ms: 30000
-      privilege_level: admin
-      interactive: true
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - No read-only mode query exists on the device; the probe is idempotent and switches the mode only when it differs (then fails STATE_MISMATCH).
-  fw_config_clear_policy_any:
-    atom_ref: atoms/fw/fw_config_clear_policy_any.yaml
-    intent: Clear useless any conditions (clear policy-any ip4 all|<id>) with auto-confirmation.
-    transport: cli
-    shell:
-      command_template: "clear policy-any ip4 {{scope}}"
-      success_pattern: "\\S+"
-      prompt_timeout_ms: 30000
-      privilege_level: admin
-      interactive: true
-      confirm_prompt: "确认继续? (y/N):"
-      confirm_input: "y"
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - The command asks 确认继续? (y/N); the runner auto-replies y.
-        - In AND match mode the device rejects the command: 错误，当前策略匹配模式为'AND'，不支持使用当前命令.
   fw_verify_session:
     atom_ref: atoms/fw/fw_verify_session.yaml
     intent: Query NGFW session table entries (IPv4 or IPv6) with optional filter conditions.

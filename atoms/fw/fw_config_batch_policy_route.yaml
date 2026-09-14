@@ -1,24 +1,24 @@
 schema_version: "1.1"
 op_id: fw_config_batch_policy_route
 device_type: fw
-description: Define multi-device policy route batch configuration contract for NGFW capacity.
+description: Loop-create multiple NGFW policy routes on one device by repeated POST /api/v1/policyroute.
 parameters:
   device_inventory_ref:
     type: string
-    required: true
-    description: Non-sensitive external device inventory reference.
+    required: false
+    description: Reserved for multi-device orchestration; not consumed by the current CLI, which batch-creates on a single device.
   device_selector:
     type: json
-    required: true
-    description: Non-sensitive selector using device_refs or labels.
+    required: false
+    description: Reserved for multi-device orchestration; not consumed by the current CLI.
   batch_ref:
     type: string
-    required: true
-    description: Non-sensitive batch reference supplied by an external orchestrator.
+    required: false
+    description: Non-sensitive external batch reference supplied by an external orchestrator.
   batch:
     type: json
-    required: true
-    description: Batch policy with max_concurrency default 1 and maximum 5.
+    required: false
+    description: Reserved for multi-device orchestration (max_concurrency default 1, maximum 5); not consumed by the current CLI.
   state_ref:
     type: string
     required: false
@@ -34,58 +34,51 @@ parameters:
   params:
     type: json
     required: true
-    description: Policy route configuration object with required domain fields.
+    description: >-
+      Policy route configuration object (source_network, dst_network, next_hop_ip or
+      outgoing_interface, in_interface, service, weight, time_obj, ...) plus count and the
+      increment flag consumed by the CLI config-batch loop.
   idempotency_key:
     type: string
     required: true
     description: Non-sensitive batch idempotency key for repeatable intent.
 inputs:
-  device_inventory_ref: "<device-inventory-ref>"
-  device_selector:
-    device_ids:
-      - "<device-ref-a>"
-      - "<device-ref-b>"
-    labels:
-      role: edge_firewall
-    max_selected: 5
-  batch_ref: "<batch-ref>"
-  batch:
-    max_concurrency: 1
-    failure_policy: isolate_failed_device
   state_ref: "<state-ref>"
   session_ref: "<session-ref>"
   config_domain: policy_route
   params:
-    route_ref: "<route-ref>"
-    source_ref: "<source-ref>"
-    destination_ref: "<destination-ref>"
-    next_hop_ref: "<next-hop-ref>"
+    source_network: any
+    dst_network: "1.1.1.0/24"
+    next_hop_ip: "10.0.0.1"
+    in_interface: GE0_3
+    outgoing_interface: ""
+    service: any
+    weight: 100
+    time_obj: ""
+    count: 3
+    increment: true
   idempotency_key: "<batch-policy-route-idempotency-key>"
 returns:
   status: success
   data:
-    batch_status: partial_failed
-    per_device_results:
-      - device_ref: "<device-ref-a>"
-        status: succeeded
-        idempotency_key: "<device-a-idempotency-key>"
-        config_result_ref: "<device-a-policy-route-config-result-ref>"
-        error_type: NONE
-        diag_snapshot_ref: "<device-a-diag-snapshot-ref>"
-        verification_summary_ref: "<device-a-verification-summary-ref>"
-      - device_ref: "<device-ref-b>"
+    mode: config_batch
+    count: 3
+    created_count: 2
+    failed_count: 1
+    created:
+      - index: 1
+        status: success
+        policy_route_id: 101
+        status_code: 200
+      - index: 2
+        status: success
+        policy_route_id: 102
+        status_code: 200
+    failed:
+      - index: 3
         status: failed
-        idempotency_key: "<device-b-idempotency-key>"
-        config_result_ref: "<device-b-policy-route-config-result-ref>"
-        error_type: CONFIG_REJECTED
-        diag_snapshot_ref: "<device-b-diag-snapshot-ref>"
-        verification_summary_ref: "<device-b-verification-summary-ref>"
-    failed_devices:
-      - device_ref: "<device-ref-b>"
-        error_type: CONFIG_REJECTED
-        diag_snapshot_ref: "<device-b-diag-snapshot-ref>"
-        handling_hint: manual_review_required
-    verification_summary_ref: "<batch-policy-route-verification-summary-ref>"
+        error_code: RUNNER_CONFIG_REJECTED
+        message: "<device-rejection-message>"
   error_type: NONE
   diag_snapshot_ref: "<batch-policy-route-diag-snapshot-ref>"
 idempotent: true
@@ -131,8 +124,15 @@ preconditions:
   - Gate evidence exists before this high-risk batch configuration contract is used.
   - device_inventory_ref and device_selector contain only non-sensitive references.
 postconditions:
-  - Per-device results, failed device references, and batch verification summary are available.
-  - Successful devices are not automatically reverted when another device fails.
+  - >-
+    Implementation-aligned returns (P2-48): the runner loops over count payloads and reports
+    mode=config_batch with count, created_count, failed_count, created[] and failed[].
+    Each created policy-route id is at created[].policy_route_id (per-entry index / status /
+    status_code alongside); failed entries carry index / status / error_code / message.
+    The earlier design-draft keys batch_policy_route_id, per_device_results, failed_devices and
+    verification_summary_ref were never produced by the implementation and are removed.
+  - A single failed entry does not abort the loop; only when every entry fails does the
+    overall status become failed.
 tags:
   - firewall
   - capacity

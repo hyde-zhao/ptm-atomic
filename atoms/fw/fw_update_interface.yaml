@@ -19,7 +19,14 @@ parameters:
   params:
     type: json
     required: true
-    description: Complete /api/v1/intf interface payload for bvi, subinterface, physical, or bond update.
+    description: >-
+      Complete /api/v1/intf interface payload for bvi, subinterface, physical, or bond update.
+      FULL-REPLACEMENT PUT: fields omitted from val are wiped on the device (e.g. toggling
+      --interface-enabled without --ip-address clears existing IPs). Pass --keep-ip on
+      'ptm-atomic run interface update' to backfill current device IPs, or re-pass --ip-address.
+      Bond update (P2-bond-schema) - id is bond<N>, val.type is 10, val.bond={id, mode, lb,
+      bonded_interfaces=[{name, is_passive, is_long_timeout}]}; CLI --bond-member must be
+      repeated per member (a comma-joined string is ONE member name).
   idempotency_key:
     type: string
     required: true
@@ -99,6 +106,16 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk interface configuration is used.
+  - >-
+    FULL-REPLACEMENT PUT semantics (P2-42): fw_update_interface sends the complete val object;
+    any field omitted from val (ip_addresses, desc, level, service, mtus, ...) is wiped on the device.
+    When only toggling --interface-enabled/--interface-disabled, callers MUST re-pass --ip-address
+    (or use --keep-ip so the runner backfills current device IPs) or gateway IPs will be lost.
+  - >-
+    Bond interfaces (P2-bond-schema): id is bond<N> and val.type is 10; val.bond carries
+    id, mode, lb and bonded_interfaces=[{name, is_passive, is_long_timeout}]. On the CLI,
+    --bond-member is an append flag: repeat it per member (--bond-member GE0_1 --bond-member GE0_2);
+    a comma-joined string is sent as ONE member name.
 postconditions:
   - Interface update result and diagnostic references are available to the caller.
 tags:

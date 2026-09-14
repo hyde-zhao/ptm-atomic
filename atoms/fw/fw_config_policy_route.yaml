@@ -19,7 +19,7 @@ parameters:
   params:
     type: json
     required: true
-    description: Policy route create object. type must be ipv4 or ipv6; forwarding path requires next_hop_ip or outgoing_interface, and next_hop_ip must match the selected IP version when provided. applist (list of {appname, appid}) and app_tag_name (list of tag names) are optional application match criteria; omit to match no application. ip_link_name is an optional IP-link object name; when provided, forwarding_paths[].health_check becomes {"type":"iplink","name":"<ip_link_name>"}.
+    description: Policy route create object. type must be ipv4 or ipv6; forwarding path requires exactly one of next_hop_ip (gateway mode) or outgoing_interface (outgoing-interface mode) — the two modes are mutually exclusive and must not be combined (both provided or both empty is rejected as RUNNER_VALIDATION_FAILED before any HTTP request); next_hop_ip must match the selected IP version when provided. Note the device model may support only one of the two modes (DAS-TGFW-290 supports gateway mode only and rejects outgoing-interface mode with ePolicyRouteOutIfModeError). applist (list of {appname, appid}) and app_tag_name (list of tag names) are optional application match criteria; omit to match no application. ip_link_name is an optional IP-link object name; when provided, forwarding_paths[].health_check becomes {"type":"iplink","name":"<ip_link_name>"}.
   idempotency_key:
     type: string
     required: true

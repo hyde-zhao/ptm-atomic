@@ -104,6 +104,20 @@ $defs:
             type: string
             enum:
               - application/json
+              - multipart/form-data
+            description: >-
+              Request body encoding. multipart/form-data is for file-upload
+              operations; the runner sends the payload_template fields as form
+              parts (it must NOT set Content-Type manually — the HTTP client
+              appends the multipart boundary).
+          query_params:
+            type: object
+            additionalProperties:
+              type: string
+            description: >-
+              Optional query-string parameters appended to path. Values are
+              templates; the runner URL-encodes each substituted value. Used by
+              paginated GET operations (for example fw_verify_interface).
           auth:
             type: object
             additionalProperties: false
@@ -159,6 +173,14 @@ $defs:
               - user
               - enable
               - configure
+              - privileged
+              - root
+            description: >-
+              Privilege the command requires. user/enable/configure describe
+              network-CLI mode escalation; privileged/root describe
+              OS-level privilege on appliance SSH targets (for example vppctl).
+              This field is descriptive metadata — the runner does not perform
+              escalation from it.
       response:
         type: object
         additionalProperties: false

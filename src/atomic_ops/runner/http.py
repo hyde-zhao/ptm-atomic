@@ -2,11 +2,51 @@
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from typing import Any, Callable
 
 import requests
 
 from atomic_ops.runner.errors import RunnerError
+
+
+def request_json_with_retries(
+    send: Callable[[], tuple[int, dict[str, Any], str]],
+    *,
+    retries: int = 0,
+    backoff_seconds: float = 1.0,
+) -> tuple[int, dict[str, Any], str]:
+    """带可选重试地执行一次 ``request_json`` 形状的请求（P2 delete 未就绪缺口）。
+
+    背景（下游现场 2026-09-08~09-11）：DUT 未就绪时 delete 直接 exit 46（
+    RUNNER_DEVICE_UNREACHABLE、retryable=true），重试语义只作为信号交给调用方，
+    runner 内没有 backoff/重试循环，清理步会直接失败。本 helper 提供**默认关闭**
+    的内部重试（retries=0 时行为与直接调用 send() 完全一致，向后兼容）：
+    - 仅对 ``RUNNER_DEVICE_UNREACHABLE`` 且 ``retryable=True`` 的失败重试——46 精确
+      对应「根本没拿到响应」；设备可达但拒绝（48 CONFIG_REJECTED）不重试。
+    - 退避为固定间隔 ``backoff_seconds``（简单可预期；不做指数退避，避免测试与
+      现场排障时的时长不确定性）。
+    - ``send`` 由调用方以 lambda 闭包传入（内部引用调用方模块命名空间的
+      ``request_json``），既有 ``patch("<module>.request_json")`` 测试注入不受影响。
+    """
+    if retries < 0:
+        raise ValueError("retries must be >= 0")
+    if backoff_seconds < 0:
+        raise ValueError("backoff_seconds must be >= 0")
+    attempt = 0
+    while True:
+        try:
+            return send()
+        except RunnerError as exc:
+            if (
+                attempt >= retries
+                or exc.error_code != "RUNNER_DEVICE_UNREACHABLE"
+                or not exc.retryable
+            ):
+                raise
+            attempt += 1
+            if backoff_seconds > 0:
+                time.sleep(backoff_seconds)
 
 
 def request_json(

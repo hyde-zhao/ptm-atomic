@@ -19,7 +19,11 @@ parameters:
   expected_unavailable_seconds:
     type: int
     required: false
-    description: Informational estimate of how long the device stays unreachable after reboot.
+    description: >-
+      Contract, not informational (P2-39): the runner does NOT wait for the device to come back.
+      Callers MUST wait this many seconds after a 2xx response before issuing further requests,
+      or the device will be unreachable (exit 46). Also exposed as data.caller_must_wait_seconds
+      and data.device_unavailable_until_epoch for machine-readable orchestration.
   idempotency_key:
     type: string
     required: true
@@ -37,6 +41,8 @@ returns:
     reboot_initiated: true
     session_invalidated: true
     expected_unavailable_seconds: 300
+    caller_must_wait_seconds: 300
+    device_unavailable_until_epoch: "<epoch-seconds>"
     state_ref: "<state-ref>"
     state_status: invalid
     expires_at: null
@@ -77,6 +83,11 @@ preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this destructive reboot is used.
 postconditions:
+  - >-
+    The runner does NOT wait for the device to recover (P2-39): a success response within seconds
+    only means the reboot has been initiated. Callers MUST wait expected_unavailable_seconds
+    (exposed as data.caller_must_wait_seconds) or until data.device_unavailable_until_epoch before
+    any further request, otherwise requests fail with DEVICE_UNREACHABLE (exit 46).
   - The device is rebooting and will be unreachable for expected_unavailable_seconds.
   - A fresh fw_login_web_management session is required before any further run command.
 tags:

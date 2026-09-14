@@ -19,7 +19,15 @@ parameters:
   params:
     type: json
     required: true
-    description: Time object configuration with name, scheduletype and timequantum/timemonquantum.
+    description: >-
+      Time object configuration with name, scheduletype and timequantum/timemonquantum.
+      Field-level shape (P2): timequantum is an ARRAY of segments, each
+      {starttime: {time, weekday?}, endtime: {time, weekday?}} - oneshot times are
+      'YYYY-MM-DD HH:MM:SS', day/week times are 'HH:MM:SS', week adds weekday int 1-7;
+      timemonquantum is an ARRAY of {time: int, planday: str}. The structured CLI emits ONE
+      segment unless --time-range / --month-quantum entries are repeated; ANY multi-segment or
+      cross-day/week/month shape can also be passed verbatim through the --payload-json /
+      --payload-file escape hatch, which the runner forwards to the device unvalidated.
   idempotency_key:
     type: string
     required: true
@@ -95,6 +103,12 @@ preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk configuration contract is used.
   - scheduletype must be oneshot, day, week or month; month uses timemonquantum, others use timequantum.
+  - >-
+    Multi-segment shapes (P2): timequantum/timemonquantum are arrays and accept multiple segments
+    (cross-day/cross-week/cross-month). Escape hatch: --payload-json / --payload-file are forwarded
+    verbatim and unvalidated, so any multi-segment body is expressible; the structured CLI supports
+    repeatable --time-range ('START~END', week 'N:START~M:END') and --month-quantum
+    ('<time>:<planday>') entries.
 postconditions:
   - Configuration result and diagnostic references are available to the caller.
 tags:

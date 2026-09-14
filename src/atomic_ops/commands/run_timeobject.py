@@ -93,6 +93,25 @@ def _add_timeobject_args(parser: argparse.ArgumentParser) -> None:
         default="",
         help="Plan day string for month scheduletype (e.g. 11).",
     )
+    # P2 多段时间对象：结构化 CLI 此前恒生成单段 timequantum/timemonquantum，
+    # 跨天/跨周/跨月表达不了。--time-range / --month-quantum 提供显式多段入口；
+    # 也可继续用 --payload-json/--payload-file 原样透传任意段结构（逃生口）。
+    parser.add_argument(
+        "--time-range",
+        action="append",
+        default=None,
+        help="Multi-segment timequantum entry (oneshot/day/week). Repeatable; each entry is "
+        "'START~END' (oneshot: 'YYYY-MM-DD HH:MM:SS~YYYY-MM-DD HH:MM:SS'; day: 'HH:MM:SS~HH:MM:SS'; "
+        "week: 'N:HH:MM:SS~M:HH:MM:SS', end weekday optional and defaults to start's). Must not be "
+        "combined with --start-time/--end-time/--weekday.",
+    )
+    parser.add_argument(
+        "--month-quantum",
+        action="append",
+        default=None,
+        help="Multi-segment timemonquantum entry (month scheduletype). Repeatable; each entry is "
+        "'<time>:<planday>', e.g. '15:1,2,3'. Must not be combined with --month-time/--planday.",
+    )
     _add_payload_args(parser)
 
 
@@ -103,6 +122,9 @@ def _add_timeobject_update_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_delete_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", required=True, help="Entry name to delete.")
+    # P2 delete 未就绪缺口：可选内部重试（默认 0 关闭，向后兼容）。
+    parser.add_argument("--retry", type=int, default=0, help="Optional internal retries when the device is unreachable (exit 46: no response at all). Default 0 (no retry).")
+    parser.add_argument("--retry-backoff", type=float, default=1.0, help="Seconds to wait between delete retries. Default 1.0.")
 
 
 def _add_delete_batch_args(parser: argparse.ArgumentParser) -> None:
@@ -118,6 +140,8 @@ def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=40, help="Paginated query page size.")
     parser.add_argument("--keywords", default="", help="Keyword filter for the query.")
+    # P2 大批量 verify 缺口：--page-size 开启内部翻页聚合（默认不传行为不变）。
+    parser.add_argument("--page-size", type=int, help="Aggregate mode: fetch ALL entries with internal pagination of this page size instead of one oversized query.")
 
 
 def _run_timeobject_config(args: argparse.Namespace) -> int:
@@ -186,6 +210,9 @@ def _run_timeobject(args: argparse.Namespace, op_id: str) -> int:
                     weekday=getattr(args, "weekday", None),
                     month_time=getattr(args, "month_time", None),
                     planday=getattr(args, "planday", ""),
+                    # P2 多段：透传可重复的 --time-range / --month-quantum
+                    time_ranges=list(getattr(args, "time_range", None) or []) or None,
+                    month_quanta=list(getattr(args, "month_quantum", None) or []) or None,
                 )
         elif op_id == "fw_update_timeobject":
             raw_payload = load_json_payload(
@@ -213,6 +240,9 @@ def _run_timeobject(args: argparse.Namespace, op_id: str) -> int:
                     weekday=getattr(args, "weekday", None),
                     month_time=getattr(args, "month_time", None),
                     planday=getattr(args, "planday", ""),
+                    # P2 多段：透传可重复的 --time-range / --month-quantum
+                    time_ranges=list(getattr(args, "time_range", None) or []) or None,
+                    month_quanta=list(getattr(args, "month_quantum", None) or []) or None,
                 )
         elif op_id == "fw_delete_timeobject":
             payload = {"id": _single_arg(args, "id") or ""}
@@ -248,6 +278,11 @@ def _run_timeobject(args: argparse.Namespace, op_id: str) -> int:
                 keywords=keywords,
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
+                # P2 大批量 verify 缺口：--page-size 聚合模式（默认 None 行为不变）
+                aggregate_page_size=getattr(args, "page_size", None),
+                # P2 delete 未就绪缺口：删除类 op 可选内部重试（默认 0）
+                retries=int(getattr(args, "retry", 0) or 0),
+                retry_backoff_seconds=float(getattr(args, "retry_backoff", 1.0)),
             )
         _write_output(_to_run_envelope(result), output_format)
         return 0
