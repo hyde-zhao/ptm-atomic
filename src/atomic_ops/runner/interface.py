@@ -92,6 +92,8 @@ def build_interface_payload(
     gre_keepalive_enable: bool = False,
     ip6_nd_prefixes: list[str] | None = None,
     ip6_racfg_suppress: int | None = None,
+    ipv4_gateway: str | None = None,
+    ipv4_reverse_path: bool = False,
 ) -> dict[str, Any]:
     interface_kind = _validate_interface_kind(interface_kind)
     mode = _validate_mode(interface_kind, mode)
@@ -114,6 +116,8 @@ def build_interface_payload(
         mode=mode,
         ip_addresses=addresses,
         link_type=link_type,
+        ipv4_gateway=ipv4_gateway,
+        ipv4_reverse_path=ipv4_reverse_path,
     )
     if interface_kind == "bvi":
         _apply_bvi(val, entry_id, bvi_instance, parent_name)
@@ -509,15 +513,19 @@ def _base_val(
     mode: str,
     ip_addresses: list[str],
     link_type: int | None,
+    ipv4_gateway: str | None = None,
+    ipv4_reverse_path: bool = False,
 ) -> dict[str, Any]:
+    # ipv4_gateway / ipv4_reverse_path 是「源进源出」的落点（CFG-OUTINTF-018）：
+    # 缺省值保持既有行为（空串 / False），只有显式传参才改变下发内容。
     val: dict[str, Any] = {
         "vltype": "VPP",
         "name": name,
         "desc": desc,
         "enabled": enabled,
         "level": level,
-        "ipv4_gateway": "",
-        "ipv4_reverse_path": False,
+        "ipv4_gateway": ipv4_gateway or "",
+        "ipv4_reverse_path": bool(ipv4_reverse_path),
         "ipv6_reverse_path": False,
         "ipv6_gateway": "",
         "mtus": [1500, 0, 0, 0],
