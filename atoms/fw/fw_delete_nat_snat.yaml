@@ -1,0 +1,116 @@
+schema_version: "1.1"
+op_id: fw_delete_nat_snat
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_nat_snat
+description: Delete a source NAT (SNAT) rule by id through /api/v1/natsnat.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be nat for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      Source NAT rule delete selector. The device takes the rule id in a JSON
+      request body as a string, not as a query parameter.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: nat
+  params:
+    id: "4"
+  idempotency_key: "<idempotency-key>"
+side_effect: destructive
+returns:
+  status: success
+  data:
+    nat_rule_id: "4"
+    pre_snapshot_ref: "<nat-snat-pre-delete-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: nat
+      applied_ref: "<nat-snat-delete-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - nat_rule_id
+    - full_config
+  notes: >-
+    Recreate the source NAT rule from the full pre-delete snapshot. Deletion
+    is irreversible in practice when no snapshot was captured, so use this op
+    as a cleanup action that does not trigger rollback.
+pre_snapshot:
+  op_id: fw_verify_nat_snat
+  capture_fields:
+    - nat_rule_id
+    - full_config
+rollback_apply:
+  op_id: fw_config_nat_snat
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_nat_snat
+  expected_state: absent
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Source NAT rule deletion removes address translation for matching traffic and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk source NAT deletion is used.
+  - DELETE carries the rule id in a JSON body as a string and sends no query parameter.
+postconditions:
+  - Source NAT rule deletion result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_nat_snat query can confirm the deleted rule is absent.
+tags:
+  - firewall
+  - capacity
+  - nat
+  - snat
+  - configuration
+aliases:
+  - nat
+  - snat
+  - source-nat
+  - nat-snat
+since_version: "1.6.0"

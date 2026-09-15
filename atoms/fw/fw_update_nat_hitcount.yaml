@@ -1,0 +1,91 @@
+schema_version: "1.1"
+op_id: fw_update_nat_hitcount
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_nat_hitcount
+description: Clear NAT rule hit counters through /api/v1/nathitcount.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be nat for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      Hit counter clear request. val.type selects the NAT family (snat, dnat,
+      or static) and val.is_ipv6 selects the address family. The captured
+      requests always carried id 0; val.rule_ids optionally narrows the clear
+      to specific rule ids.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: nat
+  params:
+    id: 0
+    val:
+      type: snat
+      is_ipv6: false
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: nat
+      applied_ref: "<nat-hitcount-clear-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: irreversible
+  snapshot_required: false
+  required_inputs: []
+  notes: Cleared hit counters cannot be restored to their previous values.
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: medium
+  categories:
+    - configuration
+    - capacity_domain
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - val.type matches the NAT family whose counters are being cleared.
+postconditions:
+  - Hit counter clear result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_nat_snat, fw_verify_nat_dnat, or fw_verify_nat_static query shows the affected counters reset.
+tags:
+  - firewall
+  - capacity
+  - nat
+  - hitcount
+  - configuration
+aliases:
+  - nat
+  - nat-hitcount
+since_version: "1.6.0"

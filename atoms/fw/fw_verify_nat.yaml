@@ -1,7 +1,9 @@
 schema_version: "1.1"
 op_id: fw_verify_nat
 device_type: fw
-description: Verify NAT configuration contract result for NGFW capacity operations.
+description: >-
+  Deprecated since 1.6.0; superseded by fw_verify_nat_snat, fw_verify_nat_dnat,
+  and fw_verify_nat_static.
 parameters:
   config_result_ref:
     type: string
@@ -58,8 +60,6 @@ tags:
   - verification
 aliases:
   - network-address-translation
-  - snat
-  - dnat
-  - source-nat
-  - destination-nat
+deprecated: true
+deprecated_by: fw_verify_nat_snat
 since_version: "1.1.0"

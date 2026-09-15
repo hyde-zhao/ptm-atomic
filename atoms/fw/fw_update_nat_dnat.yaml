@@ -1,0 +1,137 @@
+schema_version: "1.1"
+op_id: fw_update_nat_dnat
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_nat_dnat
+description: Update an existing destination NAT (DNAT) rule through /api/v1/iterate/natdnat.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be nat for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      Destination NAT rule update payload with integer id and a val object.
+      The device is read-modify-write for this endpoint: the captured update
+      echoed the device read-back fields (config_source, effect_type,
+      enable_status, hitcount, auto_disable) plus an originRow copy of the
+      pre-update rule. Pass the complete val through --payload-file or
+      --payload-json when those read-back fields are required.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: nat
+  params:
+    id: 2
+    val:
+      enabled: true
+      transType: 5
+      noTransPort: true
+      transPort: ""
+      noTrans: false
+      choise: 2
+      srcName: any
+      inInterfaceName: TE0_7
+      twice_nat_trans_type: 0
+      twice_nat: 0
+      dstName: ""
+      serviceName: "3000"
+      transParm: 4.4.4.5
+      vrrpRelateInfo:
+        isIpv6: false
+        VRRPId: 0
+        VRRPIntf: ""
+        enabled: false
+      timeObj: ""
+      natType: nat44
+      srcName_is_group: false
+      dstIp: 4.4.4.4
+      dstName_is_group: false
+      tcpPort: 3000
+      serviceName_is_group: false
+      relate:
+        isIpv6: false
+        VRRPId: 0
+        VRRPIntf: ""
+        enabled: false
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    nat_rule_id: 2
+    config_result:
+      status: succeeded
+      config_domain: nat
+      applied_ref: "<nat-dnat-update-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - nat_rule_id
+    - full_config
+  notes: Restore the destination NAT rule from the full pre-update snapshot.
+pre_snapshot:
+  op_id: fw_verify_nat_dnat
+  capture_fields:
+    - nat_rule_id
+    - full_config
+rollback_apply:
+  op_id: fw_update_nat_dnat
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_nat_dnat
+  expected_state: matches_snapshot
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: medium
+  categories:
+    - configuration
+    - capacity_domain
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - The target rule id exists in fw_verify_nat_dnat output.
+postconditions:
+  - Destination NAT rule update result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_nat_dnat query reflects the updated field values.
+tags:
+  - firewall
+  - capacity
+  - nat
+  - dnat
+  - configuration
+aliases:
+  - nat
+  - dnat
+  - destination-nat
+  - nat-dnat
+since_version: "1.6.0"

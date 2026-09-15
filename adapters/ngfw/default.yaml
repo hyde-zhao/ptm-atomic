@@ -6113,3 +6113,596 @@ operations:
         - GET /api/v1/neighbor/garplimitrate returns {"vals":[{"rate":...,"capacity":...}]} for read-back.
         - Interface-level gratuitous ARP enable (enable_garp_timed_send / garp_send_interval) is covered by fw_config_interface / fw_update_interface over PUT /api/v1/intf.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_nat_snat:
+    atom_ref: atoms/fw/fw_config_nat_snat.yaml
+    intent: Build a source NAT rule create request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/natsnat
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-snat-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST /api/v1/natsnat creates a source NAT rule; the response body is {"id":"1","msg":"success"} with a string id.
+        - val.natType carries the address family and translation variant; nat44 is the only value this device exposes today.
+        - The read-back record from GET /api/v1/natsnat returns the same rule with an integer id and extra read-only fields (config_source, effect_type, enable_status, hitcount, auto_disable).
+        - The create payload uses relate.isIpv6 while the read-back record uses relate.is_ipv6; keep the captured spelling on each side.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_nat_snat:
+    atom_ref: atoms/fw/fw_update_nat_snat.yaml
+    intent: Build a source NAT rule update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/natsnat
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-snat-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/natsnat updates an existing source NAT rule; the captured request carried id as an integer.
+        - The captured source NAT update sent business fields only (plus desc); unlike the destination NAT endpoint it did not echo the device read-back fields inside val.
+        - Pass the complete val through --payload-file or --payload-json when read-back fields must be round-tripped.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_nat_snat:
+    atom_ref: atoms/fw/fw_delete_nat_snat.yaml
+    intent: Build a source NAT rule delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/natsnat
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-snat-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE /api/v1/natsnat carries the rule id in a JSON body as a string and sends no query parameter.
+        - This differs from fw_delete_iptun and fw_delete_interface, which pass id as a query value; do not mirror their transport here.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_nat_snat:
+    atom_ref: atoms/fw/fw_verify_nat_snat.yaml
+    intent: Build a source NAT rule query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/natsnat
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        natType: "{{ params.natType }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <nat-snat-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET /api/v1/natsnat returns {"count":n,"page":n,"size":n,"vals":[...]}.
+        - The capture export rendered page, size, and natType under a payload heading with string values; they are query values and the request sends no JSON body.
+        - Each vals entry carries an integer id used as the update and delete selector.
+  fw_config_nat_dnat:
+    atom_ref: atoms/fw/fw_config_nat_dnat.yaml
+    intent: Build a destination NAT rule create request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/iterate/natdnat
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-dnat-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The destination NAT endpoint carries the iterate path prefix /api/v1/iterate/natdnat; the source and static NAT endpoints do not.
+        - POST /api/v1/iterate/natdnat creates a destination NAT rule and returns {"id":"1","msg":"success"} with a string id.
+        - The destination NAT rule carries both vrrpRelateInfo and relate subobjects, unlike the source and static NAT rules.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_nat_dnat:
+    atom_ref: atoms/fw/fw_update_nat_dnat.yaml
+    intent: Build a destination NAT rule update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/iterate/natdnat
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-dnat-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/iterate/natdnat updates an existing destination NAT rule; the captured request carried id as an integer.
+        - The captured update was read-modify-write; val echoed config_source, effect_type, enable_status, hitcount, auto_disable, and an originRow copy of the pre-update rule.
+        - Pass the complete val through --payload-file or --payload-json when those read-back fields must be round-tripped.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_nat_dnat:
+    atom_ref: atoms/fw/fw_delete_nat_dnat.yaml
+    intent: Build a destination NAT rule delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/iterate/natdnat
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-dnat-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE /api/v1/iterate/natdnat carries the rule id in a JSON body as a string and sends no query parameter.
+        - This differs from fw_delete_ipsec_policy, which passes id as a query value; do not mirror that transport here.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_nat_dnat:
+    atom_ref: atoms/fw/fw_verify_nat_dnat.yaml
+    intent: Build a destination NAT rule query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/iterate/natdnat
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        natType: "{{ params.natType }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <nat-dnat-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET /api/v1/iterate/natdnat returns {"count":n,"page":n,"size":n,"vals":[...]}.
+        - The capture export rendered page, size, and natType under a payload heading with string values; they are query values and the request sends no JSON body.
+        - Each vals entry carries an integer id used as the update and delete selector.
+  fw_config_nat_static:
+    atom_ref: atoms/fw/fw_config_nat_static.yaml
+    intent: Build a static NAT rule create request from a validated atom parameter set.
+    request:
+      method: POST
+      path: /api/v1/natstatic
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-static-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - POST /api/v1/natstatic creates a static NAT rule and returns {"id":"1","msg":"success"} with a string id.
+        - val.local_ips is named as a plural but the device contract carries a single object with vrf_id and local_ip, not an array.
+        - val.twice_nat is a numeric flag; twice_nat 0 was the only captured value.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_nat_static:
+    atom_ref: atoms/fw/fw_update_nat_static.yaml
+    intent: Build a static NAT rule update request from a validated atom parameter set.
+    request:
+      method: PUT
+      path: /api/v1/natstatic
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-static-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/natstatic updates an existing static NAT rule; the captured request carried id as an integer.
+        - The captured update echoed effect_type, enable_status, hitcount, and id inside val as read-back fields.
+        - Pass the complete val through --payload-file or --payload-json when those read-back fields must be round-tripped.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_nat_static:
+    atom_ref: atoms/fw/fw_delete_nat_static.yaml
+    intent: Build a static NAT rule delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/natstatic
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-static-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE /api/v1/natstatic carries the rule id in a JSON body as a string and sends no query parameter.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_nat_static:
+    atom_ref: atoms/fw/fw_verify_nat_static.yaml
+    intent: Build a static NAT rule query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/natstatic
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        natType: "{{ params.natType }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <nat-static-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET /api/v1/natstatic returns {"count":n,"page":n,"size":n,"vals":[...]}.
+        - The capture export rendered page, size, and natType under a payload heading with string values; they are query values and the request sends no JSON body.
+        - Each vals entry carries an integer id used as the update and delete selector.
+  fw_update_nat_hitcount:
+    atom_ref: atoms/fw/fw_update_nat_hitcount.yaml
+    intent: Build a NAT hit counter clear request.
+    request:
+      method: PUT
+      path: /api/v1/nathitcount
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-hitcount-clear-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - PUT /api/v1/nathitcount clears hit counters and is a state mutation, not a query, despite living beside the NAT list endpoints.
+        - val.type selects the family (snat, dnat, or static) and val.is_ipv6 selects the address family.
+        - The captured requests always carried id 0; the batch variant additionally carried val.rule_ids as a string list.
+        - The endpoint is shared by all three NAT families and is not per-family.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_nat:
+    atom_ref: atoms/fw/fw_delete_batch_nat.yaml
+    intent: Build a batch NAT rule delete request for a single device.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <nat-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE items; each item names the target NAT endpoint in resource and carries body.id as a non-empty list of string ids.
+        - resource is one of /api/v1/natsnat, /api/v1/iterate/natdnat, or /api/v1/natstatic.
+        - The response is {"BatchResult":[{"msg":"success"},...]} in request order.
+        - This op batches operations inside one device; multi-device orchestration is a separate contract.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_ipsec_policy:
+    atom_ref: atoms/fw/fw_config_ipsec_policy.yaml
+    intent: Build an IPsec policy create-or-modify (upsert) request keyed by policy name.
+    request:
+      method: PUT
+      path: /api/v1/ipsec
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {id: "{{ params.id }}", val: "{{ params.val }}"}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ipsec-policy-upsert-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "PUT /api/v1/ipsec is an upsert: the request id is the policy name and decides which object the device writes, so one method covers both create and modify."
+        - "The response is {\"msg\":\"success\"} and echoes no object body, so a live change must be confirmed with a follow-up fw_verify_ipsec_policy query."
+        - "val.scene selects the payload shape: PTMP carries ike.ptmp_remote_psk and ike.pool; PTP carries ike.remote_id_type/remote_id and a top-level adipsec. Both share scene/name/enable/ike/ipsec/adike."
+        - "val is passed through whole rather than field by field, so a new protocol- or scene-specific field needs no adapter change."
+        - "PSK material is supplied through a runtime reference; this profile and the matching atom carry no credential value."
+        - "Enum values that the capture did not exercise (auth_method, local_id_type, adike.version, ike_mode, ipsec_mode, encry_alg, auth_alg, dh_group, pfs) are marked as inferred in the source capture; they are passed through untouched instead of being validated here."
+        - "Because this op overwrites an existing policy of the same name, deleting it as an inverse is only safe when the policy did not exist before this call."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_ipsec_policy:
+    atom_ref: atoms/fw/fw_delete_ipsec_policy.yaml
+    intent: Build an IPsec policy delete request by query id.
+    request:
+      method: DELETE
+      path: /api/v1/ipsec
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "{{ params.id }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ipsec-policy-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "DELETE sends the policy name as ?id=<policy-name> and sends no JSON body."
+        - "This differs from fw_delete_nat_snat, fw_delete_nat_dnat, and fw_delete_nat_static, which carry the id in a JSON body; do not mirror their transport here."
+        - "id is the IPsec policy val.name. GET /api/v1/ipsec echoes no id field per policy, so the policy name is the only stable identity."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ipsec_policy:
+    atom_ref: atoms/fw/fw_verify_ipsec_policy.yaml
+    intent: Build an IPsec policy query request.
+    request:
+      method: GET
+      path: /api/v1/ipsec
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ipsec-policy-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "GET /api/v1/ipsec sends no JSON body and takes no query parameters in the captured contract."
+        - "The response is {\"vals\":[...]} with one entry per policy; entries are identified by name, not by id."
+        - "Each entry carries scene/name/enable/ike/ipsec/adike/adipsec, so it is also the snapshot source for restoring a deleted policy."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_ipsec_port:
+    atom_ref: atoms/fw/fw_update_ipsec_port.yaml
+    intent: Build an IPsec port and NAT-T settings update request.
+    request:
+      method: PUT
+      path: /api/v1/ipsec/port
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {id: "{{ params.id }}", val: "{{ params.val }}"}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ipsec-port-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "PUT /api/v1/ipsec/port takes id fixed at \"0\" per the captured contract; val carries local_port, ip_protocol (ipv4 or ipv6), remote_port, and nat_t (enable or disable)."
+        - "The response is {\"msg\":\"success\"} and echoes no object body, so a live change must be confirmed with a follow-up fw_verify_ipsec_port query."
+        - "val.ip_protocol selects which of the two device records this request rewrites."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ipsec_port:
+    atom_ref: atoms/fw/fw_verify_ipsec_port.yaml
+    intent: Build an IPsec port and NAT-T settings query request.
+    request:
+      method: GET
+      path: /api/v1/ipsec/port
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ipsec-port-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "GET /api/v1/ipsec/port sends no JSON body and takes no query parameters in the captured contract."
+        - "The response is {\"vals\":[...]} with one record per ip_protocol; none of the records carries an id, so a record is identified by ip_protocol."
+        - "Each record carries local_port, remote_port, and nat_t, so it is also the snapshot source for restoring earlier settings."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ipsec_ikesa:
+    atom_ref: atoms/fw/fw_verify_ipsec_ikesa.yaml
+    intent: Build an IKE SA query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/ipsec/ikesa
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ipsec-ikesa-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "GET /api/v1/ipsec/ikesa sends no JSON body; page and size are query-string values."
+        - "The response is {\"count\":n,\"vals\":[...]}; each entry carries name, local_ip, remote_ip, state, and rekey_time."
+        - "For PTMP policies the SA name is the policy name joined with the remote peer, so a missing row means the tunnel never came up."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ipsec_sa:
+    atom_ref: atoms/fw/fw_verify_ipsec_sa.yaml
+    intent: Build an IPsec child SA query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/ipsec/ipsecsa
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ipsec-sa-state-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "GET /api/v1/ipsec/ipsecsa sends no JSON body; page and size are query-string values."
+        - "The response is {\"count\":n,\"vals\":[...]}; each entry carries name, state, local_ts, remote_ts, bytes_in, and bytes_out."
+        - "Traffic-selector rows are what prove a policy carries traffic, so this op is the traffic-level companion to fw_verify_ipsec_policy."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_ipsec:
+    atom_ref: atoms/fw/fw_delete_batch_ipsec.yaml
+    intent: Build a batch IPsec policy delete request for a single device.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {batch: "{{ params.batch }}"}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ipsec-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "Batch body contains only DELETE items whose resource is /api/v1/ipsec and whose body.id is a non-empty list of policy names."
+        - "The response is {\"BatchResult\":[{\"msg\":\"success\"},...]} in request order."
+        - "This op batches operations inside one device; multi-device orchestration is a separate contract."
+        - ptm-atomic run can execute this request only when --execute is explicit.

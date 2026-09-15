@@ -27,6 +27,21 @@ from atomic_ops.runner.iptun import (
     build_iptun_payload,
     validate_iptun_payload,
 )
+from atomic_ops.runner.nat import (
+    SUPPORTED_NAT_TYPES,
+    build_nat_batch_delete_payload,
+    build_nat_delete_payload,
+    build_nat_hitcount_payload,
+    build_nat_rule_payload,
+    validate_nat_payload,
+)
+from atomic_ops.runner.ipsec import (
+    IPSEC_PORT_ID,
+    build_ipsec_batch_delete_payload,
+    build_ipsec_policy_payload,
+    build_ipsec_port_payload,
+    validate_ipsec_payload,
+)
 from atomic_ops.runner.ngfw_login import login
 from atomic_ops.runner.object import (
     IP6POOL_OBJECT_RESOURCE,
@@ -5856,6 +5871,515 @@ class CredentialAuthSplitTests(unittest.TestCase):
         payload = json.loads(stderr.getvalue())
         self.assertIn("FW_WEB_PASSWORD", payload["message"])
         self.assertIn("set -a; source .env; set +a", payload["suggestion"])
+
+
+class NatPayloadTests(unittest.TestCase):
+    """NAT 请求构造：端点分歧、id 类型、协议参数。"""
+
+    def test_config_snat_wraps_val_without_id(self) -> None:
+        payload = build_nat_rule_payload(op_id="fw_config_nat_snat", val={"srcName": "any"})
+        self.assertEqual(payload, {"val": {"srcName": "any", "natType": "nat44"}})
+
+    def test_update_carries_integer_id(self) -> None:
+        payload = build_nat_rule_payload(op_id="fw_update_nat_dnat", val={"dstName": ""}, entry_id="3")
+        self.assertEqual(payload["id"], 3)
+        self.assertIsInstance(payload["id"], int)
+
+    def test_delete_carries_string_id(self) -> None:
+        payload = build_nat_delete_payload(op_id="fw_delete_nat_static", entry_id="2")
+        self.assertEqual(payload, {"id": "2"})
+        self.assertIsInstance(payload["id"], str)
+
+    def test_update_rejects_non_numeric_id(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_nat_rule_payload(op_id="fw_update_nat_snat", val={"srcName": "any"}, entry_id="rule-a")
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_read_modify_write_fields_pass_through_unchanged(self) -> None:
+        """PUT 需要原样回传设备只读回显字段，不做任何归一化。"""
+        val = {
+            "dstName": "",
+            "config_source": 0,
+            "effect_type": "None",
+            "enable_status": True,
+            "hitcount": 0,
+            "auto_disable": False,
+            "originRow": {"id": 2, "natType": "nat44"},
+        }
+        payload = build_nat_rule_payload(op_id="fw_update_nat_dnat", val=val, entry_id=2)
+        self.assertEqual(payload["val"]["originRow"], {"id": 2, "natType": "nat44"})
+        self.assertEqual(payload["val"]["effect_type"], "None")
+        self.assertEqual(payload["val"]["enable_status"], True)
+
+    def test_relate_is_ipv6_spelling_is_preserved(self) -> None:
+        """创建/修改 payload 用 relate.isIpv6，回读记录用 relate.is_ipv6，两侧不可共用键名。"""
+        payload = build_nat_rule_payload(
+            op_id="fw_config_nat_snat",
+            val={"relate": {"isIpv6": False, "VRRPId": 0}},
+        )
+        self.assertEqual(payload["val"]["relate"], {"isIpv6": False, "VRRPId": 0})
+        self.assertNotIn("is_ipv6", payload["val"]["relate"])
+
+    def test_nat_type_conflict_is_rejected(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_nat_rule_payload(op_id="fw_config_nat_snat", val={"natType": "nat66"})
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_unsupported_nat_type_is_rejected(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_nat_rule_payload(op_id="fw_config_nat_snat", val={"srcName": "any"}, nat_type="nat46")
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+        self.assertEqual(ctx.exception.details["allowed"], list(SUPPORTED_NAT_TYPES))
+
+    def test_nat44_is_the_only_registered_protocol(self) -> None:
+        self.assertEqual(list(SUPPORTED_NAT_TYPES), ["nat44"])
+
+    def test_hitcount_payload_shape(self) -> None:
+        payload = build_nat_hitcount_payload(family="snat", rule_ids=["1", "2"])
+        self.assertEqual(payload, {"id": 0, "val": {"type": "snat", "is_ipv6": False, "rule_ids": ["1", "2"]}})
+
+    def test_hitcount_rejects_unknown_family(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_nat_hitcount_payload(family="cross")
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_batch_delete_uses_family_resource(self) -> None:
+        payload = build_nat_batch_delete_payload(family="dnat", entry_ids=["1", "2"])
+        self.assertEqual(
+            payload["batch"],
+            [
+                {"method": "DELETE", "resource": "/api/v1/iterate/natdnat", "body": {"id": ["1"]}},
+                {"method": "DELETE", "resource": "/api/v1/iterate/natdnat", "body": {"id": ["2"]}},
+            ],
+        )
+
+    def test_batch_delete_requires_ids(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_nat_batch_delete_payload(family="snat", entry_ids=[])
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_validate_rejects_non_nat_delete_resource(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            validate_nat_payload(
+                {"batch": [{"method": "DELETE", "resource": "/api/v1/ipsec", "body": {"id": ["p1"]}}]},
+                op_id="fw_delete_batch_nat",
+            )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_validate_coerces_update_id_to_integer(self) -> None:
+        """回滚重放的快照记录带字符串 id，PUT 契约只认整数，校验时写回整数形态。"""
+        payload = validate_nat_payload(
+            {"id": "7", "val": {"natType": "nat44", "srcName": "any"}},
+            op_id="fw_update_nat_snat",
+        )
+        self.assertEqual(payload["id"], 7)
+        self.assertIsInstance(payload["id"], int)
+
+    def test_validate_strips_id_from_create_payload(self) -> None:
+        """创建抓包 body 只有 {"val": {...}}，id 由设备分配 —— 重放带来的 id 不下发。"""
+        payload = validate_nat_payload(
+            {"id": "9", "val": {"natType": "nat44", "srcName": "any"}},
+            op_id="fw_config_nat_snat",
+        )
+        self.assertNotIn("id", payload)
+        self.assertEqual(payload["val"]["srcName"], "any")
+
+
+class NatCliDryRunTests(unittest.TestCase):
+    """NAT CLI dry-run：端点、方法、id 类型与查询参数。"""
+
+    BASE = "https://192.0.2.1"
+
+    def _dry_run(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "nat", *argv])
+        self.assertEqual(exit_code, 0, stderr.getvalue())
+        return json.loads(stdout.getvalue())
+
+    def _dry_run_error(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "nat", *argv])
+        self.assertEqual(exit_code, 49)
+        return json.loads(stdout.getvalue()) if stdout.getvalue().strip() else json.loads(stderr.getvalue())
+
+    def test_config_snat_dry_run(self) -> None:
+        payload = self._dry_run(["config-snat", "--val-json", '{"srcName":"any","outInterfaceName":"TE0_7"}'])
+        self.assertEqual(payload["op_id"], "fw_config_nat_snat")
+        self.assertEqual(payload["status"], "dry_run")
+        self.assertEqual(payload["error_type"], "NONE")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertTrue(request["url"].endswith("/api/v1/natsnat"))
+        self.assertEqual(request["payload"]["val"]["outInterfaceName"], "TE0_7")
+        self.assertIsNone(request["query"])
+
+    def test_config_dnat_uses_iterate_endpoint(self) -> None:
+        payload = self._dry_run(["config-dnat", "--val-json", '{"dstName":"","dstIp":"4.4.4.4"}'])
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertTrue(request["url"].endswith("/api/v1/iterate/natdnat"))
+
+    def test_update_static_sends_integer_id(self) -> None:
+        payload = self._dry_run(["update-static", "--id", "1", "--val-json", '{"external_ip":"6.6.6.6"}'])
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["payload"]["id"], 1)
+        self.assertIsInstance(request["payload"]["id"], int)
+
+    def test_delete_snat_sends_string_id_in_body_and_no_query(self) -> None:
+        payload = self._dry_run(["delete-snat", "--id", "4"])
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "DELETE")
+        self.assertEqual(request["payload"], {"id": "4"})
+        self.assertIsInstance(request["payload"]["id"], str)
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/natsnat")
+
+    def test_delete_dnat_keeps_iterate_endpoint_and_body_id(self) -> None:
+        payload = self._dry_run(["delete-dnat", "--id", "3"])
+        request = payload["data"]["request"]
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/iterate/natdnat")
+        self.assertEqual(request["payload"], {"id": "3"})
+
+    def test_verify_sends_query_and_no_body(self) -> None:
+        payload = self._dry_run(["verify-static", "--page", "1", "--size", "10"])
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "GET")
+        self.assertIsNone(request["payload"])
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/natstatic?page=1&size=10&natType=nat44")
+
+    def test_verify_rejects_unsupported_nat_type(self) -> None:
+        error = self._dry_run_error(["verify-snat", "--nat-type", "nat64"])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_update_hitcount_dry_run(self) -> None:
+        payload = self._dry_run(["update-hitcount", "--nat-family", "dnat"])
+        request = payload["data"]["request"]
+        self.assertEqual(payload["op_id"], "fw_update_nat_hitcount")
+        self.assertEqual(request["method"], "PUT")
+        self.assertTrue(request["url"].endswith("/api/v1/nathitcount"))
+        self.assertEqual(request["payload"], {"id": 0, "val": {"type": "dnat", "is_ipv6": False}})
+
+    def test_delete_batch_dry_run(self) -> None:
+        payload = self._dry_run(["delete-batch", "--nat-family", "snat", "--id", "1"])
+        request = payload["data"]["request"]
+        self.assertEqual(payload["op_id"], "fw_delete_batch_nat")
+        self.assertEqual(request["method"], "POST")
+        self.assertTrue(request["url"].endswith("/api/v1/batch"))
+        self.assertEqual(
+            request["payload"]["batch"],
+            [{"method": "DELETE", "resource": "/api/v1/natsnat", "body": {"id": ["1"]}}],
+        )
+
+    def test_envelope_shape(self) -> None:
+        payload = self._dry_run(["verify-snat"])
+        self.assertEqual(
+            sorted(payload.keys()),
+            ["data", "diag_snapshot_ref", "error_type", "op_id", "status"],
+        )
+
+    # 回滚重放路径（op_mapper 只给 payload_json，不给 --id）：update 的 --id 因此改为
+    # 「除非直传 payload 否则必填」，形状取自 ptm-atomic 既有 timeobject 先例。
+    def test_update_payload_replay_needs_no_id_flag(self) -> None:
+        payload = self._dry_run(
+            ["update-snat", "--payload-json", '{"id":"1","val":{"srcName":"any","natType":"nat44"}}']
+        )
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["payload"]["id"], 1)
+        self.assertIsInstance(request["payload"]["id"], int)
+
+    def test_update_payload_without_id_requires_the_flag(self) -> None:
+        error = self._dry_run_error(
+            ["update-snat", "--payload-json", '{"val":{"srcName":"any","natType":"nat44"}}']
+        )
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_update_payload_injects_id_flag(self) -> None:
+        payload = self._dry_run(
+            ["update-snat", "--id", "5", "--payload-json", '{"val":{"srcName":"any","natType":"nat44"}}']
+        )
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], 5)
+
+    def test_update_structured_path_still_requires_id(self) -> None:
+        error = self._dry_run_error(["update-snat", "--val-json", '{"srcName":"any"}'])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_config_payload_replay_drops_device_id(self) -> None:
+        payload = self._dry_run(
+            ["config-snat", "--payload-json", '{"id":"9","val":{"srcName":"any","natType":"nat44"}}']
+        )
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertNotIn("id", request["payload"])
+        self.assertEqual(request["payload"]["val"]["srcName"], "any")
+
+
+class IpsecPayloadTests(unittest.TestCase):
+    """IPsec 请求构造：upsert 信封、固定端口 id、批量删除形状、无 body 的 op。"""
+
+    def test_policy_upsert_keeps_id_and_passes_val_through(self) -> None:
+        """PUT /api/v1/ipsec 是 upsert：id 即策略名，val 整体直传（两种 scene 形状共用）。"""
+        envelope = {
+            "id": "p2mp",
+            "val": {"scene": "PTMP", "name": "p2mp", "ike": {"ptmp_remote_psk": [{"psk": "<psk-ref>"}]}},
+        }
+        payload = build_ipsec_policy_payload(op_id="fw_config_ipsec_policy", envelope=envelope)
+        self.assertEqual(payload["id"], "p2mp")
+        self.assertIsInstance(payload["id"], str)
+        self.assertEqual(payload["val"]["scene"], "PTMP")
+        self.assertEqual(payload["val"]["ike"]["ptmp_remote_psk"], [{"psk": "<psk-ref>"}])
+
+    def test_policy_upsert_requires_id(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_ipsec_policy_payload(op_id="fw_config_ipsec_policy", envelope={"val": {"scene": "PTMP"}})
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_policy_upsert_requires_val(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_ipsec_policy_payload(op_id="fw_config_ipsec_policy", envelope={"id": "p2mp"})
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_policy_upsert_rejects_empty_val(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_ipsec_policy_payload(op_id="fw_config_ipsec_policy", envelope={"id": "p2mp", "val": {}})
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_unknown_policy_field_passes_through(self) -> None:
+        """抓包里多处枚举标「(推断)」——不做白名单校验，字段原样透传。"""
+        envelope = {
+            "id": "p1",
+            "val": {"scene": "PTP", "name": "p1", "remote_type": ["UNRECORDED_VALUE"]},
+        }
+        payload = build_ipsec_policy_payload(op_id="fw_config_ipsec_policy", envelope=envelope)
+        self.assertEqual(payload["val"]["remote_type"], ["UNRECORDED_VALUE"])
+
+    def test_port_payload_uses_fixed_id(self) -> None:
+        payload = build_ipsec_port_payload(val={"local_port": 500, "ip_protocol": "ipv4", "nat_t": "enable"})
+        self.assertEqual(payload["id"], IPSEC_PORT_ID)
+        self.assertEqual(IPSEC_PORT_ID, "0")
+        self.assertEqual(payload["val"]["local_port"], 500)
+
+    def test_port_payload_requires_val(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_ipsec_port_payload(val=None)
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_validate_rejects_non_fixed_port_id(self) -> None:
+        """端口信封 id 是设备契约的固定字面量，不是选择器 —— 非 0 一律拒绝。"""
+        with self.assertRaises(RunnerError) as ctx:
+            validate_ipsec_payload(
+                {"id": "1", "val": {"local_port": 500}}, op_id="fw_update_ipsec_port"
+            )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+        self.assertEqual(ctx.exception.details["expected"], "0")
+
+    def test_validate_accepts_fixed_port_id(self) -> None:
+        payload = validate_ipsec_payload(
+            {"id": "0", "val": {"local_port": 4500}}, op_id="fw_update_ipsec_port"
+        )
+        self.assertEqual(payload["id"], "0")
+
+    def test_no_body_ops_return_none(self) -> None:
+        """GET 四个查询与 delete-policy 都不下发 body（delete 的 id 走查询串）。"""
+        for op_id in (
+            "fw_verify_ipsec_policy",
+            "fw_verify_ipsec_port",
+            "fw_verify_ipsec_ikesa",
+            "fw_verify_ipsec_sa",
+            "fw_delete_ipsec_policy",
+        ):
+            with self.subTest(op_id=op_id):
+                self.assertIsNone(validate_ipsec_payload({"unexpected": True}, op_id=op_id))
+
+    def test_batch_delete_shape(self) -> None:
+        payload = build_ipsec_batch_delete_payload(policy_names=["p2mp", "p2mp2"])
+        self.assertEqual(
+            payload["batch"],
+            [
+                {
+                    "method": "DELETE",
+                    "resource": "/api/v1/ipsec",
+                    "body": {"id": ["p2mp", "p2mp2"]},
+                }
+            ],
+        )
+
+    def test_batch_delete_requires_names(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_ipsec_batch_delete_payload(policy_names=[])
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_batch_delete_rejects_unregistered_resource(self) -> None:
+        """批量契约只认 /api/v1/ipsec；NAT 端点由 fw_delete_batch_nat 承接。"""
+        with self.assertRaises(RunnerError) as ctx:
+            validate_ipsec_payload(
+                {"batch": [{"method": "DELETE", "resource": "/api/v1/natsnat", "body": {"id": ["1"]}}]},
+                op_id="fw_delete_batch_ipsec",
+            )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_batch_delete_rejects_non_delete_method(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            validate_ipsec_payload(
+                {"batch": [{"method": "POST", "resource": "/api/v1/ipsec", "body": {"id": ["p1"]}}]},
+                op_id="fw_delete_batch_ipsec",
+            )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+
+class IpsecCliDryRunTests(unittest.TestCase):
+    """IPsec CLI dry-run：端点、方法、DELETE 形态差异与固定端口 id。"""
+
+    BASE = "https://192.0.2.1"
+
+    def _dry_run(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "ipsec", *argv])
+        self.assertEqual(exit_code, 0, stderr.getvalue())
+        return json.loads(stdout.getvalue())
+
+    def _dry_run_error(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "ipsec", *argv])
+        self.assertEqual(exit_code, 49)
+        return json.loads(stdout.getvalue()) if stdout.getvalue().strip() else json.loads(stderr.getvalue())
+
+    def test_config_policy_dry_run(self) -> None:
+        payload = self._dry_run(
+            ["config-policy", "--id", "p2mp", "--val-json", '{"scene":"PTMP","name":"p2mp"}']
+        )
+        self.assertEqual(payload["op_id"], "fw_config_ipsec_policy")
+        self.assertEqual(payload["status"], "dry_run")
+        self.assertEqual(payload["error_type"], "NONE")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/ipsec")
+        self.assertEqual(request["payload"]["id"], "p2mp")
+        self.assertEqual(request["payload"]["val"]["scene"], "PTMP")
+        self.assertIsNone(request["query"])
+
+    def test_config_policy_result_carries_no_created_flag(self) -> None:
+        """响应只有 {"msg":"success"}：upsert 无法区分新建/覆盖，故不得臆造 created。"""
+        payload = self._dry_run(
+            ["config-policy", "--id", "p1", "--val-json", '{"scene":"PTMP","name":"p1"}']
+        )
+        self.assertNotIn("created", payload["data"])
+
+    def test_config_policy_payload_replay_needs_no_id_flag(self) -> None:
+        """回滚重放只给 payload_json（op_mapper 不传 --id）。"""
+        payload = self._dry_run(
+            ["config-policy", "--payload-json", '{"id":"p2mp","val":{"scene":"PTMP","name":"p2mp"}}']
+        )
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], "p2mp")
+
+    def test_config_policy_requires_id_without_payload(self) -> None:
+        error = self._dry_run_error(["config-policy", "--val-json", '{"scene":"PTMP"}'])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_delete_policy_sends_query_id_and_no_body(self) -> None:
+        """DELETE 形态差异：IPsec 用 ?id=，NAT 三族用 JSON body —— 不得互相类比。"""
+        payload = self._dry_run(["delete-policy", "--id", "p2mp"])
+        request = payload["data"]["request"]
+        self.assertEqual(payload["op_id"], "fw_delete_ipsec_policy")
+        self.assertEqual(request["method"], "DELETE")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/ipsec?id=p2mp")
+        self.assertIsNone(request["payload"])
+
+    def test_verify_policy_sends_no_body_and_no_query(self) -> None:
+        payload = self._dry_run(["verify-policy"])
+        request = payload["data"]["request"]
+        self.assertEqual(payload["op_id"], "fw_verify_ipsec_policy")
+        self.assertEqual(request["method"], "GET")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/ipsec")
+        self.assertIsNone(request["payload"])
+        self.assertIsNone(request["query"])
+
+    def test_verify_port_sends_no_body_and_no_query(self) -> None:
+        payload = self._dry_run(["verify-port"])
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "GET")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/ipsec/port")
+        self.assertIsNone(request["payload"])
+        self.assertIsNone(request["query"])
+
+    def test_update_port_dry_run_from_flat_flags(self) -> None:
+        payload = self._dry_run(
+            ["update-port", "--local-port", "4500", "--remote-port", "4500",
+             "--ip-protocol", "ipv4", "--nat-t", "disable"]
+        )
+        request = payload["data"]["request"]
+        self.assertEqual(payload["op_id"], "fw_update_ipsec_port")
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/ipsec/port")
+        self.assertEqual(
+            request["payload"],
+            {
+                "id": "0",
+                "val": {
+                    "local_port": 4500,
+                    "remote_port": 4500,
+                    "ip_protocol": "ipv4",
+                    "nat_t": "disable",
+                },
+            },
+        )
+
+    def test_update_port_payload_replay_keeps_fixed_id(self) -> None:
+        """回滚快照重放：信封 id 必须是 0，val 是整条端口记录。"""
+        payload = self._dry_run(
+            ["update-port", "--payload-json", '{"id":"0","val":{"local_port":500,"ip_protocol":"ipv6","nat_t":"enable"}}']
+        )
+        request = payload["data"]["request"]
+        self.assertEqual(request["payload"]["id"], "0")
+        self.assertEqual(request["payload"]["val"]["ip_protocol"], "ipv6")
+
+    def test_update_port_rejects_foreign_id_in_replay(self) -> None:
+        error = self._dry_run_error(
+            ["update-port", "--payload-json", '{"id":"1","val":{"local_port":500}}']
+        )
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_verify_ikesa_sends_paging_query(self) -> None:
+        payload = self._dry_run(["verify-ikesa", "--page", "2", "--size", "5"])
+        request = payload["data"]["request"]
+        self.assertEqual(payload["op_id"], "fw_verify_ipsec_ikesa")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/ipsec/ikesa?page=2&size=5")
+        self.assertIsNone(request["payload"])
+
+    def test_verify_sa_sends_paging_query(self) -> None:
+        payload = self._dry_run(["verify-sa"])
+        request = payload["data"]["request"]
+        self.assertEqual(payload["op_id"], "fw_verify_ipsec_sa")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/ipsec/ipsecsa?page=1&size=10")
+        self.assertIsNone(request["payload"])
+
+    def test_delete_batch_dry_run(self) -> None:
+        payload = self._dry_run(["delete-batch", "--id", "p2mp", "--id", "p2mp2"])
+        request = payload["data"]["request"]
+        self.assertEqual(payload["op_id"], "fw_delete_batch_ipsec")
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/batch")
+        self.assertEqual(request["payload"]["batch"][0]["resource"], "/api/v1/ipsec")
+        self.assertEqual(request["payload"]["batch"][0]["body"]["id"], ["p2mp", "p2mp2"])
+
+    def test_delete_batch_requires_at_least_one_id(self) -> None:
+        error = self._dry_run_error(["delete-batch"])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_envelope_shape(self) -> None:
+        payload = self._dry_run(["verify-policy"])
+        self.assertEqual(
+            sorted(payload.keys()),
+            ["data", "diag_snapshot_ref", "error_type", "op_id", "status"],
+        )
 
 
 if __name__ == "__main__":
