@@ -1,7 +1,8 @@
 schema_version: "1.1"
 op_id: fw_config_batch_nat
 device_type: fw
-description: Define multi-device NAT batch configuration contract for NGFW capacity.
+description: >-
+  Deprecated since 1.6.0; no replacement covers multi-device NAT orchestration.
 parameters:
   device_inventory_ref:
     type: string
@@ -140,4 +141,5 @@ tags:
   - batch_configuration
 aliases:
   - bulk
+deprecated: true
 since_version: "1.1.0"

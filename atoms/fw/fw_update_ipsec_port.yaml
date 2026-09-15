@@ -1,0 +1,104 @@
+schema_version: '1.1'
+op_id: fw_update_ipsec_port
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_ipsec_port
+description: Update NGFW IPsec port and NAT-T settings through PUT /api/v1/ipsec/port.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ipsec for this operation.
+  params:
+    type: json
+    required: true
+    description: 'IPsec port / NAT-T update request as {"id": "0", "val": {...}}. The captured device contract fixes id at "0"; val carries local_port, ip_protocol (ipv4 or ipv6), remote_port, and nat_t (enable or disable).'
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: <state-ref>
+  session_ref: <session-ref>
+  config_domain: ipsec
+  params:
+    id: '0'
+    val:
+      local_port: 500
+      ip_protocol: ipv4
+      remote_port: 500
+      nat_t: enable
+  idempotency_key: <idempotency-key>
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    ipsec_port_id: '0'
+    config_result:
+      status: succeeded
+      config_domain: ipsec
+      applied_ref: <ipsec-port-update-result-ref>
+    state_ref: <state-ref>
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: <manual-handling-ref>
+  error_type: NONE
+  diag_snapshot_ref: <diag-snapshot-ref>
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+  - ipsec_port_id
+  - full_config
+  notes: Restore the port / NAT-T settings from the pre-change snapshot taken with fw_verify_ipsec_port. GET /api/v1/ipsec/port returns one record per ip_protocol and none of them carries an id, so the snapshot record is matched on ip_protocol while the replayed PUT envelope keeps the fixed id 0 the device contract requires.
+pre_snapshot:
+  op_id: fw_verify_ipsec_port
+  capture_fields:
+  - ipsec_port_id
+  - full_config
+rollback_apply:
+  op_id: fw_update_ipsec_port
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_ipsec_port
+  expected_state: matches_snapshot
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+- NONE
+- STATE_INVALID
+- VALIDATION_FAILED
+- GATE_MISSING
+- CONFIG_REJECTED
+- DEVICE_UNREACHABLE
+- UNKNOWN_ERROR
+risk:
+  level: medium
+  categories:
+  - configuration
+  - capacity_domain
+preconditions:
+- External orchestration holds a valid state_ref or session_ref.
+- val.ip_protocol selects which record of /api/v1/ipsec/port this request rewrites.
+postconditions:
+- IPsec port update result and diagnostic references are available to the caller.
+- A follow-up fw_verify_ipsec_port query shows the new port / NAT-T values.
+tags:
+- firewall
+- capacity
+- ipsec
+- configuration
+aliases:
+- ipsec
+- ipsec-port
+- nat-t
+since_version: 1.6.0

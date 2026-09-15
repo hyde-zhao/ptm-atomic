@@ -1,0 +1,68 @@
+schema_version: '1.1'
+op_id: fw_verify_ipsec_ikesa
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ipsec_ikesa
+description: Query NGFW IKE SAs through GET /api/v1/ipsec/ikesa with pagination.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ipsec for this operation.
+  params:
+    type: json
+    required: true
+    description: List query with page and size. The device exposes both as query-string values and the request carries no JSON body.
+inputs:
+  session_ref: <session-ref>
+  config_domain: ipsec
+  params:
+    page: '1'
+    size: '10'
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: <ipsec-ikesa-state-ref>
+    full_config_ref: <ipsec-ikesa-full-config-ref>
+    vals_ref: <ipsec-ikesa-vals-ref>
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: <diag-snapshot-ref>
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+- NONE
+- VALIDATION_FAILED
+- CONFIG_RESULT_MISSING
+- STATE_MISMATCH
+- MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+  - name: ipsec_ikesa_query_returns_sa_list
+    input_ref: <ipsec-ikesa-query-result-ref>
+    expected_result: the device returns count and a vals list of IKE SAs carrying name, local_ip, remote_ip, state, and rekey_time.
+  summary_ref: <ipsec-ikesa-verification-summary-ref>
+preconditions:
+- External orchestration holds a valid session_ref.
+postconditions:
+- IKE SA query result and diagnostic references are available to the caller.
+- For PTMP policies the SA name is the policy name joined with the remote peer, so a missing row is a tunnel that never came up.
+tags:
+- firewall
+- capacity
+- ipsec
+- verification
+aliases:
+- ipsec
+- ipsec-ikesa
+- ipsec-phase1-sa
+since_version: 1.6.0

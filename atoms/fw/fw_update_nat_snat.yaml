@@ -1,0 +1,126 @@
+schema_version: "1.1"
+op_id: fw_update_nat_snat
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_nat_snat
+description: Update an existing source NAT (SNAT) rule through /api/v1/natsnat.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be nat for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      Source NAT rule update payload with integer id and a val object. The
+      device identifies the rule by the numeric id returned by
+      fw_verify_nat_snat; pass the full business field set so the update is a
+      complete desired state rather than a partial patch.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: nat
+  params:
+    id: 1
+    val:
+      desc: ""
+      timeObj: ""
+      noTransPort: false
+      enabled: true
+      outInterfaceName: TE0_7
+      zoneName: any
+      srcName: any
+      srcName_is_group: false
+      dstName: any
+      dstName_is_group: false
+      natType: nat44
+      serviceName: any
+      serviceName_is_group: false
+      useInterface: true
+      transType: 0
+      transParm: ""
+      relate:
+        isIpv6: false
+        VRRPId: 0
+        VRRPIntf: ""
+        enabled: false
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    nat_rule_id: 1
+    config_result:
+      status: succeeded
+      config_domain: nat
+      applied_ref: "<nat-snat-update-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - nat_rule_id
+    - full_config
+  notes: Restore the source NAT rule from the full pre-update snapshot.
+pre_snapshot:
+  op_id: fw_verify_nat_snat
+  capture_fields:
+    - nat_rule_id
+    - full_config
+rollback_apply:
+  op_id: fw_update_nat_snat
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_nat_snat
+  expected_state: matches_snapshot
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: medium
+  categories:
+    - configuration
+    - capacity_domain
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - The target rule id exists in fw_verify_nat_snat output.
+postconditions:
+  - Source NAT rule update result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_nat_snat query reflects the updated field values.
+tags:
+  - firewall
+  - capacity
+  - nat
+  - snat
+  - configuration
+aliases:
+  - nat
+  - snat
+  - source-nat
+  - nat-snat
+since_version: "1.6.0"

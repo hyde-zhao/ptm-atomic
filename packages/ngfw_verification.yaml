@@ -31,6 +31,13 @@ operations:
   - fw_capture_bfd_log
   - fw_verify_static_route
   - fw_verify_nat
+  - fw_verify_nat_snat
+  - fw_verify_nat_dnat
+  - fw_verify_nat_static
+  - fw_verify_ipsec_policy
+  - fw_verify_ipsec_port
+  - fw_verify_ipsec_ikesa
+  - fw_verify_ipsec_sa
   - fw_verify_bandwidth
   - fw_verify_black_white_list
   - fw_verify_ssl_vpn

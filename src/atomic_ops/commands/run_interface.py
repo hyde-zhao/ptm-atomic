@@ -90,6 +90,15 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--gre-keepalive-enable", action="store_true", default=False, help="Enable GRE keepalive (gre only).")
     parser.add_argument("--ip6-nd-prefix", action="append", default=None, help="IPv6 ND prefix for val.ip6_nd.ip_prefix (bvi/sub only), e.g. 66::/96. May be repeated. Omitted from the payload when not set.")
     parser.add_argument("--ip6-racfg-suppress", type=int, help="val.ip6_racfg.suppress flag, 0 or 1 (bvi/sub only). Omitted from the payload when not set.")
+    # 源进源出（CFG-OUTINTF-018）：/api/v1/intf 的 ipv4_reverse_path + ipv4_gateway 两字段。
+    # 缺省与历史行为一致（空串 / False），只有显式传参才改变下发内容 —— 既有用例零影响。
+    parser.add_argument("--ipv4-gateway", help="val.ipv4_gateway (source-route reverse path next hop, e.g. 10.0.0.1). Defaults to an empty string.")
+    # bool 互斥对（同 --interface-enabled/--interface-disabled）：op_mapper 的
+    # BOOL_MUTEX_FLAGS 需要 True/False 两个 flag，单 store_true 会让用例传的
+    # False 被渲染成 `--ipv4-reverse-path False`（argparse 拒收该尾值）。
+    ipv4_rp_group = parser.add_mutually_exclusive_group()
+    ipv4_rp_group.add_argument("--ipv4-reverse-path", dest="ipv4_reverse_path", action="store_true", default=False, help="Set val.ipv4_reverse_path to true (strict source-route reverse path). Off by default.")
+    ipv4_rp_group.add_argument("--no-ipv4-reverse-path", dest="ipv4_reverse_path", action="store_false", help="Set val.ipv4_reverse_path to false (the default).")
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
 
@@ -288,6 +297,8 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                     gre_keepalive_enable=bool(getattr(args, "gre_keepalive_enable", False)),
                     ip6_nd_prefixes=list(getattr(args, "ip6_nd_prefix") or []) or None,
                     ip6_racfg_suppress=getattr(args, "ip6_racfg_suppress"),
+                    ipv4_gateway=getattr(args, "ipv4_gateway", None),
+                    ipv4_reverse_path=bool(getattr(args, "ipv4_reverse_path", False)),
                 )
             payload = validate_interface_payload(payload, op_id=op_id)
 

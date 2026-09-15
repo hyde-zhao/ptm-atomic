@@ -1,0 +1,74 @@
+schema_version: "1.1"
+op_id: fw_verify_nat_dnat
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_nat_dnat
+description: Query destination NAT (DNAT) rules through /api/v1/iterate/natdnat.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be nat for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      Destination NAT list query with page, size, and natType. The device
+      exposes these as query-string values and the request carries no JSON
+      body.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: nat
+  params:
+    page: "1"
+    size: "10"
+    natType: nat44
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<nat-dnat-state-ref>"
+    full_config_ref: "<nat-dnat-full-config-ref>"
+    vals_ref: "<nat-dnat-vals-ref>"
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: nat_dnat_query_returns_rule_list
+      input_ref: "<nat-dnat-query-result-ref>"
+      expected_result: the device returns count, page, size, and a vals list of destination NAT rules.
+  summary_ref: "<nat-dnat-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - Destination NAT query result and diagnostic references are available to the caller.
+  - Each vals entry carries an integer id used as the update and delete selector.
+tags:
+  - firewall
+  - capacity
+  - nat
+  - dnat
+  - verification
+aliases:
+  - nat
+  - dnat
+  - destination-nat
+  - nat-dnat
+since_version: "1.6.0"

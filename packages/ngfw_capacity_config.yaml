@@ -83,6 +83,19 @@ operations:
   - fw_config_bfd_global
   - fw_config_static_route
   - fw_config_nat
+  - fw_config_nat_snat
+  - fw_update_nat_snat
+  - fw_delete_nat_snat
+  - fw_config_nat_dnat
+  - fw_update_nat_dnat
+  - fw_delete_nat_dnat
+  - fw_config_nat_static
+  - fw_update_nat_static
+  - fw_delete_nat_static
+  - fw_update_nat_hitcount
+  - fw_config_ipsec_policy
+  - fw_delete_ipsec_policy
+  - fw_update_ipsec_port
   - fw_config_bandwidth
   - fw_config_black_white_list
   - fw_config_ssl_vpn

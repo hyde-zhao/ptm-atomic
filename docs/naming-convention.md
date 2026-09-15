@@ -100,7 +100,7 @@ current `ptm-atomic` CLI can connect to a firewall or execute the operation.
 | `fw_run_login` | Invalid | `run` is not an atom verb and would imply execution. |
 | `fw_execute_acl_policy` | Invalid | `execute` is a CLI execution mode, not an atom verb. |
 | `fw_rollback_acl_policy` | Invalid for this baseline | Automatic rollback is out of scope; verification failures produce diagnostics and manual handling signals. |
-| `fw_configure_nat` | Invalid | Use `fw_config_nat`; `configure` is reserved as a forbidden CLI/action wording in this baseline. |
+| `fw_configure_nat` | Invalid | Use `fw_config_nat_snat` (or the `_dnat` / `_static` variant); `configure` is reserved as a forbidden CLI/action wording in this baseline. |
 
 ### Capability Folding and Business Aliases
 
@@ -123,6 +123,62 @@ must extend the existing atom's `aliases` instead of introducing a new
 `fw_config_iptun`, and configuring the associated tunnel interface uses
 `fw_update_interface` with `interface-kind tunnel` (an alias of
 `fw_update_interface`).
+
+### NAT: Translation Family vs Network Protocol
+
+NAT varies along two orthogonal axes, and they resolve to opposite naming
+decisions. The split axis is the HTTP endpoint, not the protocol.
+
+| Axis | Varies | Decision | Reason |
+|---|---|---|---|
+| Translation family (`snat` / `dnat` / `static`) | Endpoint (`/api/v1/natsnat`, `/api/v1/iterate/natdnat`, `/api/v1/natstatic`) | Separate `op_id` per family | One adapter mapping is one HTTP call; a different endpoint cannot share a mapping. |
+| Network protocol (`nat44`; `nat66` / `nat46` / `nat64` reserved) | Only the `natType` payload field and the GET query value | Same `op_id`, protocol as a parameter | Method and endpoint are unchanged, so it is a parameter of one operation, not a new atom. |
+
+Consequences:
+
+- `op_id` never carries the protocol: `fw_config_nat_snat`, never
+  `fw_config_nat44_snat`. Adding a protocol adds no `op_id` and no endpoint.
+- The protocol parameter is a single whitelist in `runner/nat.py`
+  (`SUPPORTED_NAT_TYPES`) plus the adapter template, which passes `val`
+  through whole; cross-protocol fields therefore need no adapter change.
+- Precedent: `fw_config_iptun --tunnel-type {4over6,6over4,gre}` folds tunnel
+  variants of one endpoint into a single atom the same way.
+- The three abstract placeholders `fw_config_nat` / `fw_verify_nat` /
+  `fw_config_batch_nat` are deprecated in favour of the concrete per-family
+  operations. `fw_config_batch_nat` has no replacement: it describes
+  multi-device orchestration, whereas `fw_delete_batch_nat` batches rule
+  deletions inside one device.
+
+### IPsec: Upsert and Per-Operation Transport Details
+
+The IPsec resource family does not follow the usual `config` = POST /
+`update` = PUT split, and its DELETE shape differs from NAT44 inside the same
+kind of family grouping. Both are captured device behaviour, so they drive
+the naming rather than the other way round.
+
+| Decision | `op_id` | Reason |
+|---|---|---|
+| Upsert has no separate update operation | `fw_config_ipsec_policy` (no `fw_update_ipsec_policy`) | `PUT /api/v1/ipsec` uses `id` to decide whether the policy is created or overwritten. Two `op_id`s would map to the same method and endpoint, which one adapter mapping cannot express as two operations. |
+| DELETE carries the name in the query | `fw_delete_ipsec_policy` (`DELETE /api/v1/ipsec?id=<name>`) | Captured behaviour. The NAT44 families send the id in a JSON body, so the URL builder dispatches per `op_id`, never per family. |
+| Identity fields are not always `id` | `fw_update_ipsec_port`, `fw_verify_ipsec_port` | The port records carry no `id`; the record identity is `ip_protocol` and the envelope id is the fixed literal `0`. The policy's identity is `name`, not an `id` key. |
+
+Consequences:
+
+- The `PUT /api/v1/ipsec` response is only `{"msg":"success"}` with no object
+  echo-back, so the runner cannot tell a creation from an overwrite and
+  reports no `created` flag. A caller that needs to know must query
+  `fw_verify_ipsec_policy` before the write.
+- Because the upsert is keyed by name, `inverse_op` rollback to
+  `fw_delete_ipsec_policy` deletes whatever policy holds that name — if the
+  policy already existed before the step, the rollback removes an object the
+  step never created. Snapshot-based restore via `fw_verify_ipsec_policy` is
+  the safe path when the policy may pre-exist.
+- Policy payloads are large and deeply nested (`scene` selects the PTMP or
+  PTP shape), so `--val-file` / `--val-json` is the primary interface and the
+  flat flags cover only the port fields (`--local-port`, `--remote-port`,
+  `--ip-protocol`, `--nat-t`).
+- `fw_verify_ipsec_policy` and `fw_verify_ipsec_port` accept no parameters at
+  all: the captured requests carry neither body nor query.
 
 The `list --query <keyword>` flag is an allowed `list` family query parameter.
 It performs a case-insensitive substring match across `op_id`, `aliases`,

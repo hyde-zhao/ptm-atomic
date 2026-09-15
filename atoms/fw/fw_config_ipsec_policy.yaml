@@ -1,0 +1,161 @@
+schema_version: '1.1'
+op_id: fw_config_ipsec_policy
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_ipsec_policy
+description: Create or modify an NGFW IPsec policy through PUT /api/v1/ipsec (upsert keyed by policy name).
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ipsec for this operation.
+  params:
+    type: json
+    required: true
+    description: 'IPsec policy upsert request as {"id": "<policy-name>", "val": {...}}. The id is the policy name and decides which object the device writes, so the same PUT covers both create and modify. val.scene selects the shape: PTMP carries ike.ptmp_remote_psk and ike.pool, while PTP carries ike.remote_id_type/remote_id and a top-level adipsec; both share scene/name/enable/ike/ipsec/adike. Enum values outside the ones recorded in the capture are marked as inferred in the adapter notes and pass through untouched rather than being validated here.'
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: <state-ref>
+  session_ref: <session-ref>
+  config_domain: ipsec
+  params:
+    id: p2mp
+    val:
+      scene: PTMP
+      name: p2mp
+      enable: true
+      ike:
+        local_intf: TE0_7
+        local_addr: 60.0.0.1
+        remote_addr: ''
+        auth:
+          auth_method: PSK
+          psk: ''
+          ca_type: ''
+          local_cert: ''
+          local_enc_cert: ''
+          remote_cert: ''
+          remote_enc_cert: ''
+          ca_cert: ''
+        local_id_type: IP
+        local_id: 2.2.2.2
+        ptmp_remote_psk:
+        - name: 2.2.4.1
+          desc: ''
+          remote_id_type: IP
+          remote_id: 2.2.4.1
+          remote_addr: 2.2.4.1
+          psk: <psk-ref>
+        pool:
+          name: ''
+          addr: ''
+          dns: ''
+      ipsec:
+      - local_ts_type: IP
+        local_ts: 2.2.2.2
+        remote_ts_type: IP
+        remote_ts: 2.2.2.4
+        enable_reverse_route: true
+        protocol: ''
+        src_port: 0
+        dst_port: 0
+        encrypt: false
+      adike:
+        version: 1
+        ike_mode: AGGRESSIVE
+        proposals:
+        - encry_alg: ENCRY_AES256
+          auth_alg: AUTH_SHA256
+          dh_group: DHG_MODP2048
+        rekey_time: 86400
+        dpd_delay: 5
+        dpd_timeout: 30
+      adipsec:
+        ipsec_mode: TUNNEL
+        sec_protocol: ESP
+        esp_proposals:
+        - esp_encry_alg: ENCRY_AES256
+          esp_auth_alg: AUTH_SHA256
+        ah_proposals:
+        - AUTH_SHA256
+        pfs: DHG_NONE
+        rekey_time: 3600
+        rekey_bytes: 0
+      remote_type: []
+  idempotency_key: <idempotency-key>
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    ipsec_policy_id: p2mp
+    config_result:
+      status: succeeded
+      config_domain: ipsec
+      applied_ref: <ipsec-policy-upsert-result-ref>
+    state_ref: <state-ref>
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: <manual-handling-ref>
+  error_type: NONE
+  diag_snapshot_ref: <diag-snapshot-ref>
+idempotent: true
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_ipsec_policy
+  snapshot_required: false
+  required_inputs:
+  - ipsec_policy_id
+  id_source: args
+  id_field: ipsec_policy_id
+  notes: 'PUT /api/v1/ipsec is an upsert: the id decides whether the call creates or overwrites a policy and the response carries no created flag, so this inverse is safe only when the caller knows the policy did not exist before this operation. When it did exist, restore the pre-change policy instead of deleting it.'
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+- NONE
+- STATE_INVALID
+- VALIDATION_FAILED
+- GATE_MISSING
+- CONFIG_REJECTED
+- DEVICE_UNREACHABLE
+- UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+  - configuration
+  - capacity_domain
+gate:
+  required: true
+  reason: IPsec policy upsert changes tunnel endpoints and traffic selectors and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+  - approved_change_record
+  - state_reference
+  - parameter_digest
+preconditions:
+- External orchestration holds a valid state_ref or session_ref.
+- Gate evidence exists before this high-risk IPsec policy write is used.
+- The referenced ike.local_intf exists on the device and PSK material is supplied through a runtime reference, never inline.
+postconditions:
+- IPsec policy upsert result and diagnostic references are available to the caller.
+- A follow-up fw_verify_ipsec_policy query lists the policy under its name, because the device response echoes no object body.
+tags:
+- firewall
+- capacity
+- ipsec
+- configuration
+aliases:
+- ipsec
+- ipsec-policy
+- ipsec-tunnel
+since_version: 1.6.0

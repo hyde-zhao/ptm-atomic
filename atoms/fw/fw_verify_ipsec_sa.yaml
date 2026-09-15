@@ -1,0 +1,68 @@
+schema_version: '1.1'
+op_id: fw_verify_ipsec_sa
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ipsec_sa
+description: Query NGFW IPsec child SAs through GET /api/v1/ipsec/ipsecsa with pagination.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ipsec for this operation.
+  params:
+    type: json
+    required: true
+    description: List query with page and size. The device exposes both as query-string values and the request carries no JSON body.
+inputs:
+  session_ref: <session-ref>
+  config_domain: ipsec
+  params:
+    page: '1'
+    size: '10'
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: <ipsec-sa-state-ref>
+    full_config_ref: <ipsec-sa-full-config-ref>
+    vals_ref: <ipsec-sa-vals-ref>
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: <diag-snapshot-ref>
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+- NONE
+- VALIDATION_FAILED
+- CONFIG_RESULT_MISSING
+- STATE_MISMATCH
+- MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+  - name: ipsec_sa_query_returns_child_sa_list
+    input_ref: <ipsec-sa-query-result-ref>
+    expected_result: the device returns count and a vals list of child SAs carrying name, state, local_ts, remote_ts, bytes_in, and bytes_out.
+  summary_ref: <ipsec-sa-verification-summary-ref>
+preconditions:
+- External orchestration holds a valid session_ref.
+postconditions:
+- IPsec SA query result and diagnostic references are available to the caller.
+- Traffic-selector rows (local_ts / remote_ts) are what prove a policy is carrying traffic, not the policy list alone.
+tags:
+- firewall
+- capacity
+- ipsec
+- verification
+aliases:
+- ipsec
+- ipsec-sa
+- ipsec-child-sa
+since_version: 1.6.0

@@ -10,6 +10,8 @@ operations:
   - fw_config_batch_policy_route
   - fw_config_batch_static_route
   - fw_config_batch_nat
+  - fw_delete_batch_nat
+  - fw_delete_batch_ipsec
   - fw_config_batch_bandwidth
   - fw_config_batch_black_white_list
   - fw_config_batch_ssl_vpn

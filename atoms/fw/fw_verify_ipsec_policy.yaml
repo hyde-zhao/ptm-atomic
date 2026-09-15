@@ -1,0 +1,61 @@
+schema_version: '1.1'
+op_id: fw_verify_ipsec_policy
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ipsec_policy
+description: Query NGFW IPsec policies through GET /api/v1/ipsec.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ipsec for this operation.
+inputs:
+  session_ref: <session-ref>
+  config_domain: ipsec
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: <ipsec-policy-state-ref>
+    full_config_ref: <ipsec-policy-full-config-ref>
+    vals_ref: <ipsec-policy-vals-ref>
+    count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: <diag-snapshot-ref>
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+- NONE
+- VALIDATION_FAILED
+- CONFIG_RESULT_MISSING
+- STATE_MISMATCH
+- MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+  - name: ipsec_policy_query_returns_policy_list
+    input_ref: <ipsec-policy-query-result-ref>
+    expected_result: the device returns a vals list of IPsec policies keyed by name, each carrying scene/name/enable/ike/ipsec/adike/adipsec.
+  summary_ref: <ipsec-policy-verification-summary-ref>
+preconditions:
+- External orchestration holds a valid session_ref.
+postconditions:
+- IPsec policy query result and diagnostic references are available to the caller.
+- Each vals entry is identified by name, because the device echoes no id field in the policy list.
+tags:
+- firewall
+- capacity
+- ipsec
+- verification
+aliases:
+- ipsec
+- ipsec-policy
+- ipsec-tunnel
+since_version: 1.6.0

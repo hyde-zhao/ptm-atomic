@@ -1,7 +1,9 @@
 schema_version: "1.1"
 op_id: fw_config_nat
 device_type: fw
-description: Define NAT configuration contract for NGFW capacity operations.
+description: >-
+  Deprecated since 1.6.0; superseded by fw_config_nat_snat, fw_config_nat_dnat,
+  and fw_config_nat_static.
 parameters:
   state_ref:
     type: string
@@ -81,8 +83,6 @@ tags:
   - configuration
 aliases:
   - network-address-translation
-  - snat
-  - dnat
-  - source-nat
-  - destination-nat
+deprecated: true
+deprecated_by: fw_config_nat_snat
 since_version: "1.1.0"
