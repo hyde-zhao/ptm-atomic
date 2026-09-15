@@ -61,6 +61,27 @@ ptm-atomic run iptun config --base-url https://10.0.0.1 --id tunnel3 --tunnel-ty
 ptm-atomic run iptun delete --base-url https://10.0.0.1 --id tunnel6
 ptm-atomic run iptun verify --base-url https://10.0.0.1
 
+# NAT（三级：族/动作；转换族拆 op，协议作参数）
+ptm-atomic run --base-url https://10.0.0.1 nat config-snat --nat-type nat44 --val-file /tmp/snat.json
+ptm-atomic run --base-url https://10.0.0.1 nat update-snat --id 3 --val-file /tmp/snat.json
+ptm-atomic run --base-url https://10.0.0.1 nat delete-snat --id 4
+ptm-atomic run --base-url https://10.0.0.1 nat verify-snat --page 1 --size 10 --nat-type nat44
+ptm-atomic run --base-url https://10.0.0.1 nat config-dnat --val-json '{"dstIp":"4.4.4.4","dstName":""}'
+ptm-atomic run --base-url https://10.0.0.1 nat delete-dnat --id 3
+ptm-atomic run --base-url https://10.0.0.1 nat verify-static --page 1 --size 10
+ptm-atomic run --base-url https://10.0.0.1 nat update-hitcount --nat-family snat --rule-id 1
+ptm-atomic run --base-url https://10.0.0.1 nat delete-batch --nat-family static --id 1 --id 2
+
+# IPsec（三级：族/动作；PUT 为 upsert，故无 update-policy）
+ptm-atomic run --base-url https://10.0.0.1 ipsec config-policy --id p2mp --val-file /tmp/ipsec-policy.json
+ptm-atomic run --base-url https://10.0.0.1 ipsec verify-policy
+ptm-atomic run --base-url https://10.0.0.1 ipsec delete-policy --id p2mp
+ptm-atomic run --base-url https://10.0.0.1 ipsec update-port --local-port 500 --remote-port 500 --ip-protocol ipv4
+ptm-atomic run --base-url https://10.0.0.1 ipsec verify-port
+ptm-atomic run --base-url https://10.0.0.1 ipsec verify-ikesa --page 1 --size 10
+ptm-atomic run --base-url https://10.0.0.1 ipsec verify-sa --page 1 --size 10
+ptm-atomic run --base-url https://10.0.0.1 ipsec delete-batch --id p2mp --id p2p
+
 # 配置导入导出 + 重启（异步工作流，runner 内建轮询）
 ptm-atomic run export-file config --base-url https://10.0.0.1 --moduletype systemconfig --output-path /tmp/systemconfig.tgz
 ptm-atomic run import-file config --base-url https://10.0.0.1 --moduletype systemconfig --input-path /tmp/systemconfig.tgz --operationtype override
