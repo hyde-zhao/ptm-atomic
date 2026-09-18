@@ -8,6 +8,7 @@ import re
 from typing import Any
 from urllib.parse import urlencode
 
+from atomic_ops.runner.batch import build_batch_delete_payload
 from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
 from atomic_ops.runner.http import request_json, request_json_with_retries
 from atomic_ops.runner.ngfw_login import normalize_base_url
@@ -167,6 +168,9 @@ def build_policy_route_batch_delete_payload(
     entry_ids: list[str],
     route_type: str = "ipv4",
 ) -> dict[str, Any]:
+    # #batch-id-list（STORY-REM-02-04）：id 承载收敛到共享 helper（1 item × N id）。
+    # 本族保留 route_type → is_ip6 的取值推导与 id 非空校验（route_type 语义属本族）；
+    # route_type 为批级单值，故 is_ip6 取值列表按批复制成 N 元以支持逐位对齐形态。
     is_ip6 = _route_type_to_is_ip6(route_type)
     if not entry_ids:
         raise RunnerError(
@@ -175,17 +179,12 @@ def build_policy_route_batch_delete_payload(
             {"field": "id"},
         )
     is_ip6_str = str(is_ip6).lower()
-    batch: list[dict[str, Any]] = []
-    for entry_id in entry_ids:
-        _validate_non_empty("id", entry_id)
-        batch.append(
-            {
-                "method": "DELETE",
-                "resource": POLICY_ROUTE_RESOURCE,
-                "body": {"id": [str(entry_id)], "is_ip6": [is_ip6_str]},
-            }
-        )
-    return {"batch": batch}
+    return build_batch_delete_payload(
+        entry_ids=entry_ids,
+        resource=POLICY_ROUTE_RESOURCE,
+        is_ip6_values=[is_ip6_str] * len(entry_ids),
+        validate_entry=lambda entry_id: _validate_non_empty("id", entry_id),
+    )
 
 
 def validate_policy_route_payload(payload: dict[str, Any], *, op_id: str) -> dict[str, Any]:
@@ -352,6 +351,9 @@ def execute_policy_route(
                 "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
                 "response_keys": sorted(response_payload.keys()),
             },
+            # #outif-attribution（STORY-REM-08-03 R1）：归因建议**附加**在原始错误之上，
+            # details 的原始 err_code / err_msg / status_code 与 error_code / message 逐字不变。
+            suggestion=_policy_route_error_suggestion(op_id, payload, response_payload),
         )
     result: dict[str, Any] = {
         "op_id": op_id,
@@ -366,7 +368,57 @@ def execute_policy_route(
     }
     # 兑现 atom returns.data 契约：从响应中提取结构化策略路由 id。
     result.update(_extract_policy_route_summary(op_id, response_payload))
+    # ── #batch-result（区域 #batch-result；STORY-REM-02-03 R1 接线，2026-09-17）──
+    # CT-REM-ATOM-RESULT v1.0（**追加式**）：delete-batch 的输出体并入五键
+    # count / success_count / failed_count / failed[] / per_item_result；既有键
+    # （op_id / status / status_code / request / response / summary 键）
+    # **不改名、不移动、不删除**。五键语义与保守口径由 runner/batch.py#batch-result
+    # 承担（STORY-REM-02-03 定稿，本处只读消费，不复制、不修改）：
+    #   per_item_result=True  设备逐条结果与请求条目数一一对应且每条可判定 -> 可采信；
+    #   per_item_result=False 能力边界 -> 计数 None（**None != 0**）、failed == []，
+    #                         消费方**不得**解读为「无失败」，须触发回查（02-02）。
+    # requested_count 取请求侧事实（payload 内 body.id 总数，不由设备推断）；载荷非
+    # 批量形态时计数 < 1 -> helper 既有 fail-loud 契约（RUNNER_VALIDATION_FAILED），
+    # 不产出 count: 0 的非法契约体、也不静默省略五键。摘要入口就地导入：本 Story 不
+    # 触碰 02-04 已定稿的 import 行（区域所有权 ADR-REM-06）。
+    if op_id in BATCH_OPS:
+        from atomic_ops.runner.batch import summarize_batch_result
+
+        result.update(
+            summarize_batch_result(
+                response_payload,
+                requested_count=_batch_delete_requested_count(payload),
+            )
+        )
     return result
+
+
+# ── #batch-result（区域 #batch-result；STORY-REM-02-03 R1 接线，2026-09-17）──
+# 本区域只新增两样东西，供 execute_policy_route 的返回构造处接线（见上）：
+# ① 行内调用点（`result.update(**summary)`，五键追加，既有键零影响）；
+# ② `_batch_delete_requested_count()`（请求侧条目总数推导）。
+# 五键契约本体（判定 / 保守降级 / 只读语义）在 runner/batch.py#batch-result
+# （STORY-REM-02-03 定稿），本区域**只读消费、不复制、不修改**。
+
+
+def _batch_delete_requested_count(payload: dict[str, Any] | None) -> int:
+    """推导批量删除请求的条目总数（= batch 内各 item ``body.id`` 长度之和）。
+
+    承载形态由 ``#batch-id-list``（STORY-REM-02-04）保证：``single_item`` 为 1 item ×
+    N id、``per_id_item`` 为 N item × 1 id，两种形态 id 总数一致（= 请求条目数 N）。
+    形状不符（非批量载荷）时返回 0 —— 由 ``summarize_batch_result`` 的既有 fail-loud
+    契约显式失败（不产出非法 ``count``，也不静默省略五键）。
+    """
+    batch = payload.get("batch") if isinstance(payload, dict) else None
+    if not isinstance(batch, list):
+        return 0
+    total = 0
+    for item in batch:
+        body = item.get("body") if isinstance(item, dict) else None
+        ids = body.get("id") if isinstance(body, dict) else None
+        if isinstance(ids, list):
+            total += len(ids)
+    return total
 
 
 def _extract_policy_route_summary(op_id: str, response_payload: Any) -> dict[str, Any]:
@@ -398,6 +450,55 @@ def _extract_policy_route_summary(op_id: str, response_payload: Any) -> dict[str
                 else True
             )
     return summary
+
+
+# ── 出接口归因建议（区域 #outif-attribution；STORY-REM-08-03 R1，2026-09-17）──
+# 现场实证（2026-09-15，run-20260915-171836-78782e，DAS-TGFW-290）：策略路由配置
+# 被设备拒绝的五条用例首因**同构** —— `fw_config_policy_route` + HTTP 400 +
+# `ePolicyRouteOutIfNotExist`（「新增ipv4策略路由1失败，出接口网卡名输入错误」），
+# 设备侧语义 = **出接口对象不存在**，属用例边界外的预置条件；同环境同日对照 run
+# （run-20260915-094156-662333）同五条全 PASS → 非型号能力问题。
+#
+# 用户 2026-09-17 裁定（R1 返工）：**归因建议必须附加在原始错误之上，不得替代**。
+# 因此本通道只填 `RunnerError.suggestion`（既有第一等字段，输出层 stdout/stderr
+# 双通道渲染），**不改** details 键集与取值：原始 err_code / err_msg / status_code /
+# response_keys 与 error_code / message 逐字保留，必要时用户可直接按原始错误自行判读。
+# 语义与 interface 族既有 `_interface_error_suggestion` 同型：纯函数、无 IO、无状态；
+# 触发面收窄到**写入类 op**（config / update）∩ 唯一确证错误码 —— 该码是设备对写入
+# 请求的出接口对象校验结果；GET / delete / reset / priority 收到同码属异常形态（错因
+# 不明，无离线证据），一律返回 None（不猜测、不误报）。
+POLICY_ROUTE_WRITE_OPS = {"fw_config_policy_route", "fw_update_policy_route"}
+
+
+def _policy_route_error_suggestion(
+    op_id: str,
+    payload: dict[str, Any] | None,
+    response_payload: dict[str, Any],
+) -> str | None:
+    if op_id not in POLICY_ROUTE_WRITE_OPS:
+        return None
+    if response_payload.get("errCode") != "ePolicyRouteOutIfNotExist":
+        return None
+    outgoing_interface = _outgoing_interface_name(payload)
+    target = f"'{outgoing_interface}'" if outgoing_interface else "the referenced interface"
+    return (
+        f"The device rejected the request because the outgoing interface {target} "
+        "does not exist (errCode=ePolicyRouteOutIfNotExist). The outgoing interface "
+        "is a precondition of this case: it must be prepared outside the case scope "
+        "and be up before this operation (the framework creates no tunnel/IPSec "
+        "interfaces), then re-run the case."
+    )
+
+
+def _outgoing_interface_name(payload: dict[str, Any] | None) -> str | None:
+    """从请求 payload 提取出接口名（仅供建议文案点名对象，不参与任何判定）。"""
+    val = (payload or {}).get("val")
+    paths = val.get("forwarding_paths") if isinstance(val, dict) else None
+    if isinstance(paths, list) and paths and isinstance(paths[0], dict):
+        name = paths[0].get("outgoing_interface")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
 
 
 def _request_url(

@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from atomic_ops.runner._payload import load_json_payload
+from atomic_ops.runner.batch import build_batch_delete_payload
 from atomic_ops.runner.errors import RunnerError, credential_missing_error, raise_if_device_session_rejected
 from atomic_ops.runner.http import request_json, request_json_with_retries
 from atomic_ops.runner.ngfw_login import _encrypt_password, normalize_base_url
@@ -151,17 +152,20 @@ def build_interface_payload(
 
 
 def build_interface_batch_delete_payload(*, entry_ids: list[str]) -> dict[str, Any]:
+    # #batch-id-list（STORY-REM-02-04）：id 承载收敛到共享 helper（1 item × N id）。
+    # 本族保留 _validate_deletable_interface_id（id 透传语义）；接口不是 v4/v6 二元，
+    # 故 is_ip6_values=None（不生成该键，也不补空列表）。
     if not entry_ids:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "At least one interface id is required for batch delete.",
             {"field": "id"},
         )
-    batch: list[dict[str, Any]] = []
-    for entry_id in entry_ids:
-        _validate_deletable_interface_id(entry_id)
-        batch.append({"method": "DELETE", "resource": "/api/v1/intf", "body": {"id": [entry_id]}})
-    return {"batch": batch}
+    return build_batch_delete_payload(
+        entry_ids=entry_ids,
+        resource="/api/v1/intf",
+        validate_entry=_validate_deletable_interface_id,
+    )
 
 
 def validate_interface_payload(payload: dict[str, Any], *, op_id: str) -> dict[str, Any]:
@@ -449,7 +453,61 @@ def execute_interface(
     }
     if password_encrypted:
         result["password_encrypted"] = True
+    # ── #batch-result（区域 #batch-result；STORY-REM-02-03 R1 接线，2026-09-17）──
+    # CT-REM-ATOM-RESULT v1.0（**追加式**）：delete-batch 的输出体并入五键
+    # count / success_count / failed_count / failed[] / per_item_result；既有键
+    # （op_id / status / status_code / request / response / password_encrypted）
+    # **不改名、不移动、不删除**。五键语义与保守口径由 runner/batch.py#batch-result
+    # 承担（STORY-REM-02-03 定稿，本处只读消费，不复制、不修改）：
+    #   per_item_result=True  设备逐条结果与请求条目数一一对应且每条可判定 -> 可采信；
+    #   per_item_result=False 能力边界 -> 计数 None（**None != 0**）、failed == []，
+    #                         消费方**不得**解读为「无失败」，须触发回查（02-02）。
+    # requested_count 取请求侧事实（payload 内 body.id 总数，不由设备推断）；载荷非
+    # 批量形态时计数 < 1 -> helper 既有 fail-loud 契约（RUNNER_VALIDATION_FAILED），
+    # 不产出 count: 0 的非法契约体、也不静默省略五键。摘要入口就地导入：本 Story 不
+    # 触碰 02-04 已定稿的 import 行（区域所有权 ADR-REM-06）。
+    if op_id in BATCH_OPS:
+        from atomic_ops.runner.batch import summarize_batch_result
+
+        result.update(
+            summarize_batch_result(
+                response_payload,
+                requested_count=_batch_delete_requested_count(payload),
+            )
+        )
     return result
+
+
+# ── #batch-result（区域 #batch-result；STORY-REM-02-03 R1 接线，2026-09-17）──
+# 本区域只新增两样东西，供 execute_interface 的返回构造处接线（见上）：
+# ① 批量删除 op 集合（与 policy_route.py 既有 BATCH_OPS 同型；两族各自持有）；
+# ② `_batch_delete_requested_count()`（请求侧条目总数推导）。
+# 五键契约本体（判定 / 保守降级 / 只读语义）在 runner/batch.py#batch-result
+# （STORY-REM-02-03 定稿），本区域**只读消费、不复制、不修改**。
+BATCH_OPS = {"fw_delete_batch_interface"}
+
+
+def _batch_delete_requested_count(payload: dict[str, Any] | None) -> int:
+    """推导批量删除请求的条目总数（= batch 内各 item ``body.id`` 长度之和）。
+
+    与 ``policy_route.py`` 的同名 helper 为**同构副本**（两族模块各自持有；共享落点
+    runner/batch.py#batch-result 已定稿、按派单禁改，故不做二次编辑）。
+
+    承载形态由 ``#batch-id-list``（STORY-REM-02-04）保证：``single_item`` 为 1 item ×
+    N id、``per_id_item`` 为 N item × 1 id，两种形态 id 总数一致（= 请求条目数 N）。
+    形状不符（非批量载荷）时返回 0 —— 由 ``summarize_batch_result`` 的既有 fail-loud
+    契约显式失败（不产出非法 ``count``，也不静默省略五键）。
+    """
+    batch = payload.get("batch") if isinstance(payload, dict) else None
+    if not isinstance(batch, list):
+        return 0
+    total = 0
+    for item in batch:
+        body = item.get("body") if isinstance(item, dict) else None
+        ids = body.get("id") if isinstance(body, dict) else None
+        if isinstance(ids, list):
+            total += len(ids)
+    return total
 
 
 def _interface_error_suggestion(

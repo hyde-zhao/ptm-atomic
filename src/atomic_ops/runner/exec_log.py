@@ -73,6 +73,12 @@ def current_run() -> RunContext | None:
     return _current_run.get()
 
 
+# ── 审计错误类型（区域 #audit-error-type；CT-REM-ATOM-AUDIT，FD-REM-DIAG §3/§4）──
+# 失败审计行的字段集确定性化：字段不可得时以 AUDIT_UNAVAILABLE 占位而非省略键，
+# 使「不可得」与「键不存在 / 值为 null」可区分（FD §3「不得为空悬挂」）。
+AUDIT_UNAVAILABLE = "-"
+
+
 def write_exec_log(
     *,
     run_id: str,
@@ -83,9 +89,26 @@ def write_exec_log(
     err_code: Any = None,
     err_msg: str | None = None,
     error_type: str | None = None,
+    runner_error_code: str | None = None,
+    error_type_source: str | None = None,
     duration_ms: int | None = None,
 ) -> Path:
-    """写一条 exec-log JSONL，返回日志文件路径。"""
+    """写一条 exec-log JSONL，返回日志文件路径。
+
+    ``error_type`` / ``runner_error_code`` / ``status_code`` / ``error_type_source``
+    为 CT-REM-ATOM-AUDIT 的审计字段（FD-REM-DIAG §3/§4）：``error_type`` = **原始**
+    错误类型（调用方按「原始优先、缺失回退映射后码」的口径传入），``runner_error_code``
+    = **映射后**运行时代码，``status_code`` = HTTP 状态码，``error_type_source`` =
+    取值来源（``original`` / ``mapped``，回退时非静默）。
+
+    **命名对齐**：信封中的 ``runner_error_type`` 与本审计行的 ``runner_error_code``
+    表同一语义（映射后码），命名近似属历史遗留，不擅自改名。
+
+    **append-only**：既有键（``run_id`` / ``timestamp`` / ``op_id`` / ``mode`` /
+    ``status`` / ``http_status`` / ``err_code`` / ``err_msg`` / ``error_type`` /
+    ``duration_ms``）的相对顺序与语义不变；四个审计字段只在失败行（``status="error"``）
+    追加，成功行不写入、与改动前逐键一致。
+    """
     record: dict[str, Any] = {
         "run_id": run_id,
         "timestamp": datetime.now().isoformat(timespec="milliseconds"),
@@ -101,6 +124,19 @@ def write_exec_log(
         record["err_msg"] = err_msg
     if error_type is not None:
         record["error_type"] = error_type
+    if status == "error":
+        # 失败审计行：四个审计字段恒定出现（不可得以 "-" 占位），既有键相对顺序不变。
+        # `status_code` 与既有 `http_status` 同值并存（FD §4 规范名为 `status_code`，
+        # `http_status` 的语义与位置冻结，不删除、不改名）。
+        if error_type is None:
+            record["error_type"] = AUDIT_UNAVAILABLE
+        record["runner_error_code"] = (
+            runner_error_code if runner_error_code is not None else AUDIT_UNAVAILABLE
+        )
+        record["status_code"] = status_code if status_code is not None else AUDIT_UNAVAILABLE
+        record["error_type_source"] = (
+            error_type_source if error_type_source is not None else AUDIT_UNAVAILABLE
+        )
     if duration_ms is None:
         ctx = _current_run.get()
         if ctx is not None and ctx.run_id == run_id:

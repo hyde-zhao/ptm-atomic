@@ -11,6 +11,8 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 from atomic_ops.cli import main as cli_main
 from atomic_ops.commands.run import _read_secret_env, _to_run_envelope
 from atomic_ops.rollback import readiness_report, validate_rollback_contract
@@ -183,6 +185,183 @@ from atomic_ops.runner.geoip import (
     build_geoip_batch_delete_payload,
     validate_geoip_payload,
 )
+from atomic_ops.runner.trex import (
+    IDEMPOTENT_ERROR_TYPES,
+    execute_trex,
+    idempotent_error_details,
+    validate_idempotent_registry,
+)
+
+
+class StopStreamIdempotentContractTests(unittest.TestCase):
+    """幂等停流契约（CT-REM-ATOM-STOP v1.1）— UT-RB-08a~d + UT-RB-07（分层）。
+
+    覆盖：停流失败信封统一键（UT-RB-08a）、契约双形态矩阵（UT-RB-08b）、
+    非幂等 / 非命中路径逐键回归反例（UT-RB-08c）、登记表守卫反例（UT-RB-08d）。
+    全程离线：mock 设备响应 + 只读解析仓内 atom 源文件；不触真机、不读凭据。
+    """
+
+    STOP_OP = "tg_stop_traffic_stream"
+    NON_IDEMPOTENT_OP = "tg_start_traffic_stream"
+    NOT_FOUND = "RESOURCE_NOT_FOUND"
+    SOURCE_REF = "atoms/tg/tg_stop_traffic_stream.yaml#idempotent"
+    # 改动前的失败信封键集合（逐键回归基线；新键只允许追加）
+    BASELINE_DETAIL_KEYS = ["data", "diag_snapshot_ref", "envelope_status", "error_type", "op_id"]
+
+    @classmethod
+    def _atom_declaration(cls, op_id: str) -> dict:
+        """只读解析仓内 atom 源文件（不走 cache，保证离线可判定）。"""
+        device = op_id.split("_", 1)[0]
+        path = Path(__file__).resolve().parents[1] / "atoms" / device / f"{op_id}.yaml"
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    def _execute_failure(self, op_id: str, error_type: str) -> RunnerError:
+        """以 mock 的 trex-api 失败信封驱动 execute_trex，返回捕获到的 RunnerError。"""
+        envelope = {"status": "error", "error_type": error_type, "data": {"name": "demo"}}
+        with patch("atomic_ops.runner.trex.request_json", return_value=(200, envelope, "")):
+            with self.assertRaises(RunnerError) as ctx:
+                execute_trex(
+                    op_id=op_id,
+                    base_url="http://127.0.0.1:4500",
+                    payload={},
+                    verify_tls=False,
+                    timeout=1.0,
+                )
+        return ctx.exception
+
+    # ── UT-RB-08a：停流失败信封暴露统一键 ─────────────────────────────────
+    def test_ut_rb_08a_stop_failure_envelope_exposes_unified_key(self) -> None:
+        error = self._execute_failure(self.STOP_OP, self.NOT_FOUND)
+
+        # error_code / retryable 与改动前一致（NFR-01：不改映射、不新增退出码）
+        self.assertEqual(error.error_code, "RUNNER_VALIDATION_FAILED")
+        self.assertFalse(error.retryable)
+        # 既有键保持原样 + 新增幂等标记（追加而非替换）
+        self.assertEqual(error.details["error_type"], self.NOT_FOUND)
+        self.assertEqual(error.details["op_id"], self.STOP_OP)
+        self.assertIs(error.details["idempotent"], True)
+        self.assertEqual(error.details["idempotent_source"], self.SOURCE_REF)
+        # 消费方判定式（双条件同时成立才判「幂等成功」）
+        self.assertTrue(
+            error.details.get("error_type") == self.NOT_FOUND
+            and error.details.get("idempotent") is True
+        )
+        self.assertEqual(
+            sorted(set(error.details) - {"idempotent", "idempotent_source"}),
+            self.BASELINE_DETAIL_KEYS,
+        )
+
+    # ── UT-RB-08c：非命中路径逐键回归（反例）─────────────────────────────
+    def test_ut_rb_08c_non_idempotent_op_details_unchanged(self) -> None:
+        error = self._execute_failure(self.NON_IDEMPOTENT_OP, self.NOT_FOUND)
+
+        self.assertEqual(sorted(error.details), self.BASELINE_DETAIL_KEYS)
+        self.assertNotIn("idempotent", error.details)
+        self.assertNotIn("idempotent_source", error.details)
+
+    def test_ut_rb_08c_registered_op_with_other_error_type_is_not_marked(self) -> None:
+        """登记 op 但错误类型不属于幂等集合 → 不标记（避免把参数错判成幂等成功）。"""
+        error = self._execute_failure(self.STOP_OP, "INVALID_PARAM")
+
+        self.assertEqual(error.details["error_type"], "INVALID_PARAM")
+        self.assertNotIn("idempotent", error.details)
+        self.assertNotIn("idempotent_source", error.details)
+
+    def test_detail_helper_hit_and_miss(self) -> None:
+        self.assertEqual(
+            idempotent_error_details(self.STOP_OP, self.NOT_FOUND),
+            {"idempotent": True, "idempotent_source": self.SOURCE_REF},
+        )
+        self.assertEqual(idempotent_error_details(self.STOP_OP, "TIMEOUT"), {})
+        self.assertEqual(idempotent_error_details(self.NON_IDEMPOTENT_OP, self.NOT_FOUND), {})
+
+    # ── UT-RB-08b：契约双形态矩阵 ────────────────────────────────────────
+    def test_ut_rb_08b_contract_declares_both_forms(self) -> None:
+        """① 语义键 `idempotent` 与错误枚举 `error_types` 同时成立（二选一自洽判据）。"""
+        declaration = self._atom_declaration(self.STOP_OP)
+
+        self.assertIs(declaration.get("idempotent"), True)
+        self.assertIn(self.NOT_FOUND, declaration.get("error_types") or [])
+        # 收敛不新增顶层字段（schema `additionalProperties: false`）
+        self.assertEqual(declaration.get("schema_version"), "1.1")
+
+    def test_ut_rb_08b_registry_guard_reports_no_inconsistency(self) -> None:
+        """② 登记表 ↔ 声明面一致（返回空列表）。"""
+        surface = {self.STOP_OP: self._atom_declaration(self.STOP_OP)}
+
+        self.assertEqual(validate_idempotent_registry(surface), [])
+
+    def test_ut_rb_08b_registry_guard_reads_declaration_via_repository(self) -> None:
+        """无注入时的生产路径：经 Repository 只读读取声明并判定一致。"""
+        surface = {self.STOP_OP: self._atom_declaration(self.STOP_OP)}
+
+        with patch(
+            "atomic_ops.runner.trex.Repository.from_default_cache",
+            return_value=_FakeRepo(surface),
+        ):
+            self.assertEqual(validate_idempotent_registry(), [])
+
+    # ── UT-RB-08d：登记守卫反例（不静默通过）─────────────────────────────
+    def test_ut_rb_08d_unreadable_declaration_is_explicit(self) -> None:
+        with patch(
+            "atomic_ops.runner.trex.Repository.from_default_cache",
+            side_effect=RuntimeError("cache unavailable"),
+        ):
+            self.assertEqual(
+                validate_idempotent_registry(),
+                [f"decl-unavailable:{self.STOP_OP}"],
+            )
+
+    def test_ut_rb_08d_injected_undeclared_op_is_reported(self) -> None:
+        surface = {
+            self.STOP_OP: self._atom_declaration(self.STOP_OP),
+            "tg_no_such_op": {"idempotent": False, "error_types": ["INVALID_PARAM"]},
+        }
+
+        with patch.dict(
+            IDEMPOTENT_ERROR_TYPES, {"tg_no_such_op": frozenset({self.NOT_FOUND})}
+        ):
+            findings = validate_idempotent_registry(surface)
+
+        self.assertEqual(
+            sorted(findings),
+            [
+                "idempotent-not-declared:tg_no_such_op",
+                "undeclared-error-type:tg_no_such_op:RESOURCE_NOT_FOUND",
+            ],
+        )
+
+    def test_ut_rb_08d_missing_registration_is_reported(self) -> None:
+        """声明面内具幂等停流语义却未登记 → 漏登记（不静默通过）。"""
+        surface = {
+            self.STOP_OP: self._atom_declaration(self.STOP_OP),
+            "tg_delete_traffic_template": {
+                "idempotent": True,
+                "error_types": ["INVALID_PARAM", self.NOT_FOUND],
+            },
+        }
+
+        self.assertEqual(
+            validate_idempotent_registry(surface),
+            ["missing-registration:tg_delete_traffic_template"],
+        )
+
+    # ── UT-RB-07（分层）：契约侧可证 / 框架侧 deferred ───────────────────
+    def test_ut_rb_07_contract_side_decision_rule(self) -> None:
+        """契约侧可证：命中统一键 → 判「幂等成功」；未命中 → 维持真残留信号。
+
+        框架侧断言（`case_runner._normalize_rollback_envelope` 逆序回滚不判
+        `cleanup_failed`）**不在本 Story 所有权内**，按设计分层 deferred 至
+        `STORY-REM-03-01`（消费方采纳）—— 本用例不冒充该最终结论。
+        """
+        hit = self._execute_failure(self.STOP_OP, self.NOT_FOUND)
+        self.assertTrue(
+            hit.details.get("error_type") == self.NOT_FOUND
+            and hit.details.get("idempotent") is True
+        )
+
+        miss = self._execute_failure(self.STOP_OP, "TIMEOUT")
+        self.assertFalse(bool(miss.details.get("idempotent")))
 
 
 class InterfacePayloadTests(unittest.TestCase):
@@ -340,12 +519,14 @@ class InterfacePayloadTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
 
     def test_build_batch_delete_payload(self) -> None:
+        # STORY-REM-02-04（#batch-id-list）：主形态 = 单 item 承载 N 个 id。
+        # 旧「N item × 每 item 1 个 id」形态见 tests/test_batch.py 的 per_id_item 回归。
         payload = build_interface_batch_delete_payload(entry_ids=["bvi109", "GE0_2.106"])
 
+        self.assertEqual(len(payload["batch"]), 1)
         self.assertEqual(payload["batch"][0]["method"], "DELETE")
         self.assertEqual(payload["batch"][0]["resource"], "/api/v1/intf")
-        self.assertEqual(payload["batch"][0]["body"], {"id": ["bvi109"]})
-        self.assertEqual(payload["batch"][1]["body"], {"id": ["GE0_2.106"]})
+        self.assertEqual(payload["batch"][0]["body"], {"id": ["bvi109", "GE0_2.106"]})
 
 
 class PolicyRoutePayloadTests(unittest.TestCase):
@@ -665,21 +846,22 @@ class PolicyRoutePayloadTests(unittest.TestCase):
         )
 
     def test_build_policy_route_batch_delete_payload_ipv4(self) -> None:
+        # STORY-REM-02-04（#batch-id-list）：主形态 = 单 item 承载 N 个 id。
+        # 旧「N item × 每 item 1 个 id」形态见 tests/test_batch.py 的 per_id_item 回归。
         payload = build_policy_route_batch_delete_payload(
             entry_ids=["1", "2"],
             route_type="ipv4",
         )
 
-        self.assertEqual(len(payload["batch"]), 2)
+        self.assertEqual(len(payload["batch"]), 1)
         self.assertEqual(
             payload["batch"][0],
             {
                 "method": "DELETE",
                 "resource": "/api/v1/policyroute",
-                "body": {"id": ["1"], "is_ip6": ["false"]},
+                "body": {"id": ["1", "2"], "is_ip6": ["false", "false"]},
             },
         )
-        self.assertEqual(payload["batch"][1]["body"], {"id": ["2"], "is_ip6": ["false"]})
 
     def test_build_policy_route_batch_delete_payload_ipv6(self) -> None:
         payload = build_policy_route_batch_delete_payload(

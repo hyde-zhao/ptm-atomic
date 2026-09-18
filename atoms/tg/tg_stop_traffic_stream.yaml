@@ -35,6 +35,16 @@ returns:
     cleaned: true
   error_type: RESOURCE_NOT_FOUND
   diag_snapshot_ref: ""
+# ── 幂等停流契约口径（CT-REM-ATOM-STOP v1.1；只收敛口径，不新增字段）──────────
+# `idempotent`（语义键）：true = 重复执行收敛到同一目标状态；对停流 op 特指
+#   「目标流不存在 = 目标状态已达成」。
+# `error_types`（错误枚举）：声明本 op 可能发出的错误类型面；其中 RESOURCE_NOT_FOUND
+#   在 `idempotent: true` 前提下表达「目标已不存在」，**不构成残留**。
+# 二者必须**同时成立**；只具其一的声明视为口径不一致 —— 由 runner 侧
+#   `validate_idempotent_registry()` 显式报错，不得静默按「非幂等」处理。
+# 消费方判定式（exit 9 判定读统一键）：停流失败信封 `details.error_type ==
+#   "RESOURCE_NOT_FOUND"` 且 `details.idempotent == true` 同时成立 → 判「幂等成功」，
+#   不计入 cleanup_failed / exit 9；未命中则维持既有 CLEANUP_FAILED 归一（真残留保真）。
 idempotent: true
 side_effect: traffic_runtime
 rollback_strategy:
@@ -45,6 +55,7 @@ rollback_strategy:
 dry_run_supported: true
 risk_level: medium
 timeout_ms: 30000
+# 错误枚举面：与上方 `idempotent: true` 共同构成幂等停流契约（RESOURCE_NOT_FOUND = 目标已达成）
 error_types:
   - INVALID_PARAM
   - RESOURCE_NOT_FOUND

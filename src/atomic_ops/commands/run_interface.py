@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Any
 
 from atomic_ops.commands import CommandSpec
@@ -104,13 +105,79 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_delete_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", action="append", help="Entry id. May be repeated for fw_delete_batch_interface.")
+    # #batch-id-list（STORY-REM-02-04）：--id 支持三形态（重复传参 / 逗号分隔 /
+    # --id-file 读文件），归并在 handler 内完成；单值形态解析结果与改动前一致。
+    parser.add_argument("--id", action="append", help="Entry id. May be repeated, comma-separated (a,b,c), or supplied through --id-file (delete-batch only).")
+    parser.add_argument("--id-file", help="Path to a file with one entry id per line ('#' starts a comment; blank lines are ignored). delete-batch only.")
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
     # P2 delete 未就绪缺口：DUT 未就绪时 delete 直达 exit 46。--retry 提供可选内部
     # 重试（默认 0 关闭，向后兼容）；仅单条 delete 生效，delete-batch 不自动重试。
     parser.add_argument("--retry", type=int, default=0, help="Optional internal retries when the device is unreachable (exit 46: no response at all). Default 0 (no retry). Applies to single delete only.")
     parser.add_argument("--retry-backoff", type=float, default=1.0, help="Seconds to wait between delete retries. Default 1.0.")
+
+
+def _read_id_file(path: str) -> list[str]:
+    """按行读取 --id-file（忽略空行与 '#' 注释行；兼容 \\r\\n 与 \\n 行尾）。
+
+    文件不可读（OSError）→ RUNNER_VALIDATION_FAILED（含路径），不静默跳过。
+    """
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "--id-file is not readable.",
+            {"argument": "--id-file", "path": path, "reason": exc.strerror or str(exc)},
+        ) from exc
+    entry_ids: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        entry_ids.append(stripped)
+    return entry_ids
+
+
+def _batch_delete_entry_ids(args: argparse.Namespace) -> list[str]:
+    """归并 --id 三形态为 id 列表（确定性顺序：文件行序 → 传参顺序 → 逗号拆分）。
+
+    单值形态（无逗号、无文件）的解析结果与改动前逐元素一致（兼容承诺）；
+    空元素与全空输入显式报错（不静默丢弃、不静默跳过）。
+    """
+    merged: list[str] = []
+    id_file = getattr(args, "id_file", None)
+    if id_file:
+        merged.extend(_read_id_file(id_file))
+    for raw in _arg_list(args, "id"):
+        text = str(raw)
+        if "," in text:
+            merged.extend(part.strip() for part in text.split(","))
+        else:
+            merged.append(text)
+    if not merged:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Missing required runner argument.",
+            {"argument": "--id"},
+        )
+    if any(not item.strip() for item in merged):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Entry id must be a non-empty value (blank elements are rejected, not skipped).",
+            {"argument": "--id"},
+        )
+    return merged
+
+
+def _reject_id_file(args: argparse.Namespace) -> None:
+    """单条 op 不支持 --id-file：显式拒绝而非静默忽略。"""
+    if getattr(args, "id_file", None):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "--id-file is only supported by delete-batch.",
+            {"argument": "--id-file"},
+        )
 
 
 def _add_verify_args(parser: argparse.ArgumentParser) -> None:
@@ -241,10 +308,15 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
         if op_id == "fw_verify_interface":
             payload = None
         elif op_id == "fw_delete_interface":
+            _reject_id_file(args)
             payload = raw_payload or {"id": _single_arg(args, "id")}
             payload = validate_delete_payload(payload)
         elif op_id == "fw_delete_batch_interface":
-            payload = raw_payload or build_interface_batch_delete_payload(entry_ids=_arg_list(args, "id"))
+            # #batch-id-list（STORY-REM-02-04）：--id 三形态归并；payload 直传优先
+            # 的既有语义不变（给了 --payload-* 时不读 --id / --id-file）。
+            payload = raw_payload or build_interface_batch_delete_payload(
+                entry_ids=_batch_delete_entry_ids(args)
+            )
             payload = validate_interface_payload(payload, op_id=op_id)
         else:
             if raw_payload is not None:

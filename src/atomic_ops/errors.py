@@ -90,6 +90,19 @@ def write_error(error: CliError, output_format: str) -> int:
     ctx = current_run()
     if ctx is not None and ctx.mode == "execute":
         details = error.details if isinstance(error.details, dict) else {}
+        # CT-REM-ATOM-AUDIT（FD-REM-DIAG §3/§4）：审计行 error_type = **原始**错误类型
+        # （优先 runner 透传的 details["error_type"]，如 trex 的设备原始码 STATE_MISMATCH），
+        # runner_error_code = **映射后**运行时代码（error.error_code，如
+        # RUNNER_VALIDATION_FAILED —— 与信封 runner_error_type 同语义），
+        # status_code = HTTP 状态码。原始码不可得时回退映射后码并以
+        # error_type_source="mapped" 显式标注（不静默）。
+        original_error_type = details.get("error_type")
+        if isinstance(original_error_type, str) and original_error_type.strip():
+            audit_error_type = original_error_type
+            error_type_source = "original"
+        else:
+            audit_error_type = error.error_code
+            error_type_source = "mapped"
         write_exec_log(
             run_id=ctx.run_id,
             op_id=details.get("op_id"),
@@ -98,7 +111,9 @@ def write_error(error: CliError, output_format: str) -> int:
             status_code=details.get("status_code"),
             err_code=details.get("err_code"),
             err_msg=details.get("err_msg"),
-            error_type=error.error_code,
+            error_type=audit_error_type,
+            runner_error_code=error.error_code,
+            error_type_source=error_type_source,
         )
         payload["run_id"] = ctx.run_id
         payload["exec_log_path"] = str(run_log_path(ctx.run_id))
