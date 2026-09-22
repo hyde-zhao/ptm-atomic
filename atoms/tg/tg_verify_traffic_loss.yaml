@@ -22,7 +22,10 @@ parameters:
   rxport:
     type: string
     required: true
-    description: TRex port ID that receives traffic.
+    description: >-
+      TRex port ID that receives traffic. Also accepts a list of port IDs to
+      verify received packets per port (multi-port observation); must match the
+      rxport used by the corresponding tg_start_traffic_stream.
   name:
     type: string
     required: true
@@ -31,6 +34,24 @@ parameters:
     type: float
     required: true
     description: Maximum allowed loss ratio.
+  expect_ports:
+    type: list
+    required: false
+    description: >-
+      Per-port received distribution expectation, a list of {port, ratio}
+      objects (a JSON list when passed on the command line). Only meaningful
+      with a multi-port rxport. The ratios must sum to either 100 or 0:
+      summing to 100 means each port's share of the total received packets is
+      compared against ratio (0 and 100 are enforced exactly, intermediate
+      ratios allow tolerance); summing to 0 means no packet may be received at
+      all (rx_total == 0). Any other sum is rejected as INVALID_PARAM.
+      Omitting expect_ports keeps the result driven by loss alone.
+  tolerance:
+    type: float
+    required: false
+    description: >-
+      Allowed deviation in percentage points for intermediate (non 0/100)
+      per-port ratios; omitted means 0 (exact). Range 0-100.
 returns:
   status: success
   data:
@@ -40,6 +61,20 @@ returns:
     loss: 0
     loss_ratio: 0
     max_loss: 0
+    rx_by_port:
+      "1": 500
+    distribution:
+      checked: true
+      passed: true
+      mode: ratio
+      rx_total: 500
+      tolerance: 0
+      per_port:
+        - port: "1"
+          ratio: 100
+          rx_packets: 500
+          actual_ratio: 100
+          passed: true
   error_type: STATE_MISMATCH
   diag_snapshot_ref: ""
 idempotent: true

@@ -49,6 +49,7 @@ operations:
         l4_protocol: "{{ params.l4_protocol }}"
         l4_sport: "{{ params.l4_sport }}"
         l4_dport: "{{ params.l4_dport }}"
+        stream_count: "{{ params.stream_count }}"
         traffic_mode: "{{ params.traffic_mode }}"
         rate: "{{ params.rate }}"
         count: "{{ params.count }}"
@@ -116,6 +117,8 @@ operations:
         rxport: "{{ params.rxport }}"
         name: "{{ params.name }}"
         max_loss: "{{ params.max_loss }}"
+        expect_ports: "{{ params.expect_ports }}"
+        tolerance: "{{ params.tolerance }}"
     response:
       success_status:
         - 200

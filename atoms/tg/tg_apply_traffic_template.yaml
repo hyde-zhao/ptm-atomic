@@ -39,6 +39,15 @@ parameters:
     type: int
     required: false
     description: Layer 4 destination port (tcp/udp only).
+  stream_count:
+    type: int
+    required: false
+    description: >-
+      Expand the flow into N flows whose L4 source ports are consecutive,
+      starting at l4_sport (tcp/udp only; omitted or 1 = a single flow).
+      Enables multi-flow observation: distinct five-tuples hash to different
+      next hops, so per-port received counts reveal the load sharing.
+      count remains the TOTAL packet count, not the per-flow count.
   traffic_mode:
     type: string
     required: true

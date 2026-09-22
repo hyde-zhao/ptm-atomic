@@ -22,7 +22,9 @@ parameters:
   rxport:
     type: string
     required: true
-    description: TRex port ID that receives traffic.
+    description: >-
+      TRex port ID that receives traffic. Also accepts a list of port IDs to
+      capture and count received packets per port (multi-port observation).
   template:
     type: string
     required: true
@@ -39,6 +41,8 @@ returns:
     txport: "0"
     rxport: "1"
     state: running
+    rx_by_port:
+      "1": 500
   error_type: INVALID_PARAM
   diag_snapshot_ref: ""
 idempotent: false

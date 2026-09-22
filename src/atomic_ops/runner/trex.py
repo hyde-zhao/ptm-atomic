@@ -170,7 +170,7 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
             "traffic_mode": params.get("traffic_mode"),
             "rate": params.get("rate"),
         }
-        for optional in ("count", "frame_size", "vlan", "src_ip", "dst_ip", "src_mac", "dst_mac"):
+        for optional in ("count", "stream_count", "frame_size", "vlan", "src_ip", "dst_ip", "src_mac", "dst_mac"):
             value = params.get(optional)
             if value is not None:
                 payload[optional] = value
@@ -185,6 +185,10 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
             payload["template"] = params.get("template")
         if op_id == "tg_verify_traffic_loss":
             payload["max_loss"] = params.get("max_loss")
+            for optional in ("expect_ports", "tolerance"):
+                value = params.get(optional)
+                if value is not None:
+                    payload[optional] = value
     elif op_id == "tg_delete_traffic_template":
         payload = {"template": params.get("template")}
     elif op_id == "tg_apply_stateful_template":
@@ -319,17 +323,49 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
         if payload.get("frame_size") is not None:
             payload["frame_size"] = _validate_min_int("frame_size", payload["frame_size"], minimum=64)
         _validate_ip_pair(ip_version, payload.get("src_ip"), payload.get("dst_ip"))
+        # 多流（stream_count，2026-09-22 分口观测）：l4_sport 是**起始**端口，
+        # 展开成 N 条源端口连续的五元组；count 仍是**总包数**。
+        # 口径与 trex-api schema 一致：ICMP 无 L4 端口可变化 -> 任何非空
+        # stream_count 都拒绝（服务端同口径）；tcp/udp 的起始端口已由上方分支
+        # 强制必填（l4_sport 缺失在本地即被拒），故服务端那条「stream_count 有值
+        # 而 l4_sport 为 None -> 多流静默退化为单流」的形态在本地不可达。
+        stream_count = payload.get("stream_count")
+        if stream_count is not None:
+            if l4_proto == "icmp":
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "stream_count is not valid for icmp (no L4 ports to vary).",
+                    {"field": "stream_count", "l4_protocol": l4_proto},
+                )
+            stream_count = _validate_positive_int("stream_count", stream_count)
+            if stream_count > 1000:
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "stream_count must not exceed 1000.",
+                    {"field": "stream_count", "actual": stream_count},
+                )
+            if payload["l4_sport"] + stream_count - 1 > 65535:
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "l4_sport + stream_count - 1 must not exceed 65535.",
+                    {
+                        "field": "stream_count",
+                        "l4_sport": payload["l4_sport"],
+                        "stream_count": stream_count,
+                    },
+                )
+            payload["stream_count"] = stream_count
     elif op_id in {"tg_start_traffic_stream", "tg_stop_traffic_stream", "tg_verify_traffic_loss"}:
         ports = _validate_ports_list(payload.get("ports"))
         payload["ports"] = ports
         _require_payload_str(payload, "txport")
-        _require_payload_str(payload, "rxport")
+        rxports = _validate_rxport(payload.get("rxport"), ports)
         # 允许 txport==rxport（ICMP 应答回同一口；非 ICMP 由 trex-api 按模板协议拒绝）
-        if payload["txport"] not in ports or payload["rxport"] not in ports:
+        if payload["txport"] not in ports:
             raise RunnerError(
                 "RUNNER_VALIDATION_FAILED",
-                "txport and rxport must both be included in ports.",
-                {"ports": ports, "txport": payload["txport"], "rxport": payload["rxport"]},
+                "txport must be included in ports.",
+                {"ports": ports, "txport": payload["txport"]},
             )
         _require_payload_str(payload, "name")
         if op_id == "tg_start_traffic_stream":
@@ -343,6 +379,21 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
                     {"field": "max_loss", "actual": max_loss},
                 )
             payload["max_loss"] = float(max_loss)
+            if payload.get("expect_ports") is not None:
+                _validate_expect_ports(payload["expect_ports"], rxports)
+            tolerance = payload.get("tolerance")
+            if tolerance is not None:
+                if (
+                    not isinstance(tolerance, (int, float))
+                    or isinstance(tolerance, bool)
+                    or not 0 <= tolerance <= 100
+                ):
+                    raise RunnerError(
+                        "RUNNER_VALIDATION_FAILED",
+                        "tolerance must be a number between 0 and 100.",
+                        {"field": "tolerance", "actual": tolerance},
+                    )
+                payload["tolerance"] = float(tolerance)
     elif op_id == "tg_delete_traffic_template":
         _validate_template_name(payload.get("template"), field="template")
     elif op_id == "tg_apply_stateful_template":
@@ -613,6 +664,101 @@ def _validate_ports_list(value: Any) -> list[str]:
             )
         ports.append(item)
     return ports
+
+
+def _validate_rxport(value: Any, ports: list[str]) -> list[str]:
+    """归一并校验 rxport：单值字符串或字符串列表，每一项都须在 ports 内。
+
+    多口 = 分口观测（一次抓包覆盖全部 rx 口，回包按 port_id 分口计数）。
+    单值是原形态，请求体形状不变；返回**归一的列表**仅供本地成员检查使用，
+    payload 里的原形态不动（由 trex-api schema 归一）。
+    """
+    if isinstance(value, str):
+        rxports = [value] if value.strip() else []
+    elif isinstance(value, list) and all(isinstance(item, str) and item.strip() for item in value):
+        rxports = list(value)
+    else:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "rxport must be a port id or a non-empty list of port ids.",
+            {"field": "rxport", "actual": value},
+        )
+    if not rxports:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "rxport must contain at least one port id.",
+            {"field": "rxport", "actual": value},
+        )
+    missing = [port for port in rxports if port not in ports]
+    if missing:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "rxport must be included in ports.",
+            {"field": "rxport", "ports": ports, "rxport": value, "missing": missing},
+        )
+    return rxports
+
+
+def _validate_expect_ports(value: Any, rxports: list[str]) -> None:
+    """本地预校验分口期望分布：形状、端口归属、占比之和。
+
+    与 trex-api schema 同口径 —— 这里先拦是为了让用法错误在 dry-run 静态门
+    就暴露（错误信息落在用例侧，而不是等 TG 回一个 INVALID_PARAM）。
+    占比之和只允许 100（按比例分布）或 0（要求各口都收不到包）。
+    """
+    if not isinstance(value, list) or not value:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "expect_ports must be a non-empty list of {port, ratio} objects.",
+            {"field": "expect_ports", "actual": value},
+        )
+    seen: set[str] = set()
+    total = 0.0
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "expect_ports entries must be objects with port and ratio.",
+                {"field": "expect_ports", "index": index, "actual": item},
+            )
+        port = item.get("port")
+        if not isinstance(port, str) or not port.strip():
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "expect_ports entry requires a port id.",
+                {"field": "expect_ports", "index": index, "actual": item},
+            )
+        if port not in rxports:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "expect_ports port must be one of rxport.",
+                {"field": "expect_ports", "index": index, "port": port, "rxport": rxports},
+            )
+        if port in seen:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "expect_ports must not repeat a port.",
+                {"field": "expect_ports", "index": index, "port": port},
+            )
+        seen.add(port)
+        ratio = item.get("ratio")
+        if (
+            not isinstance(ratio, (int, float))
+            or isinstance(ratio, bool)
+            or not 0 <= ratio <= 100
+        ):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "expect_ports ratio must be a number between 0 and 100.",
+                {"field": "expect_ports", "index": index, "ratio": ratio},
+            )
+        total += float(ratio)
+    if abs(total - 100.0) > 1e-6 and abs(total) > 1e-6:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "expect_ports ratio sum must be 100 (ratio split) or 0 (no traffic).",
+            {"field": "expect_ports", "total_ratio": total},
+        )
 
 
 def _validate_port_int(field: str, value: Any) -> int:

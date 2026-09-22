@@ -215,6 +215,15 @@ def _add_apply_template_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--l4-protocol", choices=("tcp", "udp", "icmp"), required=True, help="Layer 4 protocol (icmp = echo request, no ports).")
     parser.add_argument("--l4-sport", type=int, required=False, default=None, help="Layer 4 source port (tcp/udp only).")
     parser.add_argument("--l4-dport", type=int, required=False, default=None, help="Layer 4 destination port (tcp/udp only).")
+    parser.add_argument(
+        "--stream-count",
+        type=int,
+        default=None,
+        help=(
+            "Expand into N flows with consecutive L4 source ports starting at --l4-sport "
+            "(tcp/udp only; default 1 = single flow). --count stays the TOTAL packet count."
+        ),
+    )
     parser.add_argument("--traffic-mode", choices=("count", "continuous"), required=True, help="Traffic mode.")
     parser.add_argument("--rate", required=True, help="TRex-style rate string such as 100pps or 10mbps.")
     parser.add_argument("--count", type=int, default=None, help="Packet count (required when traffic-mode=count except ICMP defaults to 5).")
@@ -246,7 +255,15 @@ def _add_stream_args(parser: argparse.ArgumentParser, *, include_template: bool)
     _add_user_id_arg(parser)
     parser.add_argument("--ports", required=True, help="Comma-separated TRex port IDs occupied by this operation.")
     parser.add_argument("--txport", required=True, help="TRex port ID that transmits traffic.")
-    parser.add_argument("--rxport", required=True, help="TRex port ID that receives traffic.")
+    parser.add_argument(
+        "--rxport",
+        required=True,
+        help=(
+            "TRex port ID that receives traffic, or comma-separated IDs for multi-port "
+            "observation (e.g. 2_4,2_5): one capture spans all listed ports and received "
+            "packets are counted per port."
+        ),
+    )
     parser.add_argument("--name", required=True, help="Runtime stream instance name.")
     if include_template:
         parser.add_argument("--template", required=True, help="Traffic template name created by apply-template.")
@@ -256,6 +273,24 @@ def _add_stream_args(parser: argparse.ArgumentParser, *, include_template: bool)
 def _add_verify_loss_args(parser: argparse.ArgumentParser) -> None:
     _add_stream_args(parser, include_template=False)
     parser.add_argument("--max-loss", type=float, required=True, help="Maximum allowed loss ratio (>= 0).")
+    parser.add_argument(
+        "--expect-ports",
+        default=None,
+        help=(
+            "JSON array of per-port expected ratios for multi-port observation, e.g. "
+            "'[{\"port\":\"2_4\",\"ratio\":100},{\"port\":\"2_5\",\"ratio\":0}]'. "
+            "Ratios must sum to 100 (ratio split) or 0 (no packet at all)."
+        ),
+    )
+    parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=None,
+        help=(
+            "Allowed deviation in percentage points for intermediate ratios "
+            "(0 and 100 stay strict; omitted = 0)."
+        ),
+    )
 
 
 def _add_verify_ownership_args(parser: argparse.ArgumentParser) -> None:
@@ -470,6 +505,7 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
             "l4_protocol": getattr(args, "l4_protocol", None),
             "l4_sport": getattr(args, "l4_sport", None),
             "l4_dport": getattr(args, "l4_dport", None),
+            "stream_count": getattr(args, "stream_count", None),
             "traffic_mode": getattr(args, "traffic_mode", None),
             "rate": getattr(args, "rate", None),
             "count": getattr(args, "count", None),
@@ -485,13 +521,19 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
             "user_id": getattr(args, "user_id", "default"),
             "ports": _parse_ports(getattr(args, "ports", "")),
             "txport": getattr(args, "txport", None),
-            "rxport": getattr(args, "rxport", None),
+            "rxport": _parse_rxport(getattr(args, "rxport", None)),
             "name": getattr(args, "name", None),
         }
         if op_id == "tg_start_traffic_stream":
             params["template"] = getattr(args, "template", None)
         if op_id == "tg_verify_traffic_loss":
             params["max_loss"] = getattr(args, "max_loss", None)
+            expect_ports = getattr(args, "expect_ports", None)
+            if expect_ports:
+                params["expect_ports"] = _parse_expect_ports(expect_ports)
+            tolerance = getattr(args, "tolerance", None)
+            if tolerance is not None:
+                params["tolerance"] = tolerance
         return params
     if op_id == "tg_delete_traffic_template":
         return {"user_id": getattr(args, "user_id", "default"), "template": getattr(args, "template", None)}
@@ -535,6 +577,40 @@ def _parse_ports(value: str) -> list[str]:
             {"field": "ports"},
         )
     return ports
+
+
+def _parse_rxport(value: str | None) -> str | list[str]:
+    """接收口：单值保持字符串（请求体形状不变），逗号分隔多值转列表。
+
+    多口 = 分口观测：一次抓包覆盖全部 rx 口，回包按 port_id 分口计数。
+    单值仍回字符串，既有单口请求逐字不变。
+    """
+    ports = [item.strip() for item in (value or "").split(",") if item.strip()]
+    if not ports:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "rxport must contain at least one port id.",
+            {"field": "rxport"},
+        )
+    return ports[0] if len(ports) == 1 else ports
+
+
+def _parse_expect_ports(value: str) -> list[dict[str, Any]]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "expect-ports must be a JSON array.",
+            {"field": "expect_ports", "reason": exc.msg},
+        ) from exc
+    if not isinstance(parsed, list):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "expect-ports must be a JSON array of {port, ratio} objects.",
+            {"field": "expect_ports"},
+        )
+    return parsed
 
 
 def _parse_interfaces(value: str) -> list[dict[str, Any]]:

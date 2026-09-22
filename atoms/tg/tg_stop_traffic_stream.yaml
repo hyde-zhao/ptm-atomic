@@ -22,7 +22,9 @@ parameters:
   rxport:
     type: string
     required: true
-    description: TRex port ID that receives traffic.
+    description: >-
+      TRex port ID that receives traffic. Also accepts a list of port IDs, so
+      a stop matches a stream started with a multi-port rxport.
   name:
     type: string
     required: true
