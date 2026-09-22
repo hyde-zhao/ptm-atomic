@@ -3088,6 +3088,27 @@ operations:
         - Connection inputs come from runner input and the session file; the profile carries no runtime values.
         - Session output is captured into diag_snapshot_ref and never written to the repo.
         - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_verify_abf_policy:
+    atom_ref: atoms/fw/fw_verify_abf_policy.yaml
+    intent: Verify a policy route is in effect by querying the VPP ABF policy table over SSH or Telnet (vppctl show abf policy).
+    transport: ssh
+    shell:
+      command_template: "/opt/dbappsecurity/bin/vppctl show abf policy"
+      success_pattern: "add_counts"
+      prompt_timeout_ms: 30000
+      privilege_level: privileged
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Read-only observation; the command writes nothing to the device.
+        - Requires root privileges; the runner resolves the credential from the FW_SSH_* environment variable by default.
+        - The table carries no {{param}} placeholder; the runner matches the policy-id in the parsed output instead of templating the command.
+        - "The lookup id is the policy route id for ipv4 and 10000 + the route id for ipv6 (measured 2026-09-21: policy-id 10001 belongs to route id 1 of the ipv6 family)."
+        - "An absent policy-id raises STATE_MISMATCH: the device omits the policy from the ABF table while the time object is outside its effective window."
+        - Connection inputs come from runner input and the session file; the profile carries no runtime values.
+        - Session output is captured into diag_snapshot_ref and never written to the repo.
+        - ptm-atomic run can execute this command only when --execute is explicit.
   fw_verify_l2fib:
     atom_ref: atoms/fw/fw_verify_l2fib.yaml
     intent: Query the L2FIB table via the tgfw-cli interactive shell over SSH or Telnet.
@@ -6180,8 +6201,9 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      payload_template:
+      query_params:
         id: "{{ params.id }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -6192,7 +6214,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - DELETE /api/v1/natsnat carries the rule id in a JSON body as a string and sends no query parameter.
+        - DELETE /api/v1/natsnat carries the rule id as ?id=<id> and sends no JSON body (2026-09-21 真机实测订正).
         - This differs from fw_delete_iptun and fw_delete_interface, which pass id as a query value; do not mirror their transport here.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_nat_snat:
@@ -6288,8 +6310,9 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      payload_template:
+      query_params:
         id: "{{ params.id }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -6300,7 +6323,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - DELETE /api/v1/iterate/natdnat carries the rule id in a JSON body as a string and sends no query parameter.
+        - DELETE /api/v1/iterate/natdnat carries the rule id as ?id=<id> and sends no JSON body (2026-09-21 真机实测订正).
         - This differs from fw_delete_ipsec_policy, which passes id as a query value; do not mirror that transport here.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_nat_dnat:
@@ -6396,8 +6419,9 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      payload_template:
+      query_params:
         id: "{{ params.id }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -6408,7 +6432,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - DELETE /api/v1/natstatic carries the rule id in a JSON body as a string and sends no query parameter.
+        - DELETE /api/v1/natstatic carries the rule id as ?id=<id> and sends no JSON body (2026-09-21 真机实测订正).
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_nat_static:
     atom_ref: atoms/fw/fw_verify_nat_static.yaml
@@ -6549,7 +6573,7 @@ operations:
       runner_required: true
       notes:
         - "DELETE sends the policy name as ?id=<policy-name> and sends no JSON body."
-        - "This differs from fw_delete_nat_snat, fw_delete_nat_dnat, and fw_delete_nat_static, which carry the id in a JSON body; do not mirror their transport here."
+        - "Same transport as fw_delete_nat_snat, fw_delete_nat_dnat, and fw_delete_nat_static, which also carry the id as ?id=<id>."
         - "id is the IPsec policy val.name. GET /api/v1/ipsec echoes no id field per policy, so the policy name is the only stable identity."
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_ipsec_policy:

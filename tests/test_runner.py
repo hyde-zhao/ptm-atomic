@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
+import inspect
 import io
 import json
 import os
@@ -17,7 +19,7 @@ from atomic_ops.cli import main as cli_main
 from atomic_ops.commands.run import _read_secret_env, _to_run_envelope
 from atomic_ops.rollback import readiness_report, validate_rollback_contract
 from atomic_ops.aliases_lookup import extract_alias_keywords, find_ops_by_alias
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import RunnerError, raise_if_resource_not_found
 from atomic_ops.runner.interface import (
     build_interface_batch_delete_payload,
     build_interface_payload,
@@ -215,6 +217,26 @@ class StopStreamIdempotentContractTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[1] / "atoms" / device / f"{op_id}.yaml"
         return yaml.safe_load(path.read_text(encoding="utf-8"))
 
+    @classmethod
+    def _registered_surface(cls, **extra: dict) -> dict:
+        """登记表内每个 op 的仓内声明 + 额外注入项。
+
+        登记表扩容后（2026-09-20 增 FW 删除族 3 个 op），守卫会遍历**全部**登记项，
+        故各矩阵用例也须给出完整声明面 —— 否则缺失项会以 ``decl-unavailable`` 混入
+        断言（那是另一条正交检查，已由 ``test_ut_rb_08d_unreadable_declaration_is_explicit``
+        专测）。
+
+        ``extra`` 中的 op（通常是反例注入的假 op，仓内无 atom 文件）直接采用注入值，
+        不尝试读取仓内文件。
+        """
+        surface: dict = {
+            op_id: cls._atom_declaration(op_id)
+            for op_id in IDEMPOTENT_ERROR_TYPES
+            if op_id not in extra
+        }
+        surface.update(extra)
+        return surface
+
     def _execute_failure(self, op_id: str, error_type: str) -> RunnerError:
         """以 mock 的 trex-api 失败信封驱动 execute_trex，返回捕获到的 RunnerError。"""
         envelope = {"status": "error", "error_type": error_type, "data": {"name": "demo"}}
@@ -287,16 +309,17 @@ class StopStreamIdempotentContractTests(unittest.TestCase):
 
     def test_ut_rb_08b_registry_guard_reports_no_inconsistency(self) -> None:
         """② 登记表 ↔ 声明面一致（返回空列表）。"""
-        surface = {self.STOP_OP: self._atom_declaration(self.STOP_OP)}
+        surface = self._registered_surface()
 
         self.assertEqual(validate_idempotent_registry(surface), [])
 
     def test_ut_rb_08b_registry_guard_reads_declaration_via_repository(self) -> None:
         """无注入时的生产路径：经 Repository 只读读取声明并判定一致。"""
-        surface = {self.STOP_OP: self._atom_declaration(self.STOP_OP)}
+        surface = self._registered_surface()
 
+        # 实现已迁至 runner/errors.py（FW 删除族共用同一契约），patch 目标随之迁移
         with patch(
-            "atomic_ops.runner.trex.Repository.from_default_cache",
+            "atomic_ops.runner.errors.Repository.from_default_cache",
             return_value=_FakeRepo(surface),
         ):
             self.assertEqual(validate_idempotent_registry(), [])
@@ -304,23 +327,22 @@ class StopStreamIdempotentContractTests(unittest.TestCase):
     # ── UT-RB-08d：登记守卫反例（不静默通过）─────────────────────────────
     def test_ut_rb_08d_unreadable_declaration_is_explicit(self) -> None:
         with patch(
-            "atomic_ops.runner.trex.Repository.from_default_cache",
+            "atomic_ops.runner.errors.Repository.from_default_cache",
             side_effect=RuntimeError("cache unavailable"),
         ):
+            # 登记表内每个 op 都必须显式暴露不可读（不静默通过）
             self.assertEqual(
                 validate_idempotent_registry(),
-                [f"decl-unavailable:{self.STOP_OP}"],
+                [f"decl-unavailable:{op_id}" for op_id in sorted(IDEMPOTENT_ERROR_TYPES)],
             )
 
     def test_ut_rb_08d_injected_undeclared_op_is_reported(self) -> None:
-        surface = {
-            self.STOP_OP: self._atom_declaration(self.STOP_OP),
-            "tg_no_such_op": {"idempotent": False, "error_types": ["INVALID_PARAM"]},
-        }
-
         with patch.dict(
             IDEMPOTENT_ERROR_TYPES, {"tg_no_such_op": frozenset({self.NOT_FOUND})}
         ):
+            surface = self._registered_surface(
+                tg_no_such_op={"idempotent": False, "error_types": ["INVALID_PARAM"]},
+            )
             findings = validate_idempotent_registry(surface)
 
         self.assertEqual(
@@ -333,13 +355,12 @@ class StopStreamIdempotentContractTests(unittest.TestCase):
 
     def test_ut_rb_08d_missing_registration_is_reported(self) -> None:
         """声明面内具幂等停流语义却未登记 → 漏登记（不静默通过）。"""
-        surface = {
-            self.STOP_OP: self._atom_declaration(self.STOP_OP),
-            "tg_delete_traffic_template": {
+        surface = self._registered_surface(
+            tg_delete_traffic_template={
                 "idempotent": True,
                 "error_types": ["INVALID_PARAM", self.NOT_FOUND],
             },
-        }
+        )
 
         self.assertEqual(
             validate_idempotent_registry(surface),
@@ -362,6 +383,219 @@ class StopStreamIdempotentContractTests(unittest.TestCase):
 
         miss = self._execute_failure(self.STOP_OP, "TIMEOUT")
         self.assertFalse(bool(miss.details.get("idempotent")))
+
+
+class DeleteResourceNotFoundIdempotentContractTests(unittest.TestCase):
+    """幂等删除契约（CT-REM-ATOM-DELETE）—「目标对象不存在 == 目标状态已达成」。
+
+    覆盖：登记 op 的失败信封统一键（**端到端**驱动各 runner 的失败分支，验证接线而非
+    仅测 helper；2026-09-21 扩至 NAT 删除两族、策略路由修改与接口删除，共 7 op）、
+    「被引用」类拒绝与非登记 op 的反例不归一（真失败保真）、通用参数码缺文案佐证时不归一、
+    atom 声明双形态齐备。全程离线：mock 设备响应与 session 读取；不触真机、不读凭据。
+    """
+
+    BASE = "https://dut.example"
+    SESSION = Path("/tmp/ptm-atomic-fake-session.json")  # 仅作参数占位，读取已被 mock
+    AUTH = "Authorization"
+    NOT_FOUND = "RESOURCE_NOT_FOUND"
+    # 改动前的失败信封键集合（逐键回归基线；新键只允许追加）
+    BASELINE_DETAIL_KEYS = ["err_code", "err_msg", "op_id", "status_code"]
+    # nat.py / interface.py 旧分支额外带 response_keys（诊断键，经 extra_details 透传保留）
+    RESPONSE_KEYS_BASELINE_DETAIL_KEYS = [
+        "err_code",
+        "err_msg",
+        "op_id",
+        "response_keys",
+        "status_code",
+    ]
+    # op_id -> (runner 模块名, 执行函数名, 额外关键字参数)
+    DRIVERS = {
+        "fw_delete_policy_route": (
+            "policy_route", "execute_policy_route", {"route_type": "ipv4"},
+        ),
+        "fw_delete_object": ("object", "execute_object", {}),
+        "fw_delete_timeobject": ("timeobject", "execute_timeobject", {"keywords": ""}),
+        # 2026-09-21 补登记（策略配置 run-20260921-174814 实测 7 条 cleanup_failed 取证）
+        "fw_delete_nat_snat": ("nat", "execute_nat", {"nat_type": "nat44"}),
+        "fw_delete_nat_dnat": ("nat", "execute_nat", {"nat_type": "nat44"}),
+        "fw_update_policy_route": (
+            "policy_route", "execute_policy_route", {"route_type": "ipv4"},
+        ),
+        # 2026-09-21 补登记（策略配置 run-20260921-190022 实测 3 条 cleanup_failed
+        # 取证：028/029/030 清理步删子接口时，该接口已被创建步回滚删除）
+        "fw_delete_interface": ("interface", "execute_interface", {}),
+    }
+    # op_id -> 改动前的失败信封键集合（dict.fromkeys 而非推导式：推导式作用域
+    # 读不到类体名字）
+    BASELINE_BY_OP = dict.fromkeys(DRIVERS, BASELINE_DETAIL_KEYS)
+    BASELINE_BY_OP.update(
+        {
+            "fw_delete_nat_snat": RESPONSE_KEYS_BASELINE_DETAIL_KEYS,
+            "fw_delete_nat_dnat": RESPONSE_KEYS_BASELINE_DETAIL_KEYS,
+            "fw_delete_interface": RESPONSE_KEYS_BASELINE_DETAIL_KEYS,
+        }
+    )
+    # op_id -> 驱动载荷（NAT 的删除 id 是 JSON **字符串**，见 nat.py 模块 docstring
+    # 「不可归一化的不对称」第 1 条；传整数会被本地校验拦成 RUNNER_VALIDATION_FAILED）
+    PAYLOADS = dict.fromkeys(DRIVERS, {"id": 1})
+    PAYLOADS.update(
+        {
+            "fw_delete_nat_snat": {"id": "1"},
+            "fw_delete_nat_dnat": {"id": "1"},
+            # 接口删除的 id 是接口名（与实测原文 GE0_3.100 一致）
+            "fw_delete_interface": {"id": "GE0_3.100"},
+        }
+    )
+    # 现场实测的设备原文（策略配置 run 的清理失败取证）
+    EVIDENCE = {
+        "fw_delete_policy_route": {
+            "errCode": "ePolicyRouteIdNotExist",
+            "errMsg": "删除ipv4策略路由2失败，策略路由不存在",
+        },
+        "fw_delete_object": {
+            "errCode": "eObjGetNoExist",
+            "errMsg": "Couldn't found OBJ-SRC-192 from DB",
+        },
+        "fw_delete_timeobject": {
+            "errCode": "eRequestParam",
+            "errMsg": "Couldn't found TOBJ-5MIN from DB",
+        },
+        # 2026-09-21 实测（053/054 与 056/057 的清理失败原文，NAT 规则不存在）
+        "fw_delete_nat_snat": {
+            "errCode": "eRequestParam",
+            "errMsg": "Couldn't found 1 from DB",
+        },
+        "fw_delete_nat_dnat": {
+            "errCode": "eRequestParam",
+            "errMsg": "Couldn't found 1 from DB",
+        },
+        # 2026-09-21 实测（062/064 的清理失败原文，回滚 restore_snapshot 时对象已不在）
+        "fw_update_policy_route": {
+            "errCode": "ePolicyRouteIdNotExist",
+            "errMsg": "修改ipv4策略路由1失败，策略路由不存在",
+        },
+        # 2026-09-21 实测（028/029/030 的清理失败原文，子接口已被创建步回滚删除）
+        "fw_delete_interface": {
+            "errCode": "eIntfGetTypeByName",
+            "errMsg": "unknow interface GE0_3.100",
+        },
+    }
+
+    def _drive(self, op_id: str, response_payload: dict) -> RunnerError:
+        """以 mock 的 400 设备响应驱动 runner 失败分支，返回捕获到的 RunnerError。"""
+        module_name, func_name, extra = self.DRIVERS[op_id]
+        module = importlib.import_module(f"atomic_ops.runner.{module_name}")
+        target = getattr(module, func_name)
+        kwargs: dict = {
+            "op_id": op_id,
+            "base_url": self.BASE,
+            "session_file": self.SESSION,
+            "auth_header": self.AUTH,
+            "payload": self.PAYLOADS[op_id],
+            "verify_tls": False,
+            "timeout": 1.0,
+            **extra,
+        }
+        # 分页参数按目标函数签名注入：policy_route / object / timeobject / nat 的 execute
+        # 接受 page/size，interface 的 execute_interface 不接受（传了会 TypeError）。
+        accepted = inspect.signature(target).parameters
+        if "page" in accepted:
+            kwargs["page"] = 1
+        if "size" in accepted:
+            kwargs["size"] = 20
+        with patch.object(
+            module, "read_session_file", return_value={"session_value": "s"}
+        ), patch.object(module, "request_json", return_value=(400, response_payload, "")):
+            with self.assertRaises(RunnerError) as ctx:
+                target(**kwargs)
+        return ctx.exception
+
+    # ── UT-RB-09a：三个登记 delete op 的统一键（端到端）──────────────────
+    def test_ut_rb_09a_registered_delete_ops_expose_unified_key(self) -> None:
+        for op_id, payload in self.EVIDENCE.items():
+            with self.subTest(op_id=op_id):
+                error = self._drive(op_id, payload)
+
+                # 运行时代码与退出码同改动前一致（NFR-01：不改映射、不改退出码）
+                self.assertEqual(error.error_code, "RUNNER_CONFIG_REJECTED")
+                self.assertEqual(error.details["error_type"], self.NOT_FOUND)
+                self.assertEqual(error.details["op_id"], op_id)
+                self.assertEqual(error.details["err_code"], payload["errCode"])
+                self.assertIs(error.details["idempotent"], True)
+                self.assertEqual(
+                    error.details["idempotent_source"], f"atoms/fw/{op_id}.yaml#idempotent"
+                )
+                # 消费方判定式（双条件同时成立才判「幂等成功」）
+                self.assertTrue(
+                    error.details.get("error_type") == self.NOT_FOUND
+                    and error.details.get("idempotent") is True
+                )
+                # 既有键保持原样 + 新增幂等标记（追加而非替换）
+                self.assertEqual(
+                    sorted(
+                        set(error.details) - {"error_type", "idempotent", "idempotent_source"}
+                    ),
+                    self.BASELINE_BY_OP[op_id],
+                )
+
+    # ── UT-RB-09d：同 runner 未登记 op 免疫（登记表是唯一权威门）──────────
+    def test_ut_rb_09d_unregistered_ops_stay_immune(self) -> None:
+        """通用分支的归一不波及同 runner 的 create/update/verify 类 op。"""
+        nat_not_found = {"errCode": "eRequestParam", "errMsg": "Couldn't found 1 from DB"}
+        # 配置类负例（配置一个不存在的接口）用的是**同一个** errCode —— 只有删除
+        # 语义下「接口不存在 == 目标状态已达成」成立，配置类必须保真为真失败。
+        intf_not_found = {
+            "errCode": "eIntfGetTypeByName",
+            "errMsg": "unknow interface GE-NOT-EXIST",
+        }
+        for op_id, payload in (
+            ("fw_config_nat_snat", nat_not_found),
+            ("fw_update_nat_snat", nat_not_found),
+            ("fw_delete_nat_static", nat_not_found),
+            ("fw_verify_nat_dnat", nat_not_found),
+            ("fw_config_interface", intf_not_found),
+            ("fw_update_interface", intf_not_found),
+            ("fw_verify_interface", intf_not_found),
+        ):
+            with self.subTest(op_id=op_id):
+                self.assertIsNone(
+                    raise_if_resource_not_found(400, payload, op_id=op_id)
+                )
+
+    # ── UT-RB-09b：反例（真失败保真，不归一）────────────────────────────
+    def test_ut_rb_09b_rejection_without_not_found_semantics_is_not_normalized(self) -> None:
+        # ① 未登记 op：即便 errCode 恰在「不存在」集合内也不归一（登记表是权威门）
+        self.assertIsNone(
+            raise_if_resource_not_found(
+                400, {"errCode": "eObjGetNoExist"}, op_id="fw_update_interface"
+            )
+        )
+        # ② 已登记 op +「被引用」类拒绝：删除确实未完成，是真失败
+        self.assertIsNone(
+            raise_if_resource_not_found(
+                400,
+                {"errCode": "eIntfisRefed", "errMsg": "该接口已被引用"},
+                op_id="fw_delete_object",
+            )
+        )
+        # ③ 通用参数码 eRequestParam 缺「不存在」文案佐证时不猜
+        self.assertIsNone(
+            raise_if_resource_not_found(
+                400,
+                {"errCode": "eRequestParam", "errMsg": "参数校验失败"},
+                op_id="fw_delete_timeobject",
+            )
+        )
+
+    # ── UT-RB-09c：atom 声明双形态齐备 ───────────────────────────────────
+    def test_ut_rb_09c_atom_declarations_carry_idempotent_contract(self) -> None:
+        """`idempotent: true` 与 RESOURCE_NOT_FOUND 须同时声明（只具其一即口径不一致）。"""
+        for op_id in self.DRIVERS:
+            with self.subTest(op_id=op_id):
+                path = Path(__file__).resolve().parents[1] / "atoms" / "fw" / f"{op_id}.yaml"
+                declaration = yaml.safe_load(path.read_text(encoding="utf-8"))
+                self.assertIs(declaration.get("idempotent"), True)
+                self.assertIn(self.NOT_FOUND, declaration.get("error_types") or [])
 
 
 class InterfacePayloadTests(unittest.TestCase):
@@ -907,6 +1141,47 @@ class PolicyRoutePayloadTests(unittest.TestCase):
 
         self.assertEqual(summary["policy_route_ids"], [1, 2, 3])
         self.assertEqual(summary["count"], 3)
+
+    def test_extract_policy_route_id_singleton_from_verify_response(self) -> None:
+        """verify 同时返回单值 policy_route_id（首条），兑现 atom returns.data 声明。
+
+        现场实证（2026-09-21 策略配置 run，PC-STRATEGYROUTE-CFG-STRATEGY-035/039/040）：
+        用例「批量创建 N 条 -> 全量查询 -> 抽样启用 1 条」引用 ${STEP-00N.policy_route_id}，
+        此前实现只返回 policy_route_ids 列表 ⇒ resolve_step_refs 报
+        「字段 'policy_route_id' 在被引 step 中不存在」（VALIDATION_FAILED，步不下发）。
+        """
+        from atomic_ops.runner.policy_route import _extract_policy_route_summary
+
+        response = {"count": 3, "vals": [{"id": 7}, {"id": 8}, {"id": 9}]}
+        summary = _extract_policy_route_summary("fw_verify_policy_route", response)
+
+        self.assertEqual(summary["policy_route_id"], 7)
+        self.assertEqual(summary["policy_route_ids"], [7, 8, 9])
+
+    def test_extract_policy_route_id_absent_when_no_rows(self) -> None:
+        """空结果不设 policy_route_id（不写空值占位）。
+
+        调用方 resolve_step_refs 对「键缺失」与「值为 None/''/0」同判（均报字段不存在），
+        故无需占位；不设键可让 result.json 的形态如实反映「设备无数据」。
+        """
+        from atomic_ops.runner.policy_route import _extract_policy_route_summary
+
+        summary = _extract_policy_route_summary(
+            "fw_verify_policy_route", {"count": 0, "vals": []}
+        )
+
+        self.assertNotIn("policy_route_id", summary)
+        self.assertEqual(summary["policy_route_ids"], [])
+
+    def test_extract_policy_route_id_skips_falsy_head(self) -> None:
+        """首条 id 为 None 时取首个有效 id（设备返回残缺行的防御）。"""
+        from atomic_ops.runner.policy_route import _extract_policy_route_summary
+
+        summary = _extract_policy_route_summary(
+            "fw_verify_policy_route", {"count": 2, "vals": [{"type": "ipv4"}, {"id": 4}]}
+        )
+
+        self.assertEqual(summary["policy_route_id"], 4)
 
     def test_extract_policy_route_id_from_config_response(self) -> None:
         from atomic_ops.runner.policy_route import _extract_policy_route_summary
@@ -1573,6 +1848,79 @@ class NgfwLoginTests(unittest.TestCase):
                     )
 
         self.assertEqual(context.exception.error_code, "RUNNER_LOGIN_FAILED")
+
+    def test_login_http_400_changepwd_errcode_routes_to_change(self) -> None:
+        """设备用 HTTP 400 + errCode=eChangDeafPwd 表达改密要求（DUT3 实测形态）。
+
+        修复前 `_login_once` 在非 2xx 一律抛错，使 `--change-default-password`
+        的改密通道不可达；修复后应真正走到 changeDefPwd 并用新密码登录。
+        """
+        responses = [
+            (400, {"errCode": "eChangDeafPwd", "errMsg": "需要修改默认密码后才能登录"}, "{}"),
+            (200, {"msg": "success"}, "{}"),
+            (200, {"token": "abc123"}, "{}"),
+        ]
+        with patch("atomic_ops.runner.ngfw_login._encrypt_password", return_value="encrypted"):
+            with patch(
+                "atomic_ops.runner.ngfw_login.request_json", side_effect=responses
+            ) as mocked:
+                result = login(
+                    base_url="https://10.0.0.1",
+                    username="audit",
+                    password_value="pw",
+                    timeout=10,
+                    verify_tls=False,
+                    change_default_password=True,
+                    replacement_value="newpw",
+                )
+
+        self.assertEqual(result["session_value"], "abc123")
+        urls = [call.args[1] for call in mocked.call_args_list]
+        self.assertEqual(len(urls), 3)
+        self.assertTrue(urls[0].endswith("/api/v1/auth"))
+        self.assertTrue(urls[1].endswith("/api/v1/changeDefPwd"))
+        self.assertTrue(urls[2].endswith("/api/v1/auth"))
+
+    def test_login_http_400_other_errcode_still_fails(self) -> None:
+        """非改密类 errCode（如口令不符）语义不变：仍抛 RUNNER_LOGIN_FAILED。"""
+        with patch("atomic_ops.runner.ngfw_login._encrypt_password", return_value="encrypted"):
+            with patch(
+                "atomic_ops.runner.ngfw_login.request_json",
+                return_value=(400, {"errCode": "eAuthPasswordMismatch"}, "{}"),
+            ):
+                with self.assertRaises(RunnerError) as context:
+                    login(
+                        base_url="https://10.0.0.1",
+                        username="audit",
+                        password_value="pw",
+                        timeout=10,
+                        verify_tls=False,
+                        change_default_password=False,
+                        replacement_value=None,
+                    )
+
+        self.assertEqual(context.exception.error_code, "RUNNER_LOGIN_FAILED")
+        self.assertEqual(context.exception.details.get("err_code"), "eAuthPasswordMismatch")
+
+    def test_login_http_400_without_errcode_still_fails(self) -> None:
+        """非 2xx 且 body 无 errCode：保持原行为（RUNNER_LOGIN_FAILED）。"""
+        with patch("atomic_ops.runner.ngfw_login._encrypt_password", return_value="encrypted"):
+            with patch(
+                "atomic_ops.runner.ngfw_login.request_json", return_value=(400, {}, "{}")
+            ):
+                with self.assertRaises(RunnerError) as context:
+                    login(
+                        base_url="https://10.0.0.1",
+                        username="audit",
+                        password_value="pw",
+                        timeout=10,
+                        verify_tls=False,
+                        change_default_password=False,
+                        replacement_value=None,
+                    )
+
+        self.assertEqual(context.exception.error_code, "RUNNER_LOGIN_FAILED")
+        self.assertEqual(context.exception.details.get("status_code"), 400)
 
 
 class RunCommandEnvelopeTests(unittest.TestCase):
@@ -2796,6 +3144,113 @@ class InterfaceTunnelCliTests(unittest.TestCase):
         self.assertEqual(payload["op_id"], "fw_delete_interface")
         self.assertEqual(payload["data"]["request"]["method"], "DELETE")
         self.assertTrue(payload["data"]["request"]["url"].endswith("/api/v1/intf?id=tunnel1"))
+
+
+class InterfaceUpdateReplayCliTests(unittest.TestCase):
+    """接口族回滚重放的 CLI 通道（2026-09-21，缺口 E 后半）。
+
+    现场：ptm-team 的 restore_snapshot 回滚把设备 verify 返回的
+    ``{"id":..,"val":{..}}`` 整包经 ``--payload-json`` 回灌，但 `interface update`
+    的 ``--id`` / ``--interface-kind`` 是 argparse 层 required
+    -> 命令被 ``error: the following arguments are required: --id, --interface-kind``
+    拦下，接口快照**永远重放不出去**（与缺口 D 的策略路由 update 同款）。
+    """
+
+    BASE = "https://192.0.2.1"
+
+    # 设备 GET /api/v1/intf 的真实记录（**扁平、无 id 键**，2026-09-21 现场实测 12 条）。
+    # 经 ptm-team 的 _locate_snapshot_record(match_field="name") 归一化为下方 REPLAY。
+    FLAT_RECORD = {
+        "desc": "",
+        "enabled": True,
+        "ip_addresses": ["50.0.0.1/24"],
+        "ipv4_address_mode_config": {"address_mode": 0},
+        "ipv4_gateway": "",
+        "ipv4_reverse_path": True,
+        "ipv6_address_mode_config": {"address_mode": 0, "dhcp_client_setting": {}},
+        "ipv6_gateway": "",
+        "ipv6_reverse_path": False,
+        "level": 100,
+        "linkType": 0,
+        "mode": "Route",
+        "mtus": [1500, 0, 0, 0],
+        "name": "GE0_3",
+        "service": {"https": False, "ping": False, "ssh": False},
+        "sip": [],
+        "smac": [],
+        "type": 3,
+        "vltype": "VPP",
+    }
+    REPLAY = {"id": "GE0_3", "val": FLAT_RECORD}
+
+    def _dry_run(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "interface", *argv])
+        self.assertEqual(exit_code, 0, stderr.getvalue())
+        return json.loads(stdout.getvalue())
+
+    def _dry_run_error(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "interface", *argv])
+        self.assertEqual(exit_code, 49)
+        return json.loads(stdout.getvalue()) if stdout.getvalue().strip() else json.loads(stderr.getvalue())
+
+    def test_update_payload_json_replay_needs_no_id_or_kind(self) -> None:
+        payload = self._dry_run(
+            ["update", "--payload-json", json.dumps(self.REPLAY, ensure_ascii=False)]
+        )
+        self.assertEqual(payload["op_id"], "fw_update_interface")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/intf")
+        # 整包透传：id 与 val 原样下发，name 保留在 val 内（PUT 的 val.name 必填）
+        self.assertEqual(request["payload"]["id"], "GE0_3")
+        self.assertEqual(request["payload"]["val"]["name"], "GE0_3")
+        self.assertTrue(request["payload"]["val"]["ipv4_reverse_path"])
+
+    def test_update_payload_file_replay_needs_no_id_or_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "snapshot.json"
+            path.write_text(json.dumps(self.REPLAY, ensure_ascii=False), encoding="utf-8")
+            payload = self._dry_run(["update", "--payload-file", str(path)])
+        self.assertEqual(payload["data"]["request"]["payload"]["id"], "GE0_3")
+
+    def test_update_payload_missing_id_is_structured_error(self) -> None:
+        """缺 id 必须给结构化 RUNNER_VALIDATION_FAILED（不是 argparse usage、非裸 traceback）。"""
+        error = self._dry_run_error(
+            ["update", "--payload-json", json.dumps({"val": dict(self.FLAT_RECORD)})]
+        )
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+        self.assertEqual(error["details"]["field"], "id")
+
+    def test_update_payload_name_must_match_id(self) -> None:
+        """重放载荷的 val.name 必须等于 id —— 归一化时若丢了 name 会在此被拦。"""
+        bad = {"id": "GE0_3", "val": {**self.FLAT_RECORD, "name": "GE0_4"}}
+        error = self._dry_run_error(["update", "--payload-json", json.dumps(bad)])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_structured_update_still_requires_id(self) -> None:
+        """未走整包通道时，--id 仍必填（只是改由 runner 给结构化错误）。"""
+        error = self._dry_run_error(["update", "--interface-kind", "physical"])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_structured_update_still_requires_interface_kind(self) -> None:
+        error = self._dry_run_error(["update", "--id", "GE0_3"])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_structured_update_unchanged(self) -> None:
+        """结构化路径回归：改动不得影响既有 flag 组装。"""
+        payload = self._dry_run(
+            ["update", "--interface-kind", "physical", "--id", "GE0_3",
+             "--ip-address", "50.0.0.1/24"]
+        )
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["payload"]["val"]["ip_addresses"], ["50.0.0.1/24"])
 
 
 class _FakeAliasOp:
@@ -6212,19 +6667,25 @@ class NatCliDryRunTests(unittest.TestCase):
         self.assertEqual(request["payload"]["id"], 1)
         self.assertIsInstance(request["payload"]["id"], int)
 
-    def test_delete_snat_sends_string_id_in_body_and_no_query(self) -> None:
+    def test_delete_snat_sends_string_id_in_query_and_no_body(self) -> None:
         payload = self._dry_run(["delete-snat", "--id", "4"])
         request = payload["data"]["request"]
         self.assertEqual(request["method"], "DELETE")
-        self.assertEqual(request["payload"], {"id": "4"})
-        self.assertIsInstance(request["payload"]["id"], str)
-        self.assertEqual(request["url"], f"{self.BASE}/api/v1/natsnat")
+        self.assertIsNone(request["payload"])
+        self.assertEqual(request["query"], {"id": "4"})
+        self.assertIsInstance(request["query"]["id"], str)
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/natsnat?id=4")
 
-    def test_delete_dnat_keeps_iterate_endpoint_and_body_id(self) -> None:
+    def test_delete_dnat_keeps_iterate_endpoint_and_query_id(self) -> None:
         payload = self._dry_run(["delete-dnat", "--id", "3"])
         request = payload["data"]["request"]
-        self.assertEqual(request["url"], f"{self.BASE}/api/v1/iterate/natdnat")
-        self.assertEqual(request["payload"], {"id": "3"})
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/iterate/natdnat?id=3")
+        self.assertIsNone(request["payload"])
+        self.assertEqual(request["query"], {"id": "3"})
+
+    def test_delete_static_rejects_empty_id(self) -> None:
+        error = self._dry_run_error(["delete-static", "--id", ""])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
 
     def test_verify_sends_query_and_no_body(self) -> None:
         payload = self._dry_run(["verify-static", "--page", "1", "--size", "10"])

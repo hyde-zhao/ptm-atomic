@@ -90,6 +90,16 @@ post_verify:
 dry_run_supported: true
 risk_level: high
 timeout_ms: 30000
+# ── 幂等修改契约口径（2026-09-21 补齐 error_types，与 CT-REM-ATOM-DELETE 同构）──
+# `idempotent: true` 表达「回滚 restore_snapshot 恢复配置时对象已不存在 ⇒ 无物可
+#   恢复 ⇒ 目标状态已达成」，不构成残留。2026-09-21 实测设备原文：
+#   HTTP 400 ePolicyRouteIdNotExist「修改ipv4策略路由1失败，策略路由不存在」
+# 此前本文件只有 `idempotent: true` 而无 RESOURCE_NOT_FOUND 枚举、且不在 runner
+#   登记表内 ⇒ 属「只具其一的声明」却因反向检查（漏登记）只在声明面注入时可用而
+#   静默通过（策略配置 run-20260921-174814 实测 3 条 CLEANUP_FAILED 假阳性）。
+# 执行期负例不受影响：运行时代码仍为 RUNNER_CONFIG_REJECTED（exit 48），
+#   仅 details 增幂等键。
+# ────────────────────────────────────────────────────────────────────────────
 error_types:
   - NONE
   - STATE_INVALID
@@ -97,6 +107,7 @@ error_types:
   - GATE_MISSING
   - CONFIG_REJECTED
   - DEVICE_UNREACHABLE
+  - RESOURCE_NOT_FOUND
   - UNKNOWN_ERROR
 risk:
   level: high

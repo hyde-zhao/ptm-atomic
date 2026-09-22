@@ -142,6 +142,16 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             handler=_run_verify_neighbor_probe,
             add_args=_add_verify_neighbor_probe_args,
         ),
+        CommandSpec(
+            name="verify-abf-policy",
+            help="Verify a policy route is in effect via the VPP ABF table (vppctl show abf policy).",
+            description=(
+                "Read the VPP ABF policy table as root and assert the policy-id derived from the policy "
+                "route id is present; ipv4 uses the id directly, ipv6 uses 10000 + id."
+            ),
+            handler=_run_verify_abf_policy,
+            add_args=_add_verify_abf_policy_args,
+        ),
     )
 
 
@@ -538,6 +548,85 @@ def _run_check_bridge_domain(args: argparse.Namespace) -> int:
                 host=host,
                 port=port,
                 credential_env=credential_env,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _add_verify_abf_policy_args(parser: argparse.ArgumentParser) -> None:
+    """Register the ABF policy args: transport + username + policy-route-id + type."""
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (vppctl requires root privileges).",
+    )
+    parser.add_argument(
+        "--policy-route-id",
+        type=int,
+        required=True,
+        help="Business policy route id as returned by fw_config_policy_route.",
+    )
+    parser.add_argument(
+        "--type",
+        dest="policy_type",
+        choices=("ipv4", "ipv6"),
+        default="ipv4",
+        help=(
+            "Policy route address family. The ABF table lookup id is the route id for ipv4 "
+            "and 10000 + route id for ipv6. Defaults to ipv4."
+        ),
+    )
+
+
+def _run_verify_abf_policy(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_abf_policy_dry_run,
+        execute_verify_abf_policy,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", "root")
+        policy_route_id = int(getattr(args, "policy_route_id"))
+        policy_type = getattr(args, "policy_type", "ipv4")
+        if not ctx.get("execute"):
+            result = build_verify_abf_policy_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                policy_route_id=policy_route_id,
+                policy_type=policy_type,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = _resolve_credential_env(
+                getattr(args, "credential_env", None), default=_default_credential_env(username)
+            )
+            result = execute_verify_abf_policy(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                credential_env=credential_env,
+                username=username,
+                policy_route_id=policy_route_id,
+                policy_type=policy_type,
                 timeout=float(ctx.get("timeout", 10.0)),
             )
         _write_output(_to_run_envelope(result), output_format)

@@ -226,6 +226,7 @@ SUPPORTED_OPS = (
     *ARP_SCAN_OPS,
     *GARP_OPS,
     "fw_verify_neighbor_probe",
+    "fw_verify_abf_policy",
     *MACPOOL_OPS,
     *DOMAINPOOL_OPS,
     *FILETYPE_OPS,
@@ -294,6 +295,7 @@ DEPRECATED_OP_MAP: dict[str, tuple[str, ...]] = {
     "fw_config_bridge_domain_mac_age": ("cli", "set-mac-age"),
     "fw_verify_bridge_domain_mac_age": ("cli", "verify-mac-age"),
     "fw_verify_neighbor_probe": ("cli", "verify-neighbor-probe"),
+    "fw_verify_abf_policy": ("cli", "verify-abf-policy"),
     # Deprecated legacy op_id aliases (merged into the unified transport op)
     "fw_verify_system_version_cli": ("cli", "verify-system-version"),
     "fw_verify_system_version_telnet": ("cli", "verify-system-version"),

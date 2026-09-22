@@ -1,0 +1,91 @@
+schema_version: "1.1"
+op_id: fw_verify_abf_policy
+device_type: fw
+transport: ssh
+description: Verify a policy route is in effect by querying the VPP ABF policy table (vppctl show abf policy).
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_abf_policy
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url. Useful when telnet target differs from the management host.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  username:
+    type: string
+    required: false
+    description: SSH/Telnet username; defaults to root because vppctl requires root privileges. Falls back to the session-file username when empty.
+  policy_route_id:
+    type: int
+    required: true
+    description: Business policy route id as returned by fw_config_policy_route (the device's policy route record id, not the VPP ABF table id).
+  policy_type:
+    type: string
+    required: false
+    description: >-
+      Address family of the policy route. The VPP ABF lookup id is the route id for ipv4
+      and 10000 + route id for ipv6 (measured 2026-09-21: policy-id 10001 belongs to route id 1
+      of the ipv6 family). Defaults to ipv4.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  username: root
+  policy_route_id: 1
+  policy_type: ipv4
+side_effect: observation
+returns:
+  status: success
+  data:
+    policy_route_id: 1
+    policy_type: ipv4
+    abf_policy_id: 1
+    found: true
+    policy_ids: "<abf-policy-ids-ref>"
+    abf_policies: "<abf-policies-ref>"
+    abf_policy_raw: "<abf-policy-raw-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: abf_policy_present
+      input_ref: "<abf-policy-ids-ref>"
+      expected_result: The VPP ABF policy table contains the policy-id derived from the policy route id.
+  summary_ref: "<abf-policy-summary-ref>"
+preconditions:
+  - Device management SSH or Telnet service is reachable.
+  - A valid root credential is available via the runner credential env var (FW_SSH_PASSWORD by default).
+  - The vppctl binary is available at /opt/dbappsecurity/bin/vppctl on the device.
+  - The policy route was created by fw_config_policy_route and its id is known to the caller.
+postconditions:
+  - The ABF policy table output is captured in diag_snapshot_ref; nothing is written to the repo.
+  - Absence of the policy-id raises STATE_MISMATCH, which negative cases express with expected_failure.
+tags:
+  - firewall
+  - policy-route
+  - abf
+  - vpp
+  - query
+  - cli
+aliases:
+  - abf
+  - abf-policy
+  - policy-route-effective
+since_version: "1.12.0"

@@ -15,10 +15,14 @@ import json
 import re
 from ipaddress import AddressValueError, ip_address
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
-from atomic_ops.repository import Repository
-from atomic_ops.runner.errors import RunnerError
+from atomic_ops.runner.errors import (
+    IDEMPOTENT_ERROR_TYPES,  # noqa: F401 - 再导出（既有导入面兼容）
+    RunnerError,
+    idempotent_error_details,
+    validate_idempotent_registry,  # noqa: F401 - 再导出（既有导入面兼容）
+)
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
 
@@ -88,134 +92,12 @@ ERROR_TYPE_MAP: dict[str, tuple[str, bool]] = {
 
 
 # ── 幂等停流契约（CT-REM-ATOM-STOP v1.1；区域 #stop-stream-contract）──────────
-# 背景：停流被逆序回滚二次 stop 时设备返回 RESOURCE_NOT_FOUND，被 ERROR_TYPE_MAP
-# 映射为 RUNNER_VALIDATION_FAILED；消费方只认 {"stream_not_found","not_found"} →
-# 永不命中 → 非成功回滚一律归一为 CLEANUP_FAILED → cleanup_failed=True → exit 9
-# 假阳性（现场 615 条记录中 cleanup_errors 非空 290 条，涉停流 242 条）。
-# 本区域把「幂等停流」做成运行期机器可读的统一键：
-#   消费方判定式 = details.error_type == "RESOURCE_NOT_FOUND"
-#                  且 details.idempotent == true（双条件，缺一即按「非幂等」保守处理）
-# 技术边界：不改 ERROR_TYPE_MAP（三类语义的区分归 R-F-REM-018）、
-# 不改 EXIT_CODES、不新增 atom 顶层字段（schema `additionalProperties: false`）。
-IDEMPOTENT_ERROR_TYPES: dict[str, frozenset[str]] = {
-    "tg_stop_traffic_stream": frozenset({"RESOURCE_NOT_FOUND"}),
-}
-
-_IDEMPOTENT_DECL_FIELD = "idempotent"
-_IDEMPOTENT_DECL_ERROR_FIELD = "error_types"
-# 幂等成功语义的错误类型：atom `error_types` 含该值且 `idempotent: true` 时，
-# 表达「目标流不存在 = 目标状态已达成」，不构成残留
-_IDEMPOTENT_SUCCESS_ERROR_TYPE = "RESOURCE_NOT_FOUND"
-
-
-def _idempotent_source_ref(op_id: str) -> str:
-    """幂等标记的键来源（仓相对逻辑路径 + 声明字段），供消费方回溯契约声明位置。"""
-    device = op_id.split("_", 1)[0]
-    return f"atoms/{device}/{op_id}.yaml#{_IDEMPOTENT_DECL_FIELD}"
-
-
-def idempotent_error_details(op_id: str, error_type: str) -> dict[str, Any]:
-    """返回追加到 ``RunnerError.details`` 的幂等标记；未命中返回空 dict。
-
-    命中条件（两者同时成立）：
-      1. ``op_id`` 在 ``IDEMPOTENT_ERROR_TYPES`` 登记表中，且 ``error_type`` 属于其集合；
-      2. 该 op 的 atom 声明 ``idempotent: true`` 成立 —— 由
-         :func:`validate_idempotent_registry` 在契约层证明（测试 / 运维显式调用），
-         **不在本热路径上重读本地 cache**（避免每次回滚都读一次 cache）。
-
-    未命中返回 ``{}``：调用方的 ``details`` 与改动前**逐键一致**，非幂等 op 零影响。
-    """
-    declared = IDEMPOTENT_ERROR_TYPES.get(op_id)
-    if not declared or error_type not in declared:
-        return {}
-    return {"idempotent": True, "idempotent_source": _idempotent_source_ref(op_id)}
-
-
-def _declared_error_types(declaration: Mapping[str, Any]) -> set[str]:
-    """从 atom 声明中取出 ``error_types`` 枚举（非列表形态视为空集，不猜）。"""
-    raw = declaration.get(_IDEMPOTENT_DECL_ERROR_FIELD)
-    if not isinstance(raw, (list, tuple, set, frozenset)):
-        return set()
-    return {item for item in raw if isinstance(item, str)}
-
-
-def _registry_declaration_findings(op_id: str, declaration: Mapping[str, Any]) -> list[str]:
-    """单个登记项 ↔ 其 atom 声明的一致性检查（正向）。"""
-    findings: list[str] = []
-    if declaration.get(_IDEMPOTENT_DECL_FIELD) is not True:
-        findings.append(f"idempotent-not-declared:{op_id}")
-    declared_types = _declared_error_types(declaration)
-    for error_type in sorted(IDEMPOTENT_ERROR_TYPES[op_id] - declared_types):
-        findings.append(f"undeclared-error-type:{op_id}:{error_type}")
-    return findings
-
-
-def _read_idempotent_declaration(op_id: str) -> tuple[Mapping[str, Any] | None, str]:
-    """只读读取 op 的 atom 声明（本地 cache）。返回 ``(声明, 不可读原因)``。
-
-    与 ``commands/run.py::_load_rollback_context`` 同款只读用法；任何不可读都归一为
-    显式原因（不静默通过）。不触设备、不读凭据、不写任何状态。
-    """
-    try:
-        document = Repository.from_default_cache().read_operation(op_id)
-    except Exception as exc:  # noqa: BLE001 - 不可读必须转为显式不一致项（NFR-04 无静默）
-        return None, exc.__class__.__name__
-    data = document.data
-    if not isinstance(data, Mapping):
-        return None, "declaration-not-mapping"
-    return data, ""
-
-
-def validate_idempotent_registry(
-    declarations: Mapping[str, Mapping[str, Any]] | None = None,
-) -> list[str]:
-    """幂等登记表 ↔ atom 声明一致性校验；返回不一致项列表（空列表 = 一致）。
-
-    对每个登记 op 读 atom 声明：
-
-    - 声明不可读 → ``decl-unavailable:<op_id>``（显式，不静默通过）
-    - atom ``idempotent`` 必须为 ``true`` → 否则 ``idempotent-not-declared:<op_id>``
-    - 登记集合必须 ⊆ atom ``error_types`` → 否则 ``undeclared-error-type:<op_id>:<type>``
-    - 声明面内 ``idempotent: true`` 且 ``error_types`` 含
-      ``RESOURCE_NOT_FOUND`` 却不在登记表 → ``missing-registration:<op_id>``（漏登记）
-
-    ``declarations`` 为可选的**声明面注入**（契约矩阵 / 单测用，形如
-    ``{op_id: atom_yaml_dict}``）；为 ``None`` 时对登记表中的每个 op 走本地 cache 只读。
-    **反向检查（漏登记）只在声明面被显式注入时可用** —— 无注入时只覆盖登记表内 op
-    （避免在守卫里全量枚举 cache）。本函数是**显式调用**（测试 / 运维），
-    不在 runner 热路径上执行。
-    """
-    findings: list[str] = []
-
-    for op_id in sorted(IDEMPOTENT_ERROR_TYPES):
-        if declarations is not None:
-            injected = declarations.get(op_id)
-            if not isinstance(injected, Mapping):
-                findings.append(f"decl-unavailable:{op_id}")
-                continue
-            declaration: Mapping[str, Any] = injected
-        else:
-            declaration, _reason = _read_idempotent_declaration(op_id)
-            if declaration is None:
-                findings.append(f"decl-unavailable:{op_id}")
-                continue
-        findings.extend(_registry_declaration_findings(op_id, declaration))
-
-    # 反向检查（漏登记）：登记表缺项会让消费方读不到统一键 —— 属 03-06 的根因同类
-    if declarations is not None:
-        for op_id in sorted(declarations):
-            if op_id in IDEMPOTENT_ERROR_TYPES:
-                continue
-            candidate = declarations[op_id]
-            if not isinstance(candidate, Mapping):
-                continue
-            if candidate.get(_IDEMPOTENT_DECL_FIELD) is not True:
-                continue
-            if _IDEMPOTENT_SUCCESS_ERROR_TYPE in _declared_error_types(candidate):
-                findings.append(f"missing-registration:{op_id}")
-
-    return findings
-
+# 2026-09-20：机制主体已迁至 ``runner/errors.py``（FW 删除族共用同一契约，登记表
+# 见其 ``IDEMPOTENT_ERROR_TYPES`` 段）。本模块仅**再导出**，维持既有导入面
+# （``tests/test_runner.py`` 从本模块导入 ``IDEMPOTENT_ERROR_TYPES`` /
+# ``idempotent_error_details`` / ``validate_idempotent_registry``）零改动。
+# 技术边界不变：不改 ``ERROR_TYPE_MAP``、不改 ``EXIT_CODES``、不新增 atom 顶层字段。
+# 本模块 :615 的 ``details.update(idempotent_error_details(...))`` 调用点不变。
 
 def load_trex_json_payload(*, payload_file: str | None, payload_json: str | None) -> dict[str, Any] | None:
     """Load an optional complete JSON payload supplied by the caller."""

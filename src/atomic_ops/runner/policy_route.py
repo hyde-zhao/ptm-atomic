@@ -9,7 +9,11 @@ from typing import Any
 from urllib.parse import urlencode
 
 from atomic_ops.runner.batch import build_batch_delete_payload
-from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
+from atomic_ops.runner.errors import (
+    RunnerError,
+    raise_if_device_session_rejected,
+    raise_if_resource_not_found,
+)
 from atomic_ops.runner.http import request_json, request_json_with_retries
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.pagination import fetch_all_pages, response_payload_or_raise
@@ -157,6 +161,37 @@ def build_policy_route_payload(
         "id": entry_id,
         "val": val,
     }
+
+
+# 快照整包重放：设备 verify 返回的条目实测 = 可写字段 15 项 + 只读状态回显 enable/hitcount
+# （2026-09-20 run-20260920-sr-244 取证：val 与 .input/capacity/特性测试/策略路由.py 的
+# policy_route_data 逐字段一致，仅多出这两个）。只读字段必须剔除：hitcount 由设备维护、
+# enable 为可用状态回显，混进 PUT body 会把状态当配置写入。
+_REPLAY_VAL_DROP_FIELDS = ("hitcount", "enable")
+
+
+def build_policy_route_replay_payload(payload: dict[str, Any], *, op_id: str) -> dict[str, Any]:
+    """把快照信封 ``{"id":.., "val":{..}}`` 归一为可直接下发的 PUT body。
+
+    快照取自 ptm-team ``_locate_snapshot_record``：id 统一为 **str**（策略路由 id 是整数），
+    val 为设备 verify 返回的完整条目。故此处 ① id str→int（非数字串给结构化
+    RUNNER_VALIDATION_FAILED，不静默）；② val 内剔除只读状态字段（``_REPLAY_VAL_DROP_FIELDS``）。
+
+    结构化路径（``build_policy_route_payload``）不经此函数，行为不变。
+    """
+    val = payload.get("val")
+    if not isinstance(val, dict):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Policy-route replay payload must carry an object 'val' (snapshot envelope shape).",
+            {"field": "val", "type": type(val).__name__},
+        )
+    entry_id = payload.get("id", val.get("id"))
+    number = _validate_positive_int("id", entry_id)
+    replay_val = {k: v for k, v in val.items() if k not in _REPLAY_VAL_DROP_FIELDS}
+    # 与 build_policy_route_payload 对齐：val 内亦带 id（设备 PUT 信封要求）。
+    replay_val["id"] = number
+    return {"id": number, "val": replay_val}
 
 
 def build_policy_route_delete_payload(*, entry_id: int | str) -> dict[str, int]:
@@ -341,6 +376,8 @@ def execute_policy_route(
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload)
+        # 目标资源不存在 == 目标状态已达成（幂等删除契约，权威门见 errors.py 登记表）
+        raise_if_resource_not_found(status_code, response_payload, op_id=op_id)
         raise RunnerError(
             "RUNNER_CONFIG_REJECTED" if method != "GET" else "RUNNER_RESPONSE_INVALID",
             "Policy-route device request did not return a success status.",
@@ -424,16 +461,27 @@ def _batch_delete_requested_count(payload: dict[str, Any] | None) -> int:
 def _extract_policy_route_summary(op_id: str, response_payload: Any) -> dict[str, Any]:
     """从设备响应中提取 atom returns.data 契约声明的结构化策略路由 id。
 
-    verify 返回 policy_route_ids 列表与 count；config/update 返回新策略路由 id。
+    verify 返回 policy_route_ids 列表、policy_route_id 单值（首条）与 count；
+    config/update 返回新策略路由 id。
     其余操作（delete/reset/priority）响应不含策略路由 id，返回空 dict。
     """
     summary: dict[str, Any] = {}
     if op_id == "fw_verify_policy_route":
         vals = response_payload.get("vals") if isinstance(response_payload, dict) else None
         if isinstance(vals, list):
-            summary["policy_route_ids"] = [
-                item.get("id") for item in vals if isinstance(item, dict)
-            ]
+            ids = [item.get("id") for item in vals if isinstance(item, dict)]
+            summary["policy_route_ids"] = ids
+            # 单值便捷字段：兑现 atom returns.data.policy_route_id 声明（此前只声明不返回）。
+            # 现场实证（2026-09-21 策略配置 run，PC-STRATEGYROUTE-CFG-STRATEGY-035/039/040）：
+            # 用例形态为「批量创建 N 条 -> 全量查询取 ids -> 取单条做 enable/disable」
+            # —— fw_update_policy_route 是单值契约（无批量接口），必须拿到**一个** id。
+            # 查询无 id 过滤参数（仅 page/size/is_ip6），故单值取**首条**；顺序由设备给定
+            # （实测为 id 升序），用例语义是「抽样 1 条」，不依赖具体是哪条。
+            # 空结果/首条 id 缺失（None/0/""）时不设该键：调用方 resolve_step_refs 对
+            # 缺失字段与空值同判（均报「字段在被引 step 中不存在」），无需用空值占位。
+            first = next((i for i in ids if i not in (None, "", 0)), None)
+            if first is not None:
+                summary["policy_route_id"] = first
         if isinstance(response_payload, dict):
             summary["count"] = response_payload.get("count")
     elif op_id in {"fw_config_policy_route", "fw_update_policy_route"}:

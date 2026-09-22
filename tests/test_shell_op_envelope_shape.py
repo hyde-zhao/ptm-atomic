@@ -92,6 +92,25 @@ DNS_STDOUT = "64 bytes from 110.242.68.66: icmp_seq=1 ttl=52 time=12.3 ms"
 
 VPP_ZONE_STDOUT = "Name  Idx  Interface\ntrust-zone  0  port1"
 
+# 2026-09-21 DUT3 实测输出形态（ipv4 的 policy-id:1 与 ipv6 的 policy-id:10001 并存）
+ABF_POLICY_STDOUT = "\n".join(
+    [
+        "abf:[98]: policy-id:10001 acl:10001, action 1, priority:1, sign:7047901162892520286",
+        "     path-list:[61] locks:1 flags:shared,no-uRPF, uRPF-list: None",
+        "      path:[61] pl-index:61 ip6 weight=12 pref=0 recursive: ",
+        "        via 2001::1 in fib:0 via-fib:55 via-dpo:[dpo-load-balance:56]",
+        "abf:[99]: policy-id:1 acl:1, action 1, priority:1, sign:9515504089035501768",
+        "     path-list:[18] locks:1 flags:shared,no-uRPF, uRPF-list: None",
+        "      path:[32] pl-index:18 ip4 weight=123 pref=0 recursive: ",
+        "        via 1.1.1.1 in fib:0 via-fib:10 via-dpo:[dpo-load-balance:12]",
+        "",
+        "add_counts 1182 0",
+        "del_counts 1180 0",
+        "max time(s) .024 .002 0.000 .002",
+        "ip4 rules count: 2 ip6 rules count: 2",
+    ]
+)
+
 
 def _fake_shell(stdout: str):
     return SimpleNamespace(exit_code=0, stdout=stdout, stderr="")
@@ -195,6 +214,13 @@ OPS = (
             "expected_phase": "stale",
         },
         NEIGHBOR_STDOUT,
+    ),
+    (
+        "fw_verify_abf_policy",
+        "execute_verify_abf_policy",
+        "build_verify_abf_policy_dry_run",
+        {**_SHELL_KWARGS, "username": "root", "policy_route_id": 1, "policy_type": "ipv4"},
+        ABF_POLICY_STDOUT,
     ),
 )
 

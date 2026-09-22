@@ -11,7 +11,12 @@ from urllib.parse import urlencode
 
 from atomic_ops.runner._payload import load_json_payload
 from atomic_ops.runner.batch import build_batch_delete_payload
-from atomic_ops.runner.errors import RunnerError, credential_missing_error, raise_if_device_session_rejected
+from atomic_ops.runner.errors import (
+    RunnerError,
+    credential_missing_error,
+    raise_if_device_session_rejected,
+    raise_if_resource_not_found,
+)
 from atomic_ops.runner.http import request_json, request_json_with_retries
 from atomic_ops.runner.ngfw_login import _encrypt_password, normalize_base_url
 from atomic_ops.runner.pagination import fetch_all_pages, response_payload_or_raise
@@ -427,6 +432,24 @@ def execute_interface(
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload)
+        # 幂等「目标状态已达成」归一（2026-09-21 补齐，与 nat / policy_route / timeobject 同款）：
+        # 删除的创建步回滚与用例清理步会重复删除同一接口，第二次设备答
+        # 400 eIntfGetTypeByName「unknow interface GE0_3.100」——语义上「接口不存在 ==
+        # 目标状态已达成」，不构成残留。此前本函数未接入归一，致 fw_delete_interface 的
+        # 回滚恒报 CLEANUP_FAILED 假阳性（策略配置 run-20260921-190022 实测 3 条；
+        # 历史 run 同类 14 条，errMsg 全为 unknow interface {bond1,GE0_3.100,bvi1}）。
+        # 登记表 IDEMPOTENT_ERROR_TYPES 是唯一门：未登记的 op（创建 / 查询 / 未登记更新）
+        # 天然免疫，非删除类失败行为零变化 —— 故 eIntfGetTypeByName 见于
+        # fw_config_interface 的「配置不存在接口」负例时仍按原 CONFIG_REJECTED 判定。
+        # 反例（**不得**归一）：eIntfisRefed「该接口已被引用」—— 删除确实未完成，是真失败。
+        # extra_details 保留本函数旧分支的诊断键（response_keys），幂等命中时既有键集合
+        # 仍为「追加而非替换」。
+        raise_if_resource_not_found(
+            status_code,
+            response_payload,
+            op_id=op_id,
+            extra_details={"response_keys": sorted(response_payload.keys())},
+        )
         raise RunnerError(
             "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
             "Interface device request did not return a success status.",

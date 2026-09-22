@@ -130,7 +130,11 @@ def _add_nat_update_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_nat_delete_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", required=True, help="Rule id. Sent as a string in the JSON body.")
+    parser.add_argument(
+        "--id",
+        required=True,
+        help="Rule id. Sent as a string in the id query parameter (?id=<id>), with no JSON body.",
+    )
 
 
 def _add_nat_verify_args(parser: argparse.ArgumentParser) -> None:

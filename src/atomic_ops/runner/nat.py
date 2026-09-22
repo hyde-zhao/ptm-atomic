@@ -11,8 +11,8 @@ NAT 规则按两个正交维度组织：
 
 - 创建与删除的 ``id`` 是 JSON **字符串**，修改的 ``id`` 是 JSON **整数**；
 - 创建/修改 payload 写作 ``relate.isIpv6``，而回读记录写作 ``relate.is_ipv6``；
-- DELETE 把 id 放在 JSON body 且不发任何查询参数，与 ``fw_delete_iptun`` /
-  ``fw_delete_interface`` 走 ``?id=`` 的形态相反；
+- DELETE 把 id 放在 ``?id=`` 查询参数且不发 body，与 ``fw_delete_iptun`` /
+  ``fw_delete_interface`` 同形（2026-09-21 真机实测订正，原记的 body 形态有误）；
 - ``fw_update_nat_hitcount`` 是清除命中计数的写操作，不是查询。
 """
 
@@ -22,7 +22,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
+from atomic_ops.runner.errors import (
+    RunnerError,
+    raise_if_device_session_rejected,
+    raise_if_resource_not_found,
+)
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -55,9 +59,11 @@ CONFIG_OPS = frozenset({"fw_config_nat_snat", "fw_config_nat_dnat", "fw_config_n
 BATCH_OPS = frozenset({"fw_delete_batch_nat"})
 HITCOUNT_OP = "fw_update_nat_hitcount"
 
-# GET 是唯一不带 body 的方法：三个删除操作都把 id 放在 JSON body 里，
-# 与 iptun / interface 的 ``?id=`` 形态不同，不能套用它们的 NO_BODY_OPS 算法。
-NO_BODY_OPS = GET_OPS
+# GET 与三个删除操作都不带 body：删除把规则 id 放在 ``?id=<string>`` 查询参数里，
+# 与 iptun / interface 同形（2026-09-21 真机实测修正 —— 原 body 形态被设备判为
+# 全量删除，返回 400 eRequestParam「Delete all ... not supported in generic delete
+# operation」；``?id=<n>`` 形态返回 200 success）。
+NO_BODY_OPS = GET_OPS | DELETE_OPS
 
 # 转换族到端点。族不同即端点不同 → 独立原子操作。
 NAT_FAMILIES: dict[str, str] = {
@@ -115,9 +121,11 @@ def build_nat_rule_payload(
 
 
 def build_nat_delete_payload(*, op_id: str, entry_id: str | None) -> dict[str, Any]:
-    """组装删除请求 body ``{"id": "<string>"}``。
+    """组装删除选择器 ``{"id": "<string>"}``。
 
-    抓包证据显示三个删除端点都接收字符串 id，且不发查询参数。
+    2026-09-21 真机实测修正：id **不经 body 下发**，改走 ``?id=<string>`` 查询
+    参数（body 形态被设备判为全量删除并 400）；此结构保留用于 dry-run 呈现与
+    ``_extract_nat_summary`` 的 id 回显，实际请求由 ``_query_params`` 承载。
     """
     if op_id not in DELETE_OPS:
         raise RunnerError(
@@ -241,7 +249,13 @@ def build_nat_dry_run(
     nat_type: str = DEFAULT_NAT_TYPE,
 ) -> dict[str, Any]:
     method, _path = _method_path(op_id)
-    query = _query_params(op_id, page=page, size=size, nat_type=nat_type)
+    query = _query_params(
+        op_id,
+        page=page,
+        size=size,
+        nat_type=nat_type,
+        entry_id=(payload or {}).get("id") if isinstance(payload, dict) else None,
+    )
     return {
         "op_id": op_id,
         "status": "dry_run",
@@ -274,7 +288,13 @@ def execute_nat(
     nat_type: str = DEFAULT_NAT_TYPE,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
-    query = _query_params(op_id, page=page, size=size, nat_type=nat_type)
+    query = _query_params(
+        op_id,
+        page=page,
+        size=size,
+        nat_type=nat_type,
+        entry_id=(payload or {}).get("id") if isinstance(payload, dict) else None,
+    )
     session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
@@ -290,6 +310,20 @@ def execute_nat(
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload)
+        # 幂等「目标状态已达成」归一（2026-09-21 补齐，与 policy_route / timeobject 同款）：
+        # 删除的创建步回滚与用例清理步会重复删除同一 NAT 规则，第二次设备答
+        # 400 eRequestParam「Couldn't found 1 from DB」——语义上「目标不存在 == 目标状态
+        # 已达成」，不构成残留。此前本函数未接入归一，致 fw_delete_nat_{snat,dnat} 的
+        # 回滚恒报 CLEANUP_FAILED 假阳性（策略配置 run-20260921-174814 实测 4 条）。
+        # 登记表 IDEMPOTENT_ERROR_TYPES 是唯一门：未登记的 op（create/update/verify）
+        # 天然免疫，非删除类失败行为零变化。extra_details 保留本函数旧分支的诊断键
+        # （response_keys），幂等命中时既有键集合仍为「追加而非替换」。
+        raise_if_resource_not_found(
+            status_code,
+            response_payload,
+            op_id=op_id,
+            extra_details={"response_keys": sorted(response_payload.keys())},
+        )
         raise RunnerError(
             "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
             "NAT device request did not return a success status.",
@@ -364,8 +398,8 @@ def _extract_nat_summary(
 def _request_url(base_url: str, op_id: str, *, query: dict[str, str] | None = None) -> str:
     _method, path = _method_path(op_id)
     url = f"{normalize_base_url(base_url)}{path}"
-    # DELETE 的 id 走 JSON body，GET 的筛选条件走查询参数；两者不可互换。
-    if op_id in GET_OPS and query:
+    # GET 的筛选条件与 DELETE 的选择器 id 都走查询参数（两者均无 body）。
+    if query:
         url = f"{url}?{urlencode(query)}"
     return url
 
@@ -387,8 +421,15 @@ def _query_params(
     page: int | None,
     size: int | None,
     nat_type: str,
+    entry_id: str | None = None,
 ) -> dict[str, str] | None:
-    """GET 的查询参数。顺序与抓包一致：page、size、natType。"""
+    """查询参数。GET：page、size、natType（顺序与抓包一致）；DELETE：id。
+
+    删除的选择器 id 必须经此通道下发 —— 设备对无 id 的 DELETE 一律按全量删除
+    处理并拒绝（2026-09-21 真机实测）。
+    """
+    if op_id in DELETE_OPS:
+        return {"id": _coerce_string_id("id", entry_id)}
     if op_id not in GET_OPS:
         return None
     query: dict[str, str] = {}

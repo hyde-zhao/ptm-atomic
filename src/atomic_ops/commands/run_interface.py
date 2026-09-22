@@ -44,8 +44,16 @@ def build_subtree() -> tuple[CommandSpec, ...]:
 
 
 def _add_interface_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", required=True, action="append", help="Entry id. May be repeated for batch operations.")
-    parser.add_argument("--interface-kind", choices=("bvi", "sub", "physical", "bond", "tunnel", "pppoe"), required=True, help="NGFW interface kind. Tunnel interfaces support PUT and GET only.")
+    # --id / --interface-kind 不在 argparse 层强制（2026-09-21）：整包重放时两者由
+    # payload 自带（PUT /api/v1/intf 是覆盖式 PUT，body 的 id + val 就是完整定义）。
+    # 缺参的结构化调用改由 _run_interface 内的 _require_arg 给出结构化
+    # RUNNER_VALIDATION_FAILED（而非 argparse 的 usage 报错），与 --payload 的 help
+    # 承诺一致 —— 与 run_policy_route.py 的 update 同款处置（先例：缺口 D）。
+    # 起因：ptm-team 的 restore_snapshot 回滚把设备 verify 返回的 {"id":..,"val":{..}}
+    # 整包经 --payload-json 回灌（op_mapper.handle_rollback），此前 argparse 先拦下
+    # 「required: --id, --interface-kind」-> 接口快照永远重放不出去。
+    parser.add_argument("--id", action="append", help="Entry id. May be repeated for batch operations. Required unless --payload-json/--payload-file is given.")
+    parser.add_argument("--interface-kind", choices=("bvi", "sub", "physical", "bond", "tunnel", "pppoe"), help="NGFW interface kind. Tunnel interfaces support PUT and GET only. Required unless --payload-json/--payload-file is given.")
     parser.add_argument("--mode", choices=("Route", "Switch", "Pair", "Monitor"), default="Route", help="NGFW interface mode.")
     parser.add_argument("--name", help="Interface val.name. Defaults to --id.")
     parser.add_argument("--desc", default="", help="Interface description.")

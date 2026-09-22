@@ -1580,6 +1580,200 @@ def execute_config_bridge_domain_mac_age(
     }
 
 
+# ── ABF policy 生效状态（fw_verify_abf_policy） ───────────
+
+
+ABF_POLICY_COMMAND = "/opt/dbappsecurity/bin/vppctl show abf policy"
+# 表空时输出仅剩计数行（add_counts/del_counts 恒在），有表项时首行是 ``abf:[<i>]: policy-id:<id>``。
+ABF_POLICY_SUCCESS_PATTERN = r"add_counts|abf:\["
+# 表项行形如 ``abf:[98]: policy-id:10001 acl:10001, action 1, priority:1, sign:...``，
+# 其后的缩进行是 path-list / path 明细（不含 policy-id），故按行首锚定。
+_ABF_POLICY_ROW_RE = re.compile(r"\s*abf:\[(\d+)\]:\s*policy-id:(\d+)\s*(.*)$")
+_ABF_RULES_COUNT_RE = re.compile(r"ip4 rules count:\s*(\d+)\s+ip6 rules count:\s*(\d+)")
+ABF_POLICY_TYPES = ("ipv4", "ipv6")
+# 用户口径（2026-09-21）：VPP ABF 表里 ipv6 策略路由的 policy-id 是 10000 + 业务 id
+# （实测 ``policy-id:10001`` 对应 id=1 的 ipv6 策略路由），ipv4 直用业务 id。
+ABF_IPV6_ID_OFFSET = 10000
+
+
+def parse_abf_policy_table(raw: str) -> dict[str, Any]:
+    """解析 ``vppctl show abf policy`` 输出为结构化表项与计数。
+
+    只提取行首表项行的 ``policy-id``（缩进的 path 明细行一律跳过），另抓尾部的
+    ``ip4 rules count: N ip6 rules count: M`` 便于诊断。
+    """
+    policies: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        match = _ABF_POLICY_ROW_RE.match(line)
+        if not match:
+            continue
+        entry: dict[str, Any] = {
+            "abf_index": int(match.group(1)),
+            "policy_id": int(match.group(2)),
+        }
+        rest = match.group(3)
+        acl = re.search(r"acl:(\d+)", rest)
+        if acl:
+            entry["acl"] = int(acl.group(1))
+        priority = re.search(r"priority:(\d+)", rest)
+        if priority:
+            entry["priority"] = int(priority.group(1))
+        policies.append(entry)
+    parsed: dict[str, Any] = {
+        "policies": policies,
+        "policy_ids": [item["policy_id"] for item in policies],
+    }
+    counts = _ABF_RULES_COUNT_RE.search(raw)
+    if counts:
+        parsed["ip4_rules_count"] = int(counts.group(1))
+        parsed["ip6_rules_count"] = int(counts.group(2))
+    return parsed
+
+
+def resolve_abf_policy_id(policy_route_id: int, policy_type: str) -> int:
+    """业务策略路由 id → VPP ABF 表 policy-id。ipv4 直用；ipv6 加 10000。"""
+    if policy_type not in ABF_POLICY_TYPES:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ABF policy type is unsupported.",
+            {"field": "policy_type", "actual": policy_type, "allowed": list(ABF_POLICY_TYPES)},
+        )
+    if policy_route_id < 0:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ABF policy route id must be a non-negative integer.",
+            {"field": "policy_route_id", "actual": policy_route_id},
+        )
+    return policy_route_id + ABF_IPV6_ID_OFFSET if policy_type == "ipv6" else policy_route_id
+
+
+def build_verify_abf_policy_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None = None,
+    policy_route_id: int,
+    policy_type: str,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or "root"
+    return {
+        "op_id": "fw_verify_abf_policy",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": ABF_POLICY_COMMAND,
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+            "success_pattern": ABF_POLICY_SUCCESS_PATTERN,
+        },
+        "policy_route_id": policy_route_id,
+        "policy_type": policy_type,
+        "abf_policy_id": resolve_abf_policy_id(policy_route_id, policy_type),
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_abf_policy(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    credential_env: str,
+    username: str | None = None,
+    policy_route_id: int,
+    policy_type: str,
+    timeout: float,
+) -> dict[str, Any]:
+    """查 VPP ABF 表并断言目标 policy-id 在表内。
+
+    判据（用户口径 2026-09-21）：**能查到 policy-id ⇒ 策略路由生效；查不到 ⇒ 不生效**
+    （时间对象不在生效范围时设备不下发该 policy）。查不到按 ``STATE_MISMATCH`` 报错，
+    负例用例用 ``expected_failure: true`` 表达「预期不生效」。
+    """
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    resolved_user = username or "root"
+    credential = _read_credential_env(credential_env)
+    abf_policy_id = resolve_abf_policy_id(policy_route_id, policy_type)
+
+    result = _run_shell_command(
+        transport=transport,
+        host=target_host,
+        port=target_port,
+        username=resolved_user,
+        credential=credential,
+        command=ABF_POLICY_COMMAND,
+        timeout=timeout,
+    )
+    # 与 fw_verify_neighbor_probe 同一现象：vppctl 在该设备上不经 paramiko exec 通道
+    # 回传标准退出码（实测恒 exit_code=-1 而 stdout 完整），故 -1 且带表头/计数行即算命令成功。
+    if not _shell_output_succeeded(
+        result, ABF_POLICY_SUCCESS_PATTERN, acceptable_exit_codes={0, -1}
+    ):
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "Shell command output did not match the ABF policy success pattern.",
+            {
+                "op_id": "fw_verify_abf_policy",
+                "transport": transport,
+                "exit_code": result.exit_code,
+                "stdout_preview": (result.stdout[:200] if result.stdout else ""),
+                "stderr_preview": (result.stderr[:200] if result.stderr else ""),
+            },
+        )
+
+    parsed = parse_abf_policy_table(result.stdout)
+    if abf_policy_id not in parsed["policy_ids"]:
+        raise RunnerError(
+            "STATE_MISMATCH",
+            "ABF policy id is absent from the VPP ABF policy table; the policy route is not in effect.",
+            {
+                "op_id": "fw_verify_abf_policy",
+                "policy_route_id": policy_route_id,
+                "abf_policy_id": abf_policy_id,
+                "policy_type": policy_type,
+                "policy_ids": parsed["policy_ids"],
+                "stdout_preview": result.stdout[:2000],
+            },
+        )
+    return {
+        "op_id": "fw_verify_abf_policy",
+        "status": "success",
+        "transport": transport,
+        "abf_policy_raw": result.stdout.strip(),
+        "policy_route_id": policy_route_id,
+        "policy_type": policy_type,
+        "abf_policy_id": abf_policy_id,
+        "found": True,
+        "policy_ids": parsed["policy_ids"],
+        "abf_policies": parsed["policies"],
+        "request": {
+            "command": ABF_POLICY_COMMAND,
+            "host": target_host,
+            "port": target_port,
+            "username": resolved_user,
+        },
+        "response": {
+            "exit_code": result.exit_code,
+            "stdout_ref": "<abf-policy-raw-ref>",
+            "stderr_ref": "<diag-snapshot-ref>",
+        },
+        "diag_snapshot_ref": "<diag-snapshot-ref>",
+    }
+
+
 # ── fw_verify_process_state ───────────────────────────────
 
 

@@ -71,7 +71,22 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_update_args(parser: argparse.ArgumentParser) -> None:
     _add_common_args(parser)
-    parser.add_argument("--id", required=True, help="Policy-route entry id to update.")
+    # 快照整包重放通道（回滚路径）：ptm-team 的 restore_snapshot 分支把设备 verify 返回的
+    # {"id":..,"val":{..}} 整包经 --payload-json 回灌（见 op_mapper.handle_rollback）。
+    # 结构化字段无法表达设备的完整条目：forwarding_paths 是嵌套列表而映射表是扁平三字段、
+    # applist 与映射表的 app_list 命名不一致 —— 故必须整包下发，见
+    # atomic_ops.runner.policy_route.build_policy_route_replay_payload。
+    # 仅 update 需要（config 的策略类型是 inverse_op，无整包语义）；两者互斥，都不给时
+    # 走既有结构化路径（行为不变）。
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload (overrides structured sources).")
+    parser.add_argument("--payload-json", help="Complete JSON request payload (overrides structured sources).")
+    # --id 不在 argparse 层强制：整包重放时 id 由 payload 自带。缺 id 的结构化调用改由
+    # _run_update 内的 _require_arg 给出结构化 RUNNER_VALIDATION_FAILED（而非 argparse 的
+    # usage 报错），与 --payload 的 help 承诺一致。
+    parser.add_argument(
+        "--id",
+        help="Policy-route entry id to update. Required unless --payload-json/--payload-file is given.",
+    )
 
 
 def _add_config_batch_args(parser: argparse.ArgumentParser) -> None:
@@ -277,7 +292,9 @@ def _run_config_batch(args: argparse.Namespace) -> int:
 
 
 def _run_update(args: argparse.Namespace) -> int:
-    _require_arg(args, "id")
+    # 缺参校验不在此处：--id 的 argparse required 已放开（整包重放时 id 由 payload 自带），
+    # 而本函数在 _run_policy_route 的 try 块之外，抛 RunnerError 会成裸 traceback。
+    # 校验落在 _run_policy_route 的错误出口内（同 fw_delete_batch_policy_route 模式）。
     return _run_policy_route(args, "fw_update_policy_route")
 
 
@@ -311,12 +328,14 @@ def _run_priority(args: argparse.Namespace) -> int:
 
 
 def _run_policy_route(args: argparse.Namespace, op_id: str) -> int:
+    from atomic_ops.runner._payload import load_json_payload
     from atomic_ops.runner.policy_route import (
         build_policy_route_batch_delete_payload,
         build_policy_route_delete_payload,
         build_policy_route_dry_run,
         build_policy_route_payload,
         build_policy_route_priority_payload,
+        build_policy_route_replay_payload,
         execute_policy_route,
         validate_policy_route_payload,
     )
@@ -331,7 +350,23 @@ def _run_policy_route(args: argparse.Namespace, op_id: str) -> int:
         route_type = getattr(args, "policy_route_type", "ipv4")
         payload: dict[str, Any] | None
 
-        if op_id in {"fw_config_policy_route", "fw_update_policy_route"}:
+        # 快照整包重放优先（回滚路径）：仅 fw_update_policy_route 有整包语义，见 _add_update_args。
+        # 命中即整包下发，绕过结构化字段（结构化表达不了嵌套 forwarding_paths 与 applist 命名差异）。
+        replay_payload = (
+            load_json_payload(
+                payload_file=getattr(args, "payload_file", None),
+                payload_json=getattr(args, "payload_json", None),
+            )
+            if op_id == "fw_update_policy_route"
+            else None
+        )
+        # 缺 --id 的结构化 update：argparse 层已放开 required（整包重放时 id 在 payload 内），
+        # 故缺参校验落在此错误出口内，给结构化 RUNNER_VALIDATION_FAILED 而非裸 traceback。
+        if op_id == "fw_update_policy_route" and replay_payload is None:
+            _require_arg(args, "id")
+        if replay_payload is not None:
+            payload = build_policy_route_replay_payload(replay_payload, op_id=op_id)
+        elif op_id in {"fw_config_policy_route", "fw_update_policy_route"}:
             payload = build_policy_route_payload(
                 source_network=getattr(args, "source_network"),
                 source_network_is_group=bool(getattr(args, "source_network_is_group")),

@@ -20,8 +20,8 @@ parameters:
     type: json
     required: true
     description: >-
-      Static NAT rule delete selector. The device takes the rule id in a JSON
-      request body as a string, not as a query parameter.
+      Static NAT rule delete selector. The device takes the rule id in the id
+      query parameter as a string and sends no JSON body.
   idempotency_key:
     type: string
     required: true
@@ -98,7 +98,7 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk static NAT deletion is used.
-  - DELETE carries the rule id in a JSON body as a string and sends no query parameter.
+  - DELETE carries the rule id in the id query parameter as a string and sends no JSON body.
 postconditions:
   - Static NAT rule deletion result and diagnostic references are available to the caller.
   - A follow-up fw_verify_nat_static query can confirm the deleted rule is absent.

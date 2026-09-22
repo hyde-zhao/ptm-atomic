@@ -20,8 +20,8 @@ parameters:
     type: json
     required: true
     description: >-
-      Source NAT rule delete selector. The device takes the rule id in a JSON
-      request body as a string, not as a query parameter.
+      Source NAT rule delete selector. The device takes the rule id in the id
+      query parameter as a string and sends no JSON body.
   idempotency_key:
     type: string
     required: true
@@ -49,7 +49,21 @@ returns:
     manual_handling_ref: "<manual-handling-ref>"
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
-idempotent: false
+# ── 幂等删除契约口径（CT-REM-ATOM-DELETE；只收敛口径，不新增字段）──────────────
+# `idempotent`（语义键）：true = 重复执行收敛到同一目标状态；对删除 op 特指
+#   「目标对象不存在 = 目标状态已达成」—— 创建步回滚与用例清理步会**重复删除同一
+#   规则**，第二次必然报「不存在」。2026-09-21 实测设备原文：
+#   HTTP 400 eRequestParam「Couldn't found 1 from DB」
+# `error_types`（错误枚举）：其中 RESOURCE_NOT_FOUND 在 `idempotent: true` 前提下
+#   表达「目标已不存在」，**不构成残留**。
+# 二者必须**同时成立**；只具其一的声明视为口径不一致 —— 由 runner 侧
+#   `validate_idempotent_registry()` 显式报错，不得静默按「非幂等」处理。
+# 消费方判定式（cleanup_failed / exit 9 判定读统一键）：回滚信封
+#   `details.error_type == "RESOURCE_NOT_FOUND"` 且 `details.idempotent == true`
+#   同时成立 → 判「幂等成功」，不计入 cleanup_failed；未命中则维持既有
+#   CLEANUP_FAILED 归一（真残留保真）。
+# ────────────────────────────────────────────────────────────────────────────
+idempotent: true
 rollback_strategy:
   type: restore_snapshot
   snapshot_required: true
@@ -81,6 +95,7 @@ error_types:
   - GATE_MISSING
   - CONFIG_REJECTED
   - DEVICE_UNREACHABLE
+  - RESOURCE_NOT_FOUND
   - UNKNOWN_ERROR
 risk:
   level: high
@@ -98,7 +113,7 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk source NAT deletion is used.
-  - DELETE carries the rule id in a JSON body as a string and sends no query parameter.
+  - DELETE carries the rule id in the id query parameter as a string and sends no JSON body.
 postconditions:
   - Source NAT rule deletion result and diagnostic references are available to the caller.
   - A follow-up fw_verify_nat_snat query can confirm the deleted rule is absent.

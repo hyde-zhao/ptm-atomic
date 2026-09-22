@@ -173,6 +173,19 @@ def _login_once(
                 f"Authentication rejected by device (HTTP {status_code}).",
                 {"status_code": status_code},
             )
+        # 设备对「需要修改默认密码」用 **HTTP 400 + body errCode（eChangDeafPwd）** 表达
+        # （DUT3 实测 2026-09-21：`{"errCode":"eChangDeafPwd","errMsg":"需要修改默认密码后才能登录"}`）。
+        # 原实现在此一律抛错，令上层 `login()` 的 `errCode == "eChangDeafPwd"` 分支
+        # **不可达**（`--change-default-password` 形同虚设）。故非 2xx 且 body 带 errCode 时
+        # 原样上抛该 errCode 交由上层分流：eChangDeafPwd -> 走 changeDefPwd；其余 -> 由
+        # `login()` 统一抛 RUNNER_LOGIN_FAILED（语义不变，错误码来源从 HTTP 状态变为设备 errCode）。
+        err_code = result.get("errCode") if isinstance(result, dict) else None
+        if err_code:
+            return {
+                "errCode": err_code,
+                "errMsg": result.get("errMsg"),
+                "status_code": status_code,
+            }
         raise RunnerError(
             "RUNNER_LOGIN_FAILED",
             "Login request returned a non-success status.",
