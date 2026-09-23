@@ -13,14 +13,16 @@ parameters:
     required: true
     description: >-
       Pre-defined ASTF template name.
-      Available: http-simple, http-multi, dns-query, ftp-download.
+      Available: http-simple, http-multi, http-attack, ftp-auth, p2p-replay,
+      dns-query, ftp-download, mixed-services.
   tunables:
     type: json
     required: false
     description: >-
       Template-specific tunables JSON (e.g. {"nflows":5} for flows,
       {"ftp":20,"http":50,"dns":30} mixed percentages) plus common
-      client_ip/server_ip pool start addresses.
+      client_ip/server_ip pool start addresses. String values accept a
+      "b64:<base64>" form to escape values argparse would mistake for options.
 returns:
   status: success
   data:
