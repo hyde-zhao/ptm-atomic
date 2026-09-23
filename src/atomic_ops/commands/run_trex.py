@@ -329,7 +329,7 @@ def _add_apply_stateful_template_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--template",
         required=True,
-        help="Pre-defined ASTF template name (http-simple, http-multi, dns-query, ftp-download).",
+        help="Pre-defined ASTF template name (http-simple, http-multi, http-attack, dns-query, ftp-download, mixed-services).",
     )
     parser.add_argument(
         "--tunables",
