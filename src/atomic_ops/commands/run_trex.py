@@ -203,16 +203,23 @@ def _add_config_interface_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_apply_template_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--template", required=True, help="Traffic template name (^[a-z0-9_-]+$).")
-    parser.add_argument("--tx-port", required=True, help="Default TX port stored in the template.")
-    parser.add_argument("--rx-port", required=True, help="Default RX port stored in the template.")
+    # 2026-09-23：以下 6 个"必填"参数改由 build_trex_payload 在**未直传 payload** 时
+    # 校验（见 runner/trex.py 的 tg_apply_traffic_template 分支）。原为 argparse
+    # required=True，即使给了 --payload-json/--payload-file 也强制要求 —— 而 `_run_trex`
+    # 的 payload 分支根本不读这些值，逃生口形同虚设（真机 exit=2 usage 报错）。
+    # 语义对齐 `fw_update_timeobject`："Required unless --payload-json/--payload-file
+    # is given"。不能直传 payload 的参数（如 --ip-version 有默认值）不受影响。
+    optional_when_payload = " Required unless --payload-json/--payload-file is given."
+    parser.add_argument("--template", required=False, default=None, help="Traffic template name (^[a-z0-9_-]+$)." + optional_when_payload)
+    parser.add_argument("--tx-port", required=False, default=None, help="Default TX port stored in the template." + optional_when_payload)
+    parser.add_argument("--rx-port", required=False, default=None, help="Default RX port stored in the template." + optional_when_payload)
     parser.add_argument(
         "--ip-version",
         choices=("ipv4", "ipv6"),
         default="ipv4",
         help="Network layer packet type. Defaults to ipv4.",
     )
-    parser.add_argument("--l4-protocol", choices=("tcp", "udp", "icmp"), required=True, help="Layer 4 protocol (icmp = echo request, no ports).")
+    parser.add_argument("--l4-protocol", choices=("tcp", "udp", "icmp"), required=False, default=None, help="Layer 4 protocol (icmp = echo request, no ports)." + optional_when_payload)
     parser.add_argument("--l4-sport", type=int, required=False, default=None, help="Layer 4 source port (tcp/udp only).")
     parser.add_argument("--l4-dport", type=int, required=False, default=None, help="Layer 4 destination port (tcp/udp only).")
     parser.add_argument(
@@ -224,8 +231,8 @@ def _add_apply_template_args(parser: argparse.ArgumentParser) -> None:
             "(tcp/udp only; default 1 = single flow). --count stays the TOTAL packet count."
         ),
     )
-    parser.add_argument("--traffic-mode", choices=("count", "continuous"), required=True, help="Traffic mode.")
-    parser.add_argument("--rate", required=True, help="TRex-style rate string such as 100pps or 10mbps.")
+    parser.add_argument("--traffic-mode", choices=("count", "continuous"), required=False, default=None, help="Traffic mode." + optional_when_payload)
+    parser.add_argument("--rate", required=False, default=None, help="TRex-style rate string such as 100pps or 10mbps." + optional_when_payload)
     parser.add_argument("--count", type=int, default=None, help="Packet count (required when traffic-mode=count except ICMP defaults to 5).")
     parser.add_argument("--frame-size", type=int, default=None, help="Ethernet frame size in bytes (>= 64).")
     parser.add_argument("--vlan", default=None, help="VLAN ID or VLAN stack.")

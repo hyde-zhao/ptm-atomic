@@ -159,6 +159,19 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
             )
         payload: dict[str, Any] = {"interfaces": interfaces}
     elif op_id == "tg_apply_traffic_template":
+        # 2026-09-23：这 6 个字段原先靠 argparse required=True 保证；但用例直传
+        # --payload-json/--payload-file 时 `_run_trex` 走 payload 分支、根本不到这里，
+        # 而 argparse 仍强制要求它们 -> 逃生口不可用（真机 exit=2 usage）。现改为
+        # CLI 侧 required=False，**无 payload 路径**由本函数校验，与
+        # `fw_update_timeobject` 的 "Required unless --payload-json/--payload-file
+        # is given" 语义一致。
+        for required_field in ("template", "tx_port", "rx_port", "l4_protocol", "traffic_mode", "rate"):
+            if params.get(required_field) in (None, ""):
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    f"{required_field} is required unless --payload-json/--payload-file is given.",
+                    {"field": required_field},
+                )
         payload = {
             "template": params.get("template"),
             "tx_port": params.get("tx_port"),
@@ -338,10 +351,14 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
                     {"field": "stream_count", "l4_protocol": l4_proto},
                 )
             stream_count = _validate_positive_int("stream_count", stream_count)
-            if stream_count > 1000:
+            # 资源守卫（非协议约束）：单模板展开的流数上限。2026-09-23 由 1000 提到
+            # 10000 —— 用户需按 10000 个端口构造大规模多流（端口空间本身由下方
+            # l4_sport/l4_dport 越界检查兜底，与本上限是两回事）。服务端 trex-api
+            # schemas.py 的 le 必须同步放开，否则请求在服务端 422。
+            if stream_count > 10000:
                 raise RunnerError(
                     "RUNNER_VALIDATION_FAILED",
-                    "stream_count must not exceed 1000.",
+                    "stream_count must not exceed 10000.",
                     {"field": "stream_count", "actual": stream_count},
                 )
             if payload["l4_sport"] + stream_count - 1 > 65535:
