@@ -230,8 +230,14 @@ class BuildApplyStreamCountTests(unittest.TestCase):
         self.assertEqual(payload["stream_count"], 4)
 
     def test_stream_count_upper_bound_rejected(self) -> None:
+        # 上限 10000（ff2fba1 放开）——测试原断言 1001 被拒，是**上限抬高后未同步**的
+        # 过期基线失败（2026-09-24 修）：改为越界值 10001，并补边界值 10000 放行。
         with self.assertRaises(RunnerError):
-            build_trex_payload("tg_apply_traffic_template", _apply_params(stream_count=1001))
+            build_trex_payload("tg_apply_traffic_template", _apply_params(stream_count=10001))
+        payload = build_trex_payload(
+            "tg_apply_traffic_template", _apply_params(l4_sport=1, stream_count=10000)
+        )
+        self.assertEqual(payload["stream_count"], 10000)
 
     def test_non_positive_rejected(self) -> None:
         """0 / 负数 / 非数字一律拒绝。
