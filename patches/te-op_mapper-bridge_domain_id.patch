@@ -1,0 +1,32 @@
+--- a/skills/case-op-execution/scripts/op_mapper.py
++++ b/skills/case-op-execution/scripts/op_mapper.py
+@@ -475,11 +475,18 @@
+     },
+     # BVI 检查族（2026-09-10）：与 verify-l2fib 同为 cli 族 SSH/Telnet 旁路，host 缺省从 base-url 解析；
+     # check-bvi-interface-config 额外必填 --bvi-id（etcd key 模板 .../interfaces/bvi<id>，取数值）
++    # 2026-09-24（bridge_domain_id 落地）：本 op 从"只有全表查询"升级为可选 scoped 查询
++    # （ptm-atomic liyuanyuan df98942：--bridge-domain-id 1-4094，命令收敛为
++    # `vppctl show bridge-domain <id>`，success_pattern 由 \S+ 换成表头锚点 BD-ID）。
++    # 该字段**不用豁免表丢弃**：它决定查哪个 BD，丢掉会让后置退化为"查全表"、
++    # 失去"目标 BD 是否存在"的判据（用例 expected_result 正是"bridge-domain 含 bvi"）。
++    # 故登记映射而非登记 _IGNORED_ARGS，详见该表头注释。
+     "fw_check_bridge_domain": {
+         "transport": "--transport",
+         "host": "--host",
+         "port": "--port",
+         "credential_env": "--credential-env",
++        "bridge_domain_id": "--bridge-domain-id",
+     },
+     "fw_check_bvi_interface_config": {
+         "transport": "--transport",
+@@ -2869,6 +2876,10 @@
+ # -> PARAM_INVALID），与 op_id 级的 OP_NOT_FOUND 对等。静默丢弃会让命令「少参下发仍判
+ # success」（现场 CFG-STRATEGY-02-02：payload_json 被丢 -> 时间对象从未按用例创建）。
+ # 本表只登记「ptm-atomic CLI 确无对应 flag，且忽略不改变用例语义」的字段，逐条给理由。
++# 反向名单（2026-09-24）：以下字段**形似可豁免、实则不可**，故登记在映射表而非本表 ——
++#   - fw_check_bridge_domain.bridge_domain_id：ptm-atomic liyuanyuan df98942 起 CLI 已有
++#     --bridge-domain-id（scoped 查询 + BD-ID 表头判据）。丢弃它会让后置退化为全表查询，
++#     无法回答"目标 BD 是否存在"，与用例 expected_result 不符，故走 ARGS_TO_FLAGS 映射。
+ _IGNORED_ARGS: Dict[str, Dict[str, str]] = {
+     "fw_config_object": {
+         # run_object.py 无 --object-type：地址对象子命令固定 address 域。
