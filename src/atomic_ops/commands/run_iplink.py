@@ -48,15 +48,47 @@ def build_subtree() -> tuple[CommandGroup, ...]:
 
 
 def _add_iplink_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--name", required=True, help="Iplink val.name.")
-    parser.add_argument("--destination", required=True, help="Iplink detection destination IP address.")
-    parser.add_argument("--interface", required=True, help="Iplink detection interface name.")
+    # --name / --destination / --interface 不在 argparse 层强制（2026-09-23）：整包重放时
+    # 三者由 payload 自带（fw_update_iplink 的设备契约是 val.name 定位 + 完整定义）。
+    # 缺参的结构化调用改由 _require_iplink_args 给出结构化 RUNNER_VALIDATION_FAILED
+    # （而非 argparse 的 usage 报错），与 --payload-json 的 help 承诺一致 ——
+    # 与 run_interface.py / run_policy_route.py 的 update 同款处置（先例：缺口 D/E）。
+    # 起因：ptm-team 的 restore_snapshot 回滚把设备 verify 返回的记录整包经
+    # --payload-json 回灌（op_mapper.handle_rollback），此前 argparse 先拦下
+    # 「required: --name, --destination, --interface」-> iplink 快照永远重放不出去（缺口 F）。
+    parser.add_argument("--name", help="Iplink val.name. Required unless --payload-json/--payload-file is given.")
+    parser.add_argument("--destination", help="Iplink detection destination IP address. Required unless --payload-json/--payload-file is given.")
+    parser.add_argument("--interface", help="Iplink detection interface name. Required unless --payload-json/--payload-file is given.")
     parser.add_argument("--port", type=int, default=0, help="Iplink detection destination port.")
     parser.add_argument("--detect-type", type=int, default=0, help="Iplink detectType field.")
     parser.add_argument("--interval", type=int, default=3, help="Iplink detection interval in seconds.")
     parser.add_argument("--retry", type=int, default=1, help="Iplink detection retry count.")
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _require_iplink_args(args: argparse.Namespace) -> None:
+    """结构化调用（非整包重放）时校验三必填参数（缺口 F，2026-09-23）。
+
+    Args:
+        args: argparse 命名空间
+
+    Raises:
+        RunnerError: RUNNER_VALIDATION_FAILED（缺参），details 列出缺失的 argument；
+            与 argparse 的 usage 报错不同，本错误是**结构化信封**，可被上层判定消费。
+    """
+    missing = [
+        flag for flag, attr in (("--name", "name"),
+                                ("--destination", "destination"),
+                                ("--interface", "interface"))
+        if not str(getattr(args, attr, "") or "").strip()
+    ]
+    if missing:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Missing required runner argument(s).",
+            {"argument": missing, "hint": "Pass them explicitly, or use --payload-json/--payload-file."},
+        )
 
 
 def _add_linkgroup_args(parser: argparse.ArgumentParser) -> None:
@@ -148,6 +180,8 @@ def _run_iplink(args: argparse.Namespace, op_id: str) -> int:
         payload: dict[str, Any] | None
 
         if op_id in {"fw_config_iplink", "fw_update_iplink"}:
+            if raw_payload is None:
+                _require_iplink_args(args)
             payload = raw_payload or build_iplink_payload(
                 name=getattr(args, "name"),
                 destination=getattr(args, "destination"),
@@ -157,6 +191,16 @@ def _run_iplink(args: argparse.Namespace, op_id: str) -> int:
                 interval=int(getattr(args, "interval", 3)),
                 retry=int(getattr(args, "retry", 1)),
             )
+            # 2026-09-23 现场实证：**update 要求请求体带顶层 `id`**
+            # —— 结构化调用（只有 {"val":{...}}）被设备拒：
+            #   HTTP 400 eRequestBody / errMsg「请求中没有id字段」
+            #   （真机：PC-STRATEGYROUTE-ROUTING-LOADBALANCE-012 STEP-015）。
+            # 本族「**名即 id**」（P2-13 现场实测），故 update 时补 id = val.name。
+            # **create 不带 id**（fw_config_iplink 同环境实测成功，加 id 反而可能被拒）。
+            # 整包重放（--payload-json）自带 id（ptm-team 快照信封 {"id":..,"val":{..}}），
+            # 此处不覆盖。
+            if op_id == "fw_update_iplink" and "id" not in payload:
+                payload = {"id": payload["val"]["name"], **payload}
             payload = validate_iplink_payload(payload)
         elif op_id == "fw_delete_iplink":
             payload = raw_payload or {"id": _single_arg(args, "id")}

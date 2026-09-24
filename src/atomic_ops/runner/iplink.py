@@ -112,12 +112,54 @@ def _build_batch_delete_payload(*, entry_ids: list[str], resource: str) -> dict[
     return {"batch": batch}
 
 
+#: iplink 的**可写**字段白名单（build_iplink_payload 的产出集，与设备 PUT 契约一致）。
+_IPLINK_WRITABLE_VAL_KEYS = (
+    "name", "port", "destination", "detectType", "interface", "interval", "retry",
+)
+#: iplink 回读记录里的**只读输出**字段（设备自己算的，写回去会被拒）。
+_IPLINK_READONLY_VAL_KEYS = ("config_source", "refcnt", "status")
+
+
 def validate_iplink_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """校验并**归一到可写字段集**（快照重放必需，2026-09-23）。
+
+    为什么需要归一：ptm-team 的 `restore_snapshot` 回滚把设备 GET 回的记录**整包**原样
+    发回（`{"id":.., "val": {回读记录}}`），而回读记录是**扁平**的、含 3 个只读输出字段
+    （`config_source` / `refcnt` / `status`，见 `_IPLINK_READONLY_VAL_KEYS`）。
+    真机实测（PC-STRATEGYROUTE-ROUTING-LOADBALANCE-012）：原样重放被设备拒
+    —— HTTP 400 `/ eObjParse`「iplink JISON格式错误」。
+
+    归一规则（**不静默吞未知字段**，与接口族 `validate_interface_payload` 同款纪律）：
+      - 白名单内的键保留；
+      - 已知**只读输出**键静默剔除（它们是设备回读产物，天然不该出现在 PUT body）；
+      - **其余未知键**一律 `RUNNER_VALIDATION_FAILED` 点名 —— 避免把字段名拼写错误
+        静默丢掉后照样下发、还被判成功。
+
+    Args:
+        payload: 完整请求体，形如 ``{"val": {...}}``（update 另带顶层 ``id``）
+
+    Returns:
+        归一后的 payload（顶层键原样保留，只重写 ``val``）
+
+    Raises:
+        RunnerError: val 缺失 / name 为空 / 含未知字段
+    """
     val = payload.get("val")
     if not isinstance(val, dict):
         raise RunnerError("RUNNER_VALIDATION_FAILED", "Iplink payload val object is required.", {"field": "val"})
     _validate_non_empty("name", str(val.get("name") or ""))
-    return payload
+    unknown = [k for k in val
+               if k not in _IPLINK_WRITABLE_VAL_KEYS and k not in _IPLINK_READONLY_VAL_KEYS]
+    if unknown:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Iplink payload contains unknown val field(s).",
+            {"unknown_fields": sorted(unknown),
+             "writable": list(_IPLINK_WRITABLE_VAL_KEYS)},
+        )
+    normalized = dict(payload)
+    normalized["val"] = {k: val[k] for k in _IPLINK_WRITABLE_VAL_KEYS if k in val}
+    return normalized
 
 
 def validate_linkgroup_payload(payload: dict[str, Any]) -> dict[str, Any]:
