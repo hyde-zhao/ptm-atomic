@@ -48,6 +48,18 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--service", default="any", help="Policy-route service object/name.")
     parser.add_argument("--service-is-group", action="store_true", help="Treat --service as a service-group name.")
     parser.add_argument("--weight", type=int, default=100, help="Policy-route forwarding path weight.")
+    # 2026-09-24 用户口径：**config 时就要能下发多个下一跳/出接口**，不要弄成必须「先 config
+    # 单路径、再 update 整包扩多路径」。JSON 形态与设备 body 的 val.forwarding_paths **同形**，
+    # 零映射；与单值三参数（--next-hop-ip / --outgoing-interface / --weight）**互斥**，
+    # 单值路径的行为逐字不变（向后兼容）。
+    parser.add_argument(
+        "--forwarding-paths",
+        help='JSON list of forwarding paths, e.g. '
+             '\'[{"next_hop_ip":"60.0.0.2","weight":1},{"next_hop_ip":"70.0.0.2","weight":1}]\'. '
+             'Each item: next_hop_ip | outgoing_interface (mutually exclusive within an item), '
+             'weight, optional health_check {"type":"iplink","name":"..."}. '
+             'Mutually exclusive with --next-hop-ip/--outgoing-interface/--weight.',
+    )
     parser.add_argument("--time-obj", default="", help="Policy-route time object.")
     parser.add_argument("--policy-route-type", choices=("ipv4", "ipv6"), default="ipv4", help="Policy-route address family.")
     policy_route_active_group = parser.add_mutually_exclusive_group()
@@ -387,6 +399,8 @@ def _run_policy_route(args: argparse.Namespace, op_id: str) -> int:
                 applist=_parse_json_arg(getattr(args, "app_list", None), flag="--app-list"),
                 app_tag_name=_parse_json_arg(getattr(args, "app_tag_name", None), flag="--app-tag-name"),
                 ip_link_name=getattr(args, "ip_link_name", None) or None,
+                forwarding_paths=_parse_json_arg(
+                    getattr(args, "forwarding_paths", None), flag="--forwarding-paths"),
             )
         elif op_id == "fw_delete_policy_route":
             _reject_id_file(args)

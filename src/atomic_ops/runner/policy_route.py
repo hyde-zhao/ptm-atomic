@@ -69,6 +69,7 @@ def build_policy_route_payload(
     applist: list[dict[str, Any]] | None = None,
     app_tag_name: list[str] | None = None,
     ip_link_name: str | None = None,
+    forwarding_paths: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     # 全 any 匹配场景：source_network / in_interface / dst_network 空串/None 统一归一化为 "any"。
     # NGFW 不接受空串（eObjParse "被引用对象不存在"），需显式 "any"。
@@ -78,6 +79,48 @@ def build_policy_route_payload(
     in_interface = _normalize_any("in_interface", in_interface)
     dst_network = _normalize_any("dst_network", dst_network)
     route_type = _validate_route_type(route_type)
+
+    # ── 多转发路径（2026-09-24 用户口径）────────────────────────────────
+    # 「ptm-atomic config 策略路由时可以下发多个下一跳或者出接口」——**不要弄成必须两跳**
+    # （此前只能先 config 单路径、再 update 用 payload_json 整包扩多路径）。
+    # 契约：`forwarding_paths` 与单值三参数（next_hop_ip / outgoing_interface / weight）
+    # **互斥**；给定时按其列表构造，逐项复用单值的同一套校验（互斥 / IP 版本 / weight ≥1）。
+    if forwarding_paths is not None:
+        if next_hop_ip or outgoing_interface:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "forwarding_paths is mutually exclusive with next_hop_ip/outgoing_interface.",
+                {"fields": ["forwarding_paths", "next_hop_ip", "outgoing_interface"]},
+            )
+        if not isinstance(forwarding_paths, list) or not forwarding_paths:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "forwarding_paths must be a non-empty list.",
+                {"field": "forwarding_paths"},
+            )
+        built_paths: list[dict[str, Any]] = []
+        for idx, item in enumerate(forwarding_paths):
+            if not isinstance(item, dict):
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "Each forwarding path must be an object.",
+                    {"field": f"forwarding_paths[{idx}]"},
+                )
+            built_paths.append(
+                _build_single_forwarding_path(
+                    item, idx=idx, route_type=route_type, default_ip_link=ip_link_name
+                )
+            )
+        return _assemble_policy_route_payload(
+            route_type=route_type, source_network=source_network,
+            source_network_is_group=source_network_is_group,
+            dst_network=dst_network, dst_network_is_group=dst_network_is_group,
+            in_interface=in_interface, service=service, service_is_group=service_is_group,
+            time_obj=time_obj, entry_id=entry_id, active=active, action=action,
+            config_source=config_source, applist=applist, app_tag_name=app_tag_name,
+            forwarding_paths=built_paths,
+        )
+
     next_hop_ip = (next_hop_ip or "").strip()
     outgoing_interface = (outgoing_interface or "").strip()
     if not next_hop_ip and not outgoing_interface:
@@ -130,19 +173,14 @@ def build_policy_route_payload(
     if ip_link_name:
         health_check = {"type": "iplink", "name": ip_link_name}
 
-    val: dict[str, Any] = {
-        "type": route_type,
-        "in_interface": in_interface,
-        "source_network": source_network,
-        "source_network_is_group": source_network_is_group,
-        "dst_network": dst_network,
-        "dst_network_is_group": dst_network_is_group,
-        "service": service,
-        "service_is_group": service_is_group,
-        "active": active,
-        "applist": applist,
-        "app_tag_name": app_tag_name,
-        "forwarding_paths": [
+    return _assemble_policy_route_payload(
+        route_type=route_type, source_network=source_network,
+        source_network_is_group=source_network_is_group,
+        dst_network=dst_network, dst_network_is_group=dst_network_is_group,
+        in_interface=in_interface, service=service, service_is_group=service_is_group,
+        time_obj=time_obj, entry_id=entry_id, active=active, action=action,
+        config_source=config_source, applist=applist, app_tag_name=app_tag_name,
+        forwarding_paths=[
             {
                 "next_hop_ip": next_hop_ip,
                 "outgoing_interface": outgoing_interface,
@@ -150,17 +188,7 @@ def build_policy_route_payload(
                 "health_check": health_check,
             }
         ],
-        "time_obj": time_obj,
-        "action": action,
-        "config_source": config_source,
-    }
-    if entry_id > 0:
-        val["id"] = entry_id
-
-    return {
-        "id": entry_id,
-        "val": val,
-    }
+    )
 
 
 # 快照整包重放：设备 verify 返回的条目实测 = 可写字段 15 项 + 只读状态回显 enable/hitcount
@@ -632,6 +660,108 @@ def _validate_non_empty(field: str, value: str) -> None:
             "Required policy-route field is empty.",
             {"field": field},
         )
+
+
+def _build_single_forwarding_path(
+    item: dict[str, Any], *, idx: int, route_type: str,
+    default_ip_link: str | None = None,
+) -> dict[str, Any]:
+    """校验并构造**单条**转发路径（多路径入口复用单值路径的同一套规则，不重复实现）。
+
+    Args:
+        item: 形如 ``{"next_hop_ip": "1.1.1.1", "weight": 1, "health_check": {...}}``
+        idx: 列表下标（只用于错误定位）
+        route_type: ipv4 / ipv6（校验 next_hop_ip 版本）
+        default_ip_link: 顶层 `ip_link_name`（该项未显式给 health_check 时的兜底）
+
+    Raises:
+        RunnerError: RUNNER_VALIDATION_FAILED（缺路径 / 两模式同传 / IP 非法或版本不符 / weight < 1）
+    """
+    nh = str(item.get("next_hop_ip") or "").strip()
+    oi = str(item.get("outgoing_interface") or "").strip()
+    field_prefix = f"forwarding_paths[{idx}]"
+    if not nh and not oi:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Each policy-route forwarding path requires next-hop IP or outgoing interface.",
+            {"fields": [f"{field_prefix}.next_hop_ip", f"{field_prefix}.outgoing_interface"]},
+        )
+    if nh and oi:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Each policy-route forwarding path accepts either next-hop IP or outgoing interface, not both.",
+            {"fields": [f"{field_prefix}.next_hop_ip", f"{field_prefix}.outgoing_interface"]},
+        )
+    if nh:
+        try:
+            parsed_next_hop = ip_address(nh)
+        except ValueError as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "next-hop IP must be a valid IP address.",
+                {"field": f"{field_prefix}.next_hop_ip"},
+            ) from exc
+        expected_version = 6 if route_type == "ipv6" else 4
+        if parsed_next_hop.version != expected_version:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Policy-route next-hop IP version must match the route type.",
+                {"field": f"{field_prefix}.next_hop_ip", "route_type": route_type,
+                 "version": parsed_next_hop.version},
+            )
+    weight = _validate_non_negative_int(f"{field_prefix}.weight", item.get("weight", 100))
+    if weight < 1:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Policy-route forwarding path weight must be at least 1.",
+            {"field": f"{field_prefix}.weight", "weight": weight},
+        )
+    health_check = item.get("health_check")
+    if not isinstance(health_check, dict):
+        link_name = item.get("ip_link_name") or default_ip_link
+        health_check = {"type": "iplink", "name": link_name} if link_name else {}
+    return {
+        "next_hop_ip": nh,
+        "outgoing_interface": oi,
+        "weight": weight,
+        "health_check": health_check,
+    }
+
+
+def _assemble_policy_route_payload(
+    *, route_type: str, source_network: str, source_network_is_group: bool,
+    dst_network: str, dst_network_is_group: bool, in_interface: str,
+    service: str, service_is_group: bool, time_obj: str, entry_id: int,
+    active: bool, action: int, config_source: int,
+    applist: list[dict[str, Any]], app_tag_name: list[str],
+    forwarding_paths: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """组装策略路由 PUT body（单路径与多路径**共用**，保证两条入口产出同形）。"""
+    # ⚠️ `entry_id` 必须在此**先归一**：CLI 的 `--id` 传进来是 **str**（argparse 不做类型转换），
+    # 而下面的 `entry_id > 0` 是 int 比较。单路径分支在调用前已归一，**多路径分支直接 return**
+    # ⇒ 2026-09-24 真机 `update --forwarding-paths` 在此崩 `TypeError: '>' not supported between
+    # instances of 'str' and 'int'`（命令未下发、用例 009 FAIL）。放在组装函数内对所有调用方生效。
+    entry_id = _validate_non_negative_int("id", entry_id)
+    val: dict[str, Any] = {
+        "type": route_type,
+        "in_interface": in_interface,
+        "source_network": source_network,
+        "source_network_is_group": source_network_is_group,
+        "dst_network": dst_network,
+        "dst_network_is_group": dst_network_is_group,
+        "service": service,
+        "service_is_group": service_is_group,
+        "active": active,
+        "applist": applist,
+        "app_tag_name": app_tag_name,
+        "forwarding_paths": forwarding_paths,
+        "time_obj": time_obj,
+        "action": action,
+        "config_source": config_source,
+    }
+    if entry_id > 0:
+        val["id"] = entry_id
+    return {"id": entry_id, "val": val}
 
 
 def _normalize_any(field: str, value: str | None) -> str:
