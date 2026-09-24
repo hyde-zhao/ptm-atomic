@@ -40,6 +40,10 @@ BVI_CONFIG_COMMAND_TEMPLATE = (
 BVI_CONFIG_SUCCESS_PATTERN = r"\S+"
 BRIDGE_DOMAIN_COMMAND = "/opt/dbappsecurity/bin/vppctl show bridge-domain"
 BRIDGE_DOMAIN_SUCCESS_PATTERN = r"\S+"
+# 指定 BD 的 scoped 形态（与 mac-age show 同命令形状）：只回该 BD 一个表项
+BRIDGE_DOMAIN_SCOPED_COMMAND_TEMPLATE = (
+    "/opt/dbappsecurity/bin/vppctl show bridge-domain {{bridge_domain_id}}"
+)
 
 NEIGHBOR_PROBE_COMMAND = "/opt/dbappsecurity/bin/vppctl show ip neighbor"
 NEIGHBOR_PROBE_SUCCESS_PATTERN = r"Time\s+IP"
@@ -650,6 +654,25 @@ def execute_check_bvi_interface_config(
 # ── fw_check_bridge_domain ────────────────────────────────
 
 
+def _bridge_domain_query(*, bridge_domain_id: int | None) -> tuple[str, str]:
+    """返回 (command, success_pattern)。
+
+    不给 ``bridge_domain_id`` 时查全表，沿用 ``\\S+`` 宽松成功模式；给了则只查该
+    BD，并用表头锚点 ``BD-ID`` 判定 —— 目标 BD 不存在时 vppctl 没有表头行，
+    判 STATE_MISMATCH 而不是被 ``\\S+`` 放过。
+    """
+    if bridge_domain_id is None:
+        return BRIDGE_DOMAIN_COMMAND, BRIDGE_DOMAIN_SUCCESS_PATTERN
+    _validate_bridge_domain_id(bridge_domain_id)
+    return (
+        render_command(
+            BRIDGE_DOMAIN_SCOPED_COMMAND_TEMPLATE,
+            {"bridge_domain_id": bridge_domain_id},
+        ),
+        BRIDGE_DOMAIN_SHOW_SUCCESS_PATTERN,
+    )
+
+
 def build_check_bridge_domain_dry_run(
     *,
     base_url: str,
@@ -658,7 +681,9 @@ def build_check_bridge_domain_dry_run(
     host: str | None,
     port: int | None,
     timeout: float,
+    bridge_domain_id: int | None = None,
 ) -> dict[str, Any]:
+    command, success_pattern = _bridge_domain_query(bridge_domain_id=bridge_domain_id)
     session_payload = read_session_file(session_file, expect_base_url=base_url)
     target_host = _resolve_host(explicit_host=host, base_url=base_url)
     target_port = port if port is not None else _default_port(transport)
@@ -669,11 +694,11 @@ def build_check_bridge_domain_dry_run(
         "execute_required": True,
         "transport": transport,
         "request": {
-            "command": BRIDGE_DOMAIN_COMMAND,
+            "command": command,
             "host": target_host,
             "port": target_port,
             "username": username,
-            "success_pattern": BRIDGE_DOMAIN_SUCCESS_PATTERN,
+            "success_pattern": success_pattern,
         },
         "session_file": str(session_file),
         "timeout": timeout,
@@ -689,12 +714,14 @@ def execute_check_bridge_domain(
     port: int | None,
     credential_env: str,
     timeout: float,
+    bridge_domain_id: int | None = None,
 ) -> dict[str, Any]:
+    command, success_pattern = _bridge_domain_query(bridge_domain_id=bridge_domain_id)
     return _execute_shell_op(
         op_id="fw_check_bridge_domain",
         transport=transport,
-        command=BRIDGE_DOMAIN_COMMAND,
-        success_pattern=BRIDGE_DOMAIN_SUCCESS_PATTERN,
+        command=command,
+        success_pattern=success_pattern,
         result_key="bridge_domain_raw",
         stdout_ref_label="<bridge-domain-raw-ref>",
         base_url=base_url,

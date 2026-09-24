@@ -68,6 +68,7 @@ The two streams are intentionally separate. A schema or operation-library change
 
 ### Changed
 
+- Add an optional `bridge_domain_id` (CLI `--bridge-domain-id`, 1-4094) to `fw_check_bridge_domain`: when supplied the runner narrows the command to `vppctl show bridge-domain <id>` and judges success on the `BD-ID` header anchor instead of the whole-table `\S+` pattern, so a missing bridge domain surfaces as `STATE_MISMATCH` rather than being passed by any non-empty output. Omitting the parameter keeps the previous whole-table command and success pattern byte-for-byte. Field driver: BVI cases express their post-check as `args={bridge_domain_id: N}` ("the bridge domain for BVI N exists"), which had no CLI outlet and was rejected as an unknown parameter (`PARAM_INVALID`) — 7 cases in `exec-20260923-bvi-full` failed on that mapping gap alone.
 - Update README, user manual, engineer handbook, and test-case template to reflect the verified schema v1.1, NGFW atom/package, batch contract, security gate, and read-only CLI boundary.
 - Replace environment-specific repository address examples with `<ptm-atomic-git-repository-url>` placeholders.
 - Align Python command examples with `uv run` and `uv tool` usage.

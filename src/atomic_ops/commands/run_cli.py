@@ -264,6 +264,16 @@ def _run_check_bvi_interface_config(args: argparse.Namespace) -> int:
 
 def _add_check_bridge_domain_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
+    parser.add_argument(
+        "--bridge-domain-id",
+        type=int,
+        default=None,
+        help=(
+            "Optional VPP bridge-domain ID (1-4094). When set, only that bridge "
+            "domain is queried (vppctl show bridge-domain <id>) and the output must "
+            "carry the BD-ID header. Omit to dump the whole bridge-domain table."
+        ),
+    )
 
 
 def _add_process_args(parser: argparse.ArgumentParser) -> None:
@@ -530,6 +540,7 @@ def _run_check_bridge_domain(args: argparse.Namespace) -> int:
         transport = getattr(args, "transport", DEFAULT_TRANSPORT)
         host = getattr(args, "host", None)
         port = getattr(args, "port", None)
+        bridge_domain_id = getattr(args, "bridge_domain_id", None)
         if not ctx.get("execute"):
             result = build_check_bridge_domain_dry_run(
                 base_url=ctx["base_url"],
@@ -537,6 +548,7 @@ def _run_check_bridge_domain(args: argparse.Namespace) -> int:
                 transport=transport,
                 host=host,
                 port=port,
+                bridge_domain_id=bridge_domain_id,
                 timeout=float(ctx.get("timeout", 10.0)),
             )
         else:
@@ -548,6 +560,7 @@ def _run_check_bridge_domain(args: argparse.Namespace) -> int:
                 host=host,
                 port=port,
                 credential_env=credential_env,
+                bridge_domain_id=bridge_domain_id,
                 timeout=float(ctx.get("timeout", 10.0)),
             )
         _write_output(_to_run_envelope(result), output_format)

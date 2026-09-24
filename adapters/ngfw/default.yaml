@@ -3032,7 +3032,7 @@ operations:
         - The runner selects SSH (paramiko) or Telnet (telnetlib) based on the transport parameter; the profile's transport field is the default.
   fw_check_bridge_domain:
     atom_ref: atoms/fw/fw_check_bridge_domain.yaml
-    intent: Query the VPP bridge-domain table over SSH or Telnet.
+    intent: Query the VPP bridge-domain table, or a single bridge domain, over SSH or Telnet.
     transport: ssh
     shell:
       command_template: "/opt/dbappsecurity/bin/vppctl show bridge-domain"
@@ -3045,7 +3045,8 @@ operations:
       notes:
         - Read-only observation; the command writes nothing to the device.
         - Connection inputs come from runner input and the session file; the profile carries no runtime values.
-        - The runner MUST shell-escape every {{param}} placeholder; this template has no placeholders.
+        - The template above is the whole-table default; when the caller supplies bridge-domain-id the runner appends the numeric id as a single shell-escaped argument (the mac-age show shape) and judges success on the BD-ID header anchor instead of the permissive whole-table pattern.
+        - The runner MUST shell-escape every {{param}} placeholder; the default template has no placeholders.
         - Session output is captured into diag_snapshot_ref and never written to the repo.
         - ptm-atomic run can execute this command only when --execute is explicit.
         - The runner selects SSH (paramiko) or Telnet (telnetlib) based on the transport parameter; the profile's transport field is the default.

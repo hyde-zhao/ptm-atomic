@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_check_bridge_domain
 device_type: fw
 transport: ssh
-description: Query the VPP bridge-domain table over SSH or Telnet.
+description: Query the VPP bridge-domain table, or a single bridge domain, over SSH or Telnet.
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_check_bridge_domain
 parameters:
   transport:
@@ -17,6 +17,10 @@ parameters:
     type: int
     required: false
     description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  bridge_domain_id:
+    type: int
+    required: false
+    description: Optional VPP bridge-domain ID (1-4094). When set, only that bridge domain is queried (vppctl show bridge-domain <id>) and the output must carry the BD-ID header; a missing bridge domain is reported as STATE_MISMATCH. When omitted the whole bridge-domain table is dumped.
 inputs:
   transport: ssh
   host: ""
@@ -43,7 +47,7 @@ verification:
   rules:
     - name: bridge_domain_returned
       input_ref: "<bridge-domain-raw-ref>"
-      expected_result: The device returns the bridge-domain table as session output.
+      expected_result: The device returns the bridge-domain table as session output; when bridge_domain_id is set, the output must contain the BD-ID header row for that bridge domain.
   summary_ref: "<bridge-domain-summary-ref>"
 preconditions:
   - Device management SSH or Telnet service is reachable.
