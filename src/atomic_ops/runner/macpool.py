@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
+from atomic_ops.runner.errors import (
+    RunnerError,
+    raise_if_device_session_rejected,
+    raise_if_resource_not_found,
+)
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -172,6 +176,8 @@ def execute_macpool(
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload)
+        # 目标资源不存在 == 目标状态已达成（幂等删除契约，权威门见 errors.py 登记表）
+        raise_if_resource_not_found(status_code, response_payload, op_id=op_id)
         raise RunnerError(
             "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
             "MAC address object device request did not return a success status.",

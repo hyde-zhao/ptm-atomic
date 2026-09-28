@@ -47,7 +47,14 @@ returns:
     manual_handling_ref: "<manual-handling-ref>"
   error_type: NONE
   diag_snapshot_ref: "<diag-snapshot-ref>"
-idempotent: false
+# ── 幂等删除契约（CT-REM-ATOM-DELETE，2026-09-24 补登记；只收敛口径，不新增字段）──
+# `idempotent: true` + `error_types` 含 RESOURCE_NOT_FOUND 二者**同时成立**时，
+# 表达「目标对象不存在 = 目标状态已达成」：创建步回滚与用例清理步会重复删除同一
+# 对象，第二次必然报「不存在」，不构成残留。触发由设备回答决定（结构化 errCode
+# 明确集，或通用码 + 文案特征），未在本表登记 / 设备未答「不存在」者一律维持
+# 原失败语义（真残留保真）。消费方读统一键 details.error_type==RESOURCE_NOT_FOUND
+# 且 details.idempotent is True；一致性由 validate_idempotent_registry() 守卫。
+idempotent: true
 rollback_strategy:
   type: restore_snapshot
   snapshot_required: true
@@ -76,6 +83,7 @@ error_types:
   - GATE_MISSING
   - CONFIG_REJECTED
   - DEVICE_UNREACHABLE
+  - RESOURCE_NOT_FOUND
   - UNKNOWN_ERROR
 risk:
   level: high

@@ -184,6 +184,30 @@ IDEMPOTENT_ERROR_TYPES: dict[str, frozenset[str]] = {
     # run-20260921-190022 实测 3 条：028/029/030）。反例 eIntfisRefed（被引用）
     # 是**另一个 errCode**，不在 RESOURCE_NOT_FOUND_ERR_CODES 内，仍判真失败。
     "fw_delete_interface": frozenset({"RESOURCE_NOT_FOUND"}),
+    # 400 eRequestParam「Couldn't found obj-dom-边界-030 from DB」（r3 探针实测）；『不存在』回显 9 条
+    "fw_delete_domainpool": frozenset({"RESOURCE_NOT_FOUND"}),
+    # 对象族删除同构（本域『不存在』回显 0 条；首轮计入的 25 条属 D1「type 注入阻塞」）
+    "fw_delete_macpool": frozenset({"RESOURCE_NOT_FOUND"}),
+    # 对象族删除同构（本域『不存在』回显 3 条）
+    "fw_delete_ippool_group": frozenset({"RESOURCE_NOT_FOUND"}),
+    # 对象族删除同构（本域『不存在』回显 50 条）
+    "fw_delete_ip6pool_group": frozenset({"RESOURCE_NOT_FOUND"}),
+    # 对象族删除同构（本域『不存在』回显 89 条）
+    "fw_delete_ip6pool_object": frozenset({"RESOURCE_NOT_FOUND"}),
+    # 对象族删除同构（D1 修复后首轮真实删除）
+    "fw_delete_servicepool": frozenset({"RESOURCE_NOT_FOUND"}),
+    # 对象族删除同构（D2 修复后首轮真实删除）
+    "fw_delete_servicepool_group": frozenset({"RESOURCE_NOT_FOUND"}),
+    # 400 eObjGetNoExist（明确集内；本域『不存在』回显 25 条）
+    "fw_delete_customappobj": frozenset({"RESOURCE_NOT_FOUND"}),
+    # batch 族（本域无单条删除原子）；D7 修复后首轮真实删除
+    "fw_delete_batch_filetypeobj": frozenset({"RESOURCE_NOT_FOUND"}),
+    # G4 新登记逆删；对象族删除同构
+    "fw_delete_geoip": frozenset({"RESOURCE_NOT_FOUND"}),
+    # G4 新登记逆删；对象族删除同构
+    "fw_delete_localcert": frozenset({"RESOURCE_NOT_FOUND"}),
+    # batch 族（本域无单条删除原子）；G4 新登记逆删
+    "fw_delete_batch_localcacert": frozenset({"RESOURCE_NOT_FOUND"}),
 }
 
 _IDEMPOTENT_DECL_FIELD = "idempotent"
