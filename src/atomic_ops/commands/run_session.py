@@ -1,4 +1,4 @@
-"""Session-table runner commands (fw_verify_session)."""
+"""Session-table runner commands (fw_verify_session / fw_clear_session)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,13 @@ from atomic_ops.commands.run import _to_run_envelope, _write_output, resolve_run
 from atomic_ops.errors import CliError, write_error, write_warning
 from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.session import resolve_session_file
-from atomic_ops.runner.session_table import build_session_filters, build_session_verify_dry_run, execute_session_verify
+from atomic_ops.runner.session_table import (
+    build_session_clear_dry_run,
+    build_session_filters,
+    build_session_verify_dry_run,
+    execute_session_clear,
+    execute_session_verify,
+)
 
 
 def build_subtree() -> tuple[CommandGroup, ...]:
@@ -18,7 +24,7 @@ def build_subtree() -> tuple[CommandGroup, ...]:
         CommandGroup(
             name="session",
             help="Session-table monitor operations.",
-            description="Query NGFW session table entries with zone and filter conditions.",
+            description="Query and clear NGFW session table entries.",
             children=(
                 CommandSpec(
                     name="verify",
@@ -26,6 +32,13 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                     description="Query NGFW session table entries (IPv4/IPv6) with optional filters.",
                     handler=_run_verify,
                     add_args=_add_verify_args,
+                ),
+                CommandSpec(
+                    name="clear",
+                    help="Clear data-plane sessions.",
+                    description="Clear all NGFW data-plane session table entries (DELETE /api/v1/monitor/clearsession).",
+                    handler=_run_clear,
+                    add_args=_add_clear_args,
                 ),
             ),
         ),
@@ -48,6 +61,10 @@ def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--action", default="", help="Session action filter (permit/deny).")
     parser.add_argument("--policy-id", default="", help="Policy id filter.")
     parser.add_argument("--app-name", default="", help="Application name filter.")
+
+
+def _add_clear_args(parser: argparse.ArgumentParser) -> None:
+    """clear 无专属参数（--base-url/--session-file/--timeout/--execute 由 run 共享参数层提供）。"""
 
 
 def _run_verify(args: argparse.Namespace) -> int:
@@ -91,6 +108,38 @@ def _run_verify(args: argparse.Namespace) -> int:
                 base_url=ctx["base_url"], session_file=session_file,
                 auth_header=ctx.get("auth_header", "Authorization"),
                 page=page, size=size, is_ip6=is_ip6, filters=filters,
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _run_clear(args: argparse.Namespace) -> int:
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        if not ctx.get("verify_tls"):
+            write_warning({"warning_code": "TLS_VERIFY_DISABLED", "message": "Device TLS verification is disabled."}, output_format)
+
+        session_file = resolve_session_file(ctx.get("session_file"))
+
+        if not ctx.get("execute"):
+            result = build_session_clear_dry_run(
+                base_url=ctx["base_url"], session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"),
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            result = execute_session_clear(
+                base_url=ctx["base_url"], session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"),
                 verify_tls=bool(ctx.get("verify_tls")),
                 timeout=float(ctx.get("timeout", 10.0)),
             )

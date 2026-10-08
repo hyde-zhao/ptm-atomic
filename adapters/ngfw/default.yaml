@@ -6009,6 +6009,29 @@ operations:
       runner_required: true
       notes:
         - GET sends no JSON body; session entries expose rxzone (ingress zone) and txzone (egress zone) fields used for security-zone assertions.
+  fw_clear_session:
+    atom_ref: atoms/fw/fw_clear_session.yaml
+    intent: Clear all NGFW data-plane session table entries through /api/v1/monitor/clearsession.
+    request:
+      method: DELETE
+      path: /api/v1/monitor/clearsession
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <session-clear-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE sends no JSON body; success returns 200 with an empty body.
+        - Requires the northbound Bearer token format (header Authorization with value "Bearer <token>").
+        - The management-plane Web session is NOT cleared; only data-plane sessions are removed.
   fw_verify_security_zone_vpp:
     atom_ref: atoms/fw/fw_verify_security_zone_vpp.yaml
     intent: Verify NGFW security-zone data-plane (VPP) state via SSH vppctl.

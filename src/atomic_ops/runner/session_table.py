@@ -3,6 +3,10 @@
 Queries the firewall session table (IPv4 or IPv6) and extracts the
 per-session security-zone fields (rxzone / txzone) that security-zone
 test cases assert on (e.g. "session source zone = zone1").
+
+Also clears the data-plane session table (/api/v1/monitor/clearsession),
+used to force first-sight application identification when the same
+five-tuple is reused across runs.
 """
 
 from __future__ import annotations
@@ -19,11 +23,13 @@ from atomic_ops.runner.session import read_session_file
 
 SUCCESS_STATUS = {200, 201, 202}
 GET_SUCCESS_STATUS = {200}
+CLEAR_SUCCESS_STATUS = {200}
 SESSION_ENDPOINTS = {
     "fw_verify_session": ("GET", "/api/v1/monitor/sessioninfo"),
+    "fw_clear_session": ("DELETE", "/api/v1/monitor/clearsession"),
 }
 GET_OPS = {"fw_verify_session"}
-NO_BODY_OPS = GET_OPS
+NO_BODY_OPS = GET_OPS | {"fw_clear_session"}
 
 # sessioninfo 支持的过滤参数（值来自 Web 控制台抓包，全部可选）。
 FILTER_KEYS = (
@@ -138,6 +144,91 @@ def execute_session_verify(
     # 兑现 atom returns.data 契约：提取会话摘要（含 rxzone/txzone 安全域字段）。
     result.update(_extract_session_summary(response_payload))
     return result
+
+
+def build_session_clear_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    method, path = SESSION_ENDPOINTS["fw_clear_session"]
+    return {
+        "op_id": "fw_clear_session",
+        "status": "dry_run",
+        "execute_required": True,
+        "request": {
+            "method": method,
+            "url": f"{normalize_base_url(base_url)}{path}",
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "content_type": "application/json",
+            "payload": None,
+        },
+        "session_file": str(session_file),
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
+def execute_session_clear(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    """清空设备数据面会话表（DELETE /api/v1/monitor/clearsession）。
+
+    设备成功返回 200 空 body；管理面 Web 会话不受影响。
+    """
+    method, path = SESSION_ENDPOINTS["fw_clear_session"]
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
+    session_value = str(session_payload["session_value"])
+    header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
+    headers = {
+        "Content-Type": "application/json",
+        auth_header: header_value,
+    }
+    status_code, response_payload, _text = request_json(
+        method,
+        f"{normalize_base_url(base_url)}{path}",
+        headers=headers,
+        json_payload=None,
+        timeout=timeout,
+        verify_tls=verify_tls,
+    )
+    if status_code not in CLEAR_SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response_payload)
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "Session-table clear request did not return a success status.",
+            {
+                "op_id": "fw_clear_session",
+                "status_code": status_code,
+                "err_code": response_payload.get("errCode") if isinstance(response_payload, dict) else None,
+                "err_msg": (
+                    response_payload.get("errMsg") or response_payload.get("message")
+                    if isinstance(response_payload, dict)
+                    else None
+                ),
+                "response_keys": sorted(response_payload.keys()) if isinstance(response_payload, dict) else [],
+            },
+        )
+    return {
+        "op_id": "fw_clear_session",
+        "status": "success",
+        "status_code": status_code,
+        "cleared": True,
+        "request": {
+            "method": method,
+            "path": path,
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+        },
+        "response": response_payload,
+    }
 
 
 def _extract_session_summary(response_payload: Any) -> dict[str, Any]:

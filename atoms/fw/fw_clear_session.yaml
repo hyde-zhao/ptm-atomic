@@ -1,0 +1,56 @@
+schema_version: "1.1"
+op_id: fw_clear_session
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_clear_session
+description: Clear all NGFW data-plane session table entries through /api/v1/monitor/clearsession.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+inputs:
+  session_ref: "<session-ref>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    status_code: 200
+    cleared: true
+    session_ref: "<session-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: irreversible
+  snapshot_required: false
+  required_inputs: []
+  notes: Cleared data-plane sessions cannot be restored; the management-plane Web session is unaffected.
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: medium
+  categories:
+    - capacity_domain
+    - configuration
+preconditions:
+  - External orchestration holds a valid session_ref.
+postconditions:
+  - The data-plane session table is empty; a follow-up fw_verify_session query shows only management-plane sessions remain.
+  - Traffic for a previously-seen five-tuple is treated as first sight again, so application identification re-runs.
+tags:
+  - firewall
+  - capacity
+  - session
+  - monitor
+  - configuration
+aliases:
+  - session-clear
+  - clearsession
+since_version: "1.12.0"
