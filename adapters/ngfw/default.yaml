@@ -6257,7 +6257,7 @@ operations:
       runner_required: true
       notes:
         - DELETE sends no JSON body; success returns 200 with an empty body.
-        - Requires the northbound Bearer token format (header Authorization with value "Bearer <token>").
+        - Requires the standard northbound Bearer auth scheme (request header value prefixed with "Bearer ").
         - The management-plane Web session is NOT cleared; only data-plane sessions are removed.
   fw_verify_security_zone_vpp:
     atom_ref: atoms/fw/fw_verify_security_zone_vpp.yaml
