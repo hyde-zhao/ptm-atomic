@@ -199,6 +199,18 @@ ARP_SCAN_OPS = (
 GARP_OPS = (
     "fw_config_garp_rate_limit",
 )
+KEYWORD_OPS = (
+    "fw_config_keyword",
+    "fw_update_keyword",
+    "fw_verify_keyword",
+    "fw_delete_batch_keyword",
+)
+CRL_OPS = (
+    "fw_config_crl",
+    "fw_verify_crl",
+    "fw_download_crl",
+    "fw_delete_batch_crl",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
@@ -233,6 +245,8 @@ SUPPORTED_OPS = (
     *CERT_OPS,
     *GEOIP_OPS,
     *OBJECT_TRANSFER_OPS,
+    *KEYWORD_OPS,
+    *CRL_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -426,6 +440,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_geoip as run_geoip
     from atomic_ops.commands import run_arp_scan as run_arp_scan
     from atomic_ops.commands import run_garp as run_garp
+    from atomic_ops.commands import run_keyword as run_keyword
 
     return (
         CommandGroup(
@@ -567,7 +582,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
         CommandGroup(
             name="cert",
             help="Certificate operations.",
-            description="Local certificate and local CA certificate create, update/issue, delete, batch-delete, and verify operations.",
+            description="Local certificate and local CA certificate create, update/issue, delete, batch-delete, and verify operations, plus CRL upload/verify/download/batch-delete.",
             children=run_cert.build_subtree(),
         ),
         CommandGroup(
@@ -575,6 +590,12 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="Custom geoip region object operations.",
             description="Custom geoip region object config, update, delete, batch-delete, and verify operations.",
             children=run_geoip.build_subtree(),
+        ),
+        CommandGroup(
+            name="keyword",
+            help="Keyword object operations.",
+            description="Keyword object config, update, verify, and batch-delete operations.",
+            children=run_keyword.build_subtree(),
         ),
         CommandGroup(
             name="cli",

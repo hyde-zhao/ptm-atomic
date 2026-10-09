@@ -163,3 +163,9 @@ operations:
   - fw_update_geoip
   - fw_delete_geoip
   - fw_delete_batch_geoip
+  - fw_config_keyword
+  - fw_update_keyword
+  - fw_delete_batch_keyword
+  - fw_config_crl
+  - fw_download_crl
+  - fw_delete_batch_crl

@@ -1894,7 +1894,9 @@ def execute_verify_process_state(
 
 
 KILL_COMMAND_TEMPLATE = "kill -9 {{pid}}"
-KILL_SUCCESS_PATTERN = r"\A\z"
+# `\z`（串尾）是 PCRE 写法，Python `re` 直到 3.14 才支持，本仓库 requires-python >=3.11，
+# 故用 `\A\Z` 表达同一语义：stdout 必须为空串（kill 成功无输出）。
+KILL_SUCCESS_PATTERN = r"\A\Z"
 
 
 def build_kill_process_dry_run(

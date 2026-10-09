@@ -187,6 +187,19 @@ from atomic_ops.runner.geoip import (
     build_geoip_batch_delete_payload,
     validate_geoip_payload,
 )
+from atomic_ops.runner.keyword import (
+    SEARCH_QUERY_KEY,
+    build_keyword_payload,
+    build_keyword_update_payload,
+    build_keyword_batch_delete_payload,
+    validate_keyword_payload,
+)
+from atomic_ops.runner.crl import (
+    build_crl_upload_payload,
+    build_crl_download_payload,
+    build_crl_batch_delete_payload,
+    validate_crl_payload,
+)
 from atomic_ops.runner.trex import (
     IDEMPOTENT_ERROR_TYPES,
     execute_trex,
@@ -7023,6 +7036,370 @@ class IpsecCliDryRunTests(unittest.TestCase):
             sorted(payload.keys()),
             ["data", "diag_snapshot_ref", "error_type", "op_id", "status"],
         )
+
+
+class KeywordPayloadTests(unittest.TestCase):
+    """关键字对象载荷：规格 1.1／1.2／1.4 的逐字段形状与校验。"""
+
+    def test_config_payload_matches_spec_shape(self) -> None:
+        payload = build_keyword_payload(name="kw1", desc="d1", content=["abc", "def"])
+        self.assertEqual(payload, {"val": {"name": "kw1", "desc": "d1", "content": ["abc", "def"]}})
+
+    def test_config_payload_defaults_desc_to_empty_string(self) -> None:
+        payload = build_keyword_payload(name="kw1", content=["abc"])
+        self.assertEqual(payload["val"]["desc"], "")
+
+    def test_config_payload_requires_name(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_keyword_payload(name="", content=["abc"])
+        with self.assertRaises(RunnerError):
+            build_keyword_payload(name="   ", content=["abc"])
+
+    def test_config_payload_requires_non_empty_content(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_keyword_payload(name="kw1")
+        with self.assertRaises(RunnerError):
+            build_keyword_payload(name="kw1", content=[])
+
+    def test_config_payload_rejects_blank_content_entry(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_keyword_payload(name="kw1", content=["abc", "  "])
+
+    def test_update_payload_carries_name_as_id(self) -> None:
+        payload = build_keyword_update_payload(
+            entry_id="kw1", name="kw1", desc="d2", content=["xyz"]
+        )
+        self.assertEqual(payload["id"], "kw1")
+        self.assertEqual(payload["val"], {"name": "kw1", "desc": "d2", "content": ["xyz"]})
+
+    def test_update_payload_requires_id(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_keyword_update_payload(entry_id="", name="kw1", content=["abc"])
+
+    def test_batch_delete_delegates_to_shared_builder(self) -> None:
+        from atomic_ops.runner.batch import build_batch_delete_payload
+
+        expected = build_batch_delete_payload(
+            entry_ids=["k1", "k2"], resource="/api/v1/keywords"
+        )
+        self.assertEqual(build_keyword_batch_delete_payload(entry_ids=["k1", "k2"]), expected)
+        self.assertEqual(
+            build_keyword_batch_delete_payload(entry_ids=["k1", "k2"])["batch"][0]["resource"],
+            "/api/v1/keywords",
+        )
+
+    def test_validate_batch_rejects_foreign_resource(self) -> None:
+        payload = {
+            "batch": [
+                {"method": "DELETE", "resource": "/api/v1/cert/certcrl", "body": {"id": ["k1"]}}
+            ]
+        }
+        with self.assertRaises(RunnerError):
+            validate_keyword_payload(payload, op_id="fw_delete_batch_keyword")
+
+    def test_verify_dry_run_uses_seeded_search_key(self) -> None:
+        """规格 1.3 写 ``key``：实机探测后只翻 SEARCH_QUERY_KEY 一行，本测试跟着走。"""
+        from atomic_ops.runner.keyword import build_keyword_dry_run
+
+        dry = build_keyword_dry_run(
+            op_id="fw_verify_keyword",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            key="kw1",
+            verify_tls=False,
+            timeout=10.0,
+        )
+        url = dry["request"]["url"]
+        self.assertEqual(dry["request"]["method"], "GET")
+        self.assertIn(f"{SEARCH_QUERY_KEY}=kw1", url)
+        # 反向断言：不得同时冒出另一种拼写，否则设备侧过滤会静默失效。
+        other = "keywords" if SEARCH_QUERY_KEY == "key" else "key"
+        self.assertNotIn(f"{other}=", url)
+        self.assertIsNone(dry["request"]["payload"])
+
+    def test_verify_dry_run_omits_filter_when_key_absent(self) -> None:
+        from atomic_ops.runner.keyword import build_keyword_dry_run
+
+        dry = build_keyword_dry_run(
+            op_id="fw_verify_keyword",
+            base_url="https://fw.test",
+            session_file=Path("/tmp/s.json"),
+            auth_header="Authorization",
+            payload=None,
+            page=1,
+            size=40,
+            key="",
+            verify_tls=False,
+            timeout=10.0,
+        )
+        self.assertTrue(dry["request"]["url"].endswith("/api/v1/keywords?page=1&size=40"))
+
+
+class CrlPayloadTests(unittest.TestCase):
+    """CRL 载荷：规格 2.2／2.3／2.5 的逐字段形状与校验。"""
+
+    def test_upload_payload_matches_spec_shape(self) -> None:
+        payload = build_crl_upload_payload(cert_name="GDCA_HKMR_IV_CA.crl")
+        self.assertEqual(payload["id"], "0")
+        self.assertEqual(payload["val"]["funcType"], "certcrl")
+        self.assertEqual(payload["val"]["certName"], "GDCA_HKMR_IV_CA.crl")
+        self.assertEqual(payload["val"]["uploadType"], "local")
+        # keyType 规格未列、实测报文携带。
+        self.assertEqual(payload["val"]["keyType"], "RSA")
+        self.assertEqual(
+            sorted(payload["val"]),
+            sorted(
+                [
+                    "funcType",
+                    "certType",
+                    "certName",
+                    "keyName",
+                    "pfxPasswd",
+                    "keyPasswd",
+                    "uploadType",
+                    "urlName",
+                    "crlAutoUpTime",
+                    "keyType",
+                ]
+            ),
+        )
+
+    def test_upload_payload_requires_cert_name(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_crl_upload_payload(cert_name="")
+
+    def test_upload_payload_rejects_unknown_upload_type(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_crl_upload_payload(cert_name="c.crl", upload_type="ftp")
+
+    def test_upload_payload_rejects_unknown_key_type(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_crl_upload_payload(cert_name="c.crl", key_type="ECDSA")
+
+    def test_http_upload_requires_url_name(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_crl_upload_payload(cert_name="c.crl", upload_type="http")
+        payload = build_crl_upload_payload(
+            cert_name="c.crl", upload_type="http", url_name="https://x/y.crl"
+        )
+        self.assertEqual(payload["val"]["uploadType"], "http")
+        self.assertEqual(payload["val"]["urlName"], "https://x/y.crl")
+
+    def test_download_payload_matches_spec_shape(self) -> None:
+        payload = build_crl_download_payload(cert_name="GDCA_HKMR_IV_CA.crl")
+        self.assertEqual(
+            payload,
+            {
+                "id": "0",
+                "val": {
+                    "funcType": "certcrl",
+                    "certName": "GDCA_HKMR_IV_CA.crl",
+                    "fileType": "cert",
+                    "pfxPasswd": "",
+                },
+            },
+        )
+
+    def test_download_payload_rejects_unknown_file_type(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_crl_download_payload(cert_name="c.crl", file_type="zip")
+
+    def test_batch_delete_delegates_to_shared_builder(self) -> None:
+        from atomic_ops.runner.batch import build_batch_delete_payload
+
+        expected = build_batch_delete_payload(
+            entry_ids=["1", "2"], resource="/api/v1/cert/certcrl"
+        )
+        self.assertEqual(build_crl_batch_delete_payload(entry_ids=["1", "2"]), expected)
+
+    def test_validate_batch_rejects_foreign_resource(self) -> None:
+        payload = {
+            "batch": [{"method": "DELETE", "resource": "/api/v1/keywords", "body": {"id": ["1"]}}]
+        }
+        with self.assertRaises(RunnerError):
+            validate_crl_payload(payload, op_id="fw_delete_batch_crl")
+
+
+class KeywordCliDryRunTests(unittest.TestCase):
+    """关键字 CLI dry-run：端点、方法与信封形状。"""
+
+    BASE = "https://192.0.2.1"
+
+    def _dry_run(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "keyword", *argv])
+        self.assertEqual(exit_code, 0, stderr.getvalue())
+        return json.loads(stdout.getvalue())
+
+    def _dry_run_error(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "keyword", *argv])
+        self.assertEqual(exit_code, 49)
+        return json.loads(stdout.getvalue()) if stdout.getvalue().strip() else json.loads(stderr.getvalue())
+
+    def test_config_dry_run(self) -> None:
+        payload = self._dry_run(
+            ["config", "--name", "kw1", "--desc", "d1", "--content", "abc", "--content", "def"]
+        )
+        self.assertEqual(payload["op_id"], "fw_config_keyword")
+        self.assertEqual(payload["status"], "dry_run")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/keywords")
+        self.assertEqual(
+            request["payload"], {"val": {"name": "kw1", "desc": "d1", "content": ["abc", "def"]}}
+        )
+
+    def test_config_requires_name_without_payload(self) -> None:
+        error = self._dry_run_error(["config", "--content", "abc"])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_config_requires_content_without_payload(self) -> None:
+        error = self._dry_run_error(["config", "--name", "kw1"])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_update_dry_run_carries_name_as_id(self) -> None:
+        payload = self._dry_run(
+            ["update", "--id", "kw1", "--name", "kw1", "--desc", "d2", "--content", "xyz"]
+        )
+        self.assertEqual(payload["op_id"], "fw_update_keyword")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/keywords")
+        self.assertEqual(request["payload"]["id"], "kw1")
+        self.assertEqual(request["payload"]["val"]["content"], ["xyz"])
+
+    def test_verify_dry_run_paginates_and_omits_body(self) -> None:
+        payload = self._dry_run(["verify", "--key", "kw1", "--page", "1", "--size", "40"])
+        self.assertEqual(payload["op_id"], "fw_verify_keyword")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "GET")
+        self.assertEqual(
+            request["url"], f"{self.BASE}/api/v1/keywords?page=1&size=40&{SEARCH_QUERY_KEY}=kw1"
+        )
+        self.assertIsNone(request["payload"])
+
+    def test_delete_batch_uses_shared_batch_resource(self) -> None:
+        payload = self._dry_run(["delete-batch", "--id", "k1", "--id", "k2"])
+        self.assertEqual(payload["op_id"], "fw_delete_batch_keyword")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/batch")
+        batch = request["payload"]["batch"]
+        self.assertEqual(batch[0]["resource"], "/api/v1/keywords")
+        self.assertEqual(batch[0]["body"]["id"], ["k1", "k2"])
+
+    def test_delete_batch_requires_at_least_one_id(self) -> None:
+        # --id 是 argparse 级 required（与 cert／geoip 族同款），故缺参由 argparse 退出 2。
+        with self.assertRaises(SystemExit) as context:
+            cli_main(
+                ["run", "--format", "json", "--base-url", self.BASE, "keyword", "delete-batch"]
+            )
+        self.assertEqual(context.exception.code, 2)
+
+    def test_envelope_shape(self) -> None:
+        payload = self._dry_run(["verify", "--page", "1", "--size", "10"])
+        self.assertEqual(
+            sorted(payload.keys()),
+            ["data", "diag_snapshot_ref", "error_type", "op_id", "status"],
+        )
+
+
+class CrlCliDryRunTests(unittest.TestCase):
+    """CRL CLI dry-run：折叠流的步骤声明与端点。"""
+
+    BASE = "https://192.0.2.1"
+
+    def _dry_run(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "cert", *argv])
+        self.assertEqual(exit_code, 0, stderr.getvalue())
+        return json.loads(stdout.getvalue())
+
+    def _dry_run_error(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "cert", *argv])
+        self.assertEqual(exit_code, 49)
+        return json.loads(stdout.getvalue()) if stdout.getvalue().strip() else json.loads(stderr.getvalue())
+
+    def test_config_local_declares_stage_then_register(self) -> None:
+        payload = self._dry_run(["crl-config", "--file", "/tmp/GDCA_HKMR_IV_CA.crl"])
+        self.assertEqual(payload["op_id"], "fw_config_crl")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/cert/upload")
+        self.assertEqual(request["payload"]["id"], "0")
+        self.assertEqual(request["payload"]["val"]["funcType"], "certcrl")
+        # 未给 --cert-name：从 --file basename 派生。
+        self.assertEqual(request["payload"]["val"]["certName"], "GDCA_HKMR_IV_CA.crl")
+        steps = payload["data"]["upload_steps"]
+        self.assertEqual([step["method"] for step in steps], ["POST", "PUT"])
+        self.assertEqual(steps[0]["path"], "/api/v1/upload")
+        self.assertEqual(steps[0]["module"], "certcrl")
+
+    def test_config_http_skips_staging_step(self) -> None:
+        payload = self._dry_run(
+            ["crl-config", "--upload-type", "http", "--cert-name", "c.crl", "--url-name", "https://x/y.crl"]
+        )
+        steps = payload["data"]["upload_steps"]
+        self.assertEqual([step["method"] for step in steps], ["PUT"])
+        self.assertEqual(payload["data"]["request"]["payload"]["val"]["uploadType"], "http")
+
+    def test_config_http_requires_url_name(self) -> None:
+        error = self._dry_run_error(
+            ["crl-config", "--upload-type", "http", "--cert-name", "c.crl"]
+        )
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_config_local_requires_file(self) -> None:
+        error = self._dry_run_error(["crl-config"])
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_verify_url_uses_keywords_parameter(self) -> None:
+        payload = self._dry_run(["crl-verify", "--keywords", "GDCA", "--page", "1", "--size", "40"])
+        self.assertEqual(payload["op_id"], "fw_verify_crl")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "GET")
+        # 规格 2.4 在 CRL 族用 keywords（与仓内其余族一致），与关键字族的 key 不同。
+        self.assertEqual(
+            request["url"], f"{self.BASE}/api/v1/cert/certcrl?page=1&size=40&keywords=GDCA"
+        )
+        self.assertIsNone(request["payload"])
+
+    def test_download_declares_trigger_then_fetch(self) -> None:
+        payload = self._dry_run(
+            ["crl-download", "--cert-name", "GDCA_HKMR_IV_CA.crl", "--out", "/tmp/rt.crl"]
+        )
+        self.assertEqual(payload["op_id"], "fw_download_crl")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/cert/download")
+        self.assertEqual(request["payload"]["val"]["fileType"], "cert")
+        steps = payload["data"]["download_steps"]
+        self.assertEqual([step["method"] for step in steps], ["PUT", "GET"])
+        self.assertEqual(steps[1]["path"], "/api/v1/downloadfile")
+
+    def test_delete_batch_uses_certcrl_resource(self) -> None:
+        payload = self._dry_run(["crl-delete-batch", "--id", "7", "--id", "8"])
+        self.assertEqual(payload["op_id"], "fw_delete_batch_crl")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/batch")
+        batch = request["payload"]["batch"]
+        self.assertEqual(batch[0]["resource"], "/api/v1/cert/certcrl")
+        self.assertEqual(batch[0]["body"]["id"], ["7", "8"])
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import re
 import sys
 from pathlib import Path
@@ -35,9 +36,22 @@ def display_path(path: Path) -> str:
         return path.as_posix()
 
 
-def load_yaml(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as handle:
+@functools.lru_cache(maxsize=None)
+def _load_yaml_by_key(path_key: str) -> Any:
+    with Path(path_key).open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
+
+
+def load_yaml(path: Path) -> Any:
+    """解析 YAML，按路径缓存。
+
+    ``collect_ref_errors`` 对每个 atom 都要读一遍它引用的适配器 profile（那份
+    ``adapters/ngfw/default.yaml`` 有 6.7k 行、解析约 0.6s），且
+    ``pointer_target_exists`` 还会再读一次 —— 259 个 atom 指向同一份文件时就是
+    约 520 次重复解析（实测 336s），而本脚本全程只读文件、不写文件，故缓存安全。
+    缓存键取 ``str(Path(...))`` 以吸收调用方传入 str 与 Path 的差异。
+    """
+    return _load_yaml_by_key(str(Path(path)))
 
 
 def build_parser() -> argparse.ArgumentParser:

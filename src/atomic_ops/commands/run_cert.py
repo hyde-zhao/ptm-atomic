@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Any
 
 from atomic_ops.commands import CommandSpec
@@ -84,6 +85,40 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             handler=_run_localcacert_delete_batch,
             add_args=_add_delete_batch_args,
         ),
+        CommandSpec(
+            name="crl-config",
+            help="Upload and register a CRL certificate.",
+            description=(
+                "Stage a local .crl file (POST /api/v1/upload) and register it "
+                "(PUT /api/v1/cert/upload) as one folded workflow."
+            ),
+            handler=_run_crl_config,
+            add_args=_add_crl_config_args,
+        ),
+        CommandSpec(
+            name="crl-verify",
+            help="Query CRL certificates.",
+            description="Query NGFW CRL certificates through /api/v1/cert/certcrl.",
+            handler=_run_crl_verify,
+            add_args=_add_crl_verify_args,
+        ),
+        CommandSpec(
+            name="crl-download",
+            help="Download a CRL certificate.",
+            description=(
+                "Trigger a CRL download (PUT /api/v1/cert/download) and fetch the bytes "
+                "(GET /api/v1/downloadfile) as one folded workflow."
+            ),
+            handler=_run_crl_download,
+            add_args=_add_crl_download_args,
+        ),
+        CommandSpec(
+            name="crl-delete-batch",
+            help="Delete multiple CRL certificates.",
+            description="Batch-delete NGFW CRL certificates by id.",
+            handler=_run_crl_delete_batch,
+            add_args=_add_delete_batch_args,
+        ),
     )
 
 
@@ -148,6 +183,48 @@ def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--keywords", default="", help="Keyword filter for the query.")
 
 
+def _add_crl_config_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--file",
+        help="Local .crl file to stage. Required for --upload-type local (the default).",
+    )
+    parser.add_argument(
+        "--cert-name",
+        help="Registered certificate name. Defaults to the --file basename.",
+    )
+    parser.add_argument(
+        "--upload-type",
+        default="local",
+        choices=["local", "http"],
+        help="How the device obtains the file: local stages --file; http fetches --url-name.",
+    )
+    parser.add_argument("--key-type", default="RSA", choices=["RSA", "SM2"], help="CRL key algorithm.")
+    parser.add_argument("--key-name", default="", help="Key name accompanying the CRL.")
+    parser.add_argument("--cert-type", default="", help="Certificate type value.")
+    parser.add_argument("--pfx-passwd", default="", help="PKCS#12 passphrase, when the CRL ships with one.")
+    parser.add_argument("--key-passwd", default="", help="Private key passphrase, when one is required.")
+    parser.add_argument("--url-name", default="", help="Source URL for --upload-type http.")
+    parser.add_argument("--crl-auto-up-time", default="", help="Automatic CRL update time value.")
+    _add_payload_args(parser)
+
+
+def _add_crl_verify_args(parser: argparse.ArgumentParser) -> None:
+    _add_verify_args(parser)
+
+
+def _add_crl_download_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--cert-name", required=True, help="Registered CRL certificate name to download.")
+    parser.add_argument(
+        "--file-type",
+        default="cert",
+        choices=["cert", "key", "pfx", "csr"],
+        help="Which artifact to download.",
+    )
+    parser.add_argument("--pfx-passwd", default="", help="PKCS#12 passphrase, when downloading file-type pfx.")
+    parser.add_argument("--out", required=True, help="Local path to write the downloaded bytes to.")
+    _add_payload_args(parser)
+
+
 def _run_localcert_config(args: argparse.Namespace) -> int:
     return _run_cert(args, "fw_config_localcert")
 
@@ -185,6 +262,121 @@ def _run_localcacert_verify(args: argparse.Namespace) -> int:
 def _run_localcacert_delete_batch(args: argparse.Namespace) -> int:
     _require_arg(args, "id")
     return _run_cert(args, "fw_delete_batch_localcacert")
+
+
+def _run_crl_config(args: argparse.Namespace) -> int:
+    return _run_crl(args, "fw_config_crl")
+
+
+def _run_crl_verify(args: argparse.Namespace) -> int:
+    return _run_crl(args, "fw_verify_crl")
+
+
+def _run_crl_download(args: argparse.Namespace) -> int:
+    _require_arg(args, "cert_name")
+    _require_arg(args, "out")
+    return _run_crl(args, "fw_download_crl")
+
+
+def _run_crl_delete_batch(args: argparse.Namespace) -> int:
+    _require_arg(args, "id")
+    return _run_crl(args, "fw_delete_batch_crl")
+
+
+def _run_crl(args: argparse.Namespace, op_id: str) -> int:
+    from atomic_ops.runner._payload import load_json_payload
+    from atomic_ops.runner.crl import (
+        build_crl_batch_delete_payload,
+        build_crl_download_payload,
+        build_crl_dry_run,
+        build_crl_upload_payload,
+        execute_crl,
+        validate_crl_payload,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        if not ctx.get("verify_tls"):
+            write_warning(
+                {"warning_code": "TLS_VERIFY_DISABLED", "message": "Device TLS verification is disabled."},
+                output_format,
+            )
+
+        session_file = resolve_session_file(ctx.get("session_file"))
+        page = int(getattr(args, "page", 1))
+        size = int(getattr(args, "size", 40))
+        keywords = getattr(args, "keywords", "") or ""
+        upload_file = getattr(args, "file", "") or ""
+        output_path = getattr(args, "out", "") or ""
+        payload: dict[str, Any] | None
+
+        raw_payload = load_json_payload(
+            payload_file=getattr(args, "payload_file", None),
+            payload_json=getattr(args, "payload_json", None),
+        )
+        if raw_payload is not None:
+            payload = raw_payload
+        elif op_id == "fw_config_crl":
+            upload_type = getattr(args, "upload_type", "local")
+            cert_name = getattr(args, "cert_name", "") or ""
+            if not cert_name:
+                if upload_type != "local":
+                    raise RunnerError(
+                        "RUNNER_VALIDATION_FAILED",
+                        "CRL cert_name is required unless --upload-type local derives it from the file.",
+                        {"field": "cert_name"},
+                    )
+                _require_arg(args, "file")
+                cert_name = Path(upload_file).expanduser().name
+            payload = build_crl_upload_payload(
+                cert_name=cert_name,
+                upload_type=upload_type,
+                key_type=getattr(args, "key_type", "RSA"),
+                cert_type=getattr(args, "cert_type", "") or "",
+                key_name=getattr(args, "key_name", "") or "",
+                pfx_passwd=getattr(args, "pfx_passwd", "") or "",
+                key_passwd=getattr(args, "key_passwd", "") or "",
+                url_name=getattr(args, "url_name", "") or "",
+                crl_auto_up_time=getattr(args, "crl_auto_up_time", "") or "",
+            )
+        elif op_id == "fw_download_crl":
+            payload = build_crl_download_payload(
+                cert_name=getattr(args, "cert_name"),
+                file_type=getattr(args, "file_type", "cert"),
+                pfx_passwd=getattr(args, "pfx_passwd", "") or "",
+            )
+        elif op_id == "fw_delete_batch_crl":
+            payload = build_crl_batch_delete_payload(entry_ids=_arg_list(args, "id"))
+            payload = validate_crl_payload(payload, op_id=op_id)
+        else:
+            payload = None
+
+        runner_kwargs = {
+            "op_id": op_id,
+            "base_url": ctx["base_url"],
+            "session_file": session_file,
+            "auth_header": ctx.get("auth_header", "Authorization"),
+            "payload": payload,
+            "page": page,
+            "size": size,
+            "keywords": keywords,
+            "upload_file": upload_file,
+            "output_path": output_path,
+            "verify_tls": bool(ctx.get("verify_tls")),
+            "timeout": float(ctx.get("timeout", 10.0)),
+        }
+        if not ctx.get("execute"):
+            result = build_crl_dry_run(**runner_kwargs)
+        else:
+            result = execute_crl(**runner_kwargs)
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
 
 
 def _run_cert(args: argparse.Namespace, op_id: str, *, variant: str | None = None) -> int:

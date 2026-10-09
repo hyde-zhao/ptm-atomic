@@ -123,20 +123,28 @@ def request_bytes(
     url: str,
     *,
     headers: dict[str, str] | None = None,
+    json_payload: dict[str, Any] | None = None,
     timeout: float = 10,
     verify_tls: bool = False,
 ) -> tuple[int, bytes]:
-    """Issue a request and return ``(status_code, response_content)`` for binary downloads.
+    """Issue a request and return ``(status_code, response_content)`` for non-JSON bodies.
 
     Used by export-file workflows where the response body is a file stream rather
     than JSON. Network failures map to ``RUNNER_DEVICE_UNREACHABLE`` to stay
     consistent with ``request_json``.
+
+    ``json_payload`` exists because some endpoints answer a JSON request with a
+    plain-text body: the CRL download trigger (``PUT /api/v1/cert/download``)
+    replies with a bare ``tmpcert/<file>`` path, so it cannot use
+    ``request_json`` (which rejects a non-JSON root). Default ``None`` keeps the
+    existing bodyless callers byte-for-byte unchanged.
     """
     try:
         response = requests.request(
             method,
             url,
             headers=headers,
+            json=json_payload,
             timeout=timeout,
             verify=verify_tls,
         )

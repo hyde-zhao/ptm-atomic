@@ -57,3 +57,5 @@ operations:
   - fw_verify_localcert
   - fw_verify_localcacert
   - fw_verify_geoip
+  - fw_verify_keyword
+  - fw_verify_crl

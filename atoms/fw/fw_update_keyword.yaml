@@ -1,0 +1,107 @@
+schema_version: "1.1"
+op_id: fw_update_keyword
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_update_keyword
+description: Update a keyword object by its name through /api/v1/keywords.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be keyword for this operation.
+  params:
+    type: json
+    required: true
+    description: Keyword object update with the target name as id plus the replacement name, desc and content list.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: keyword
+  params:
+    id: test_123
+    name: test_123
+    desc: desperation2
+    content:
+      - "12341"
+      - "12"
+      - "34"
+      - "55"
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: keyword
+      applied_ref: "<keyword-update-result-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+side_effect: state_mutation
+rollback_strategy:
+  type: manual_required
+  snapshot_required: false
+  required_inputs:
+    - name
+  id_source: query
+  query_op: fw_verify_keyword
+  query_match: name
+  id_field: name
+  notes: An update overwrites the previous desc and content in place; the prior values are not recoverable from the device, so restoring them needs the captured pre-update content.
+pre_snapshot:
+  op_id: fw_verify_keyword
+  capture_fields:
+    - name
+    - desc
+    - content
+  notes: Capture desc and content before the update; they are the only record of the overwritten values.
+post_verify:
+  op_id: fw_verify_keyword
+  expected_state: present
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Rewriting keyword content changes what later policy matching sees and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - The target keyword object exists and is addressed by its name.
+  - Gate evidence exists before this high-risk configuration contract is used.
+postconditions:
+  - The replacement name, desc and content are in effect.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - keyword
+  - configuration
+aliases:
+  - keyword
+  - keyword-object
+  - kw-obj
+since_version: "1.13.0"

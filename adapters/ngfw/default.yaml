@@ -3032,7 +3032,7 @@ operations:
         - The runner selects SSH (paramiko) or Telnet (telnetlib) based on the transport parameter; the profile's transport field is the default.
   fw_check_bridge_domain:
     atom_ref: atoms/fw/fw_check_bridge_domain.yaml
-    intent: Query the VPP bridge-domain table, or a single bridge domain, over SSH or Telnet.
+    intent: Query the VPP bridge-domain table over SSH or Telnet.
     transport: ssh
     shell:
       command_template: "/opt/dbappsecurity/bin/vppctl show bridge-domain"
@@ -3045,8 +3045,7 @@ operations:
       notes:
         - Read-only observation; the command writes nothing to the device.
         - Connection inputs come from runner input and the session file; the profile carries no runtime values.
-        - The template above is the whole-table default; when the caller supplies bridge-domain-id the runner appends the numeric id as a single shell-escaped argument (the mac-age show shape) and judges success on the BD-ID header anchor instead of the permissive whole-table pattern.
-        - The runner MUST shell-escape every {{param}} placeholder; the default template has no placeholders.
+        - The runner MUST shell-escape every {{param}} placeholder; this template has no placeholders.
         - Session output is captured into diag_snapshot_ref and never written to the repo.
         - ptm-atomic run can execute this command only when --execute is explicit.
         - The runner selects SSH (paramiko) or Telnet (telnetlib) based on the transport parameter; the profile's transport field is the default.
@@ -4738,6 +4737,234 @@ operations:
         - GET takes page, size and optional keywords query parameters and returns count and vals.
         - GET requests send no JSON body.
         - Each val entry carries accuracy, ip, country, province, city, desc, id and config_source.
+  fw_config_keyword:
+    atom_ref: atoms/fw/fw_config_keyword.yaml
+    intent: Build a keyword object create request.
+    request:
+      method: POST
+      path: /api/v1/keywords
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          content: "{{ params.content }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <keyword-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - A keyword object is identified by its own name; create does not return a numeric id.
+        - val.name is required; val.desc is optional; val.content must be a non-empty list of strings.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_keyword:
+    atom_ref: atoms/fw/fw_update_keyword.yaml
+    intent: Build a keyword object update request by name.
+    request:
+      method: PUT
+      path: /api/v1/keywords
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          content: "{{ params.content }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <keyword-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The top-level id is the target object name, not a numeric id.
+        - The update replaces name, desc and content wholesale; the previous content list is not recoverable from the device.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_keyword:
+    atom_ref: atoms/fw/fw_verify_keyword.yaml
+    intent: Build a keyword object query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/keywords
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <keyword-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET takes page and size query parameters plus an optional search filter and returns count and vals.
+        - The search filter parameter name is key per the interface specification; the repository convention elsewhere is keywords, so it is settled by live probe.
+        - Each val entry carries config_source, refcnt, name, desc and the content list.
+  fw_delete_batch_keyword:
+    atom_ref: atoms/fw/fw_delete_batch_keyword.yaml
+    intent: Build a batch keyword object delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/keywords
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <keyword-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/keywords items.
+        - Every body.id entry is a keyword object name carried as a string; the runner folds N names into one batch item.
+        - The interface specification defines no single-object delete for this family, so batch delete is the only removal path.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_crl:
+    atom_ref: atoms/fw/fw_config_crl.yaml
+    intent: Build a CRL certificate upload and registration request.
+    request:
+      method: POST
+      path: /api/v1/upload
+      content_type: multipart/form-data
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <crl-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - This atom folds a two-step workflow; the runner drives both steps and no data flows between atoms.
+        - Step 1 stages the file with multipart field module=certcrl and field file, and this entry declares that step only.
+        - Step 2 registers it with PUT /api/v1/cert/upload and body id fixed to the string 0 plus val.funcType=certcrl.
+        - val.uploadType selects the branch; local stages the file first, http skips staging because the device fetches val.urlName itself.
+        - val.keyType is carried even though the interface specification omits it; live probing recorded RSA failing over an http upload while SM2 succeeded.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_crl:
+    atom_ref: atoms/fw/fw_verify_crl.yaml
+    intent: Build a CRL certificate query request with pagination.
+    request:
+      method: GET
+      path: /api/v1/cert/certcrl
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <crl-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET takes page, size and optional keywords query parameters and returns count and vals.
+        - Each val entry carries the registered name and its numeric id; the numeric id is what the batch delete needs.
+        - GET requests send no JSON body.
+  fw_download_crl:
+    atom_ref: atoms/fw/fw_download_crl.yaml
+    intent: Build a CRL certificate download request.
+    request:
+      method: PUT
+      path: /api/v1/cert/download
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "0"
+        val:
+          funcType: certcrl
+          certName: "{{ params.certName }}"
+          fileType: "{{ params.fileType }}"
+          pfxPasswd: "{{ params.pfxPasswd }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <crl-download-file-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - This atom folds a two-step workflow; the runner drives both steps and no data flows between atoms.
+        - Step 1 answers with a plain-text tmpcert path rather than JSON, so the runner reads it as bytes and treats anything not starting with tmpcert as a failure.
+        - Step 2 fetches the bytes with GET /api/v1/downloadfile?id=<urlencoded path> and writes them to output_path.
+        - pfxPasswd is only meaningful for fileType pfx; cert and key downloads ignore it.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_crl:
+    atom_ref: atoms/fw/fw_delete_batch_crl.yaml
+    intent: Build a batch CRL certificate delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/cert/certcrl
+            body:
+              id:
+                - "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <crl-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Batch body contains only DELETE /api/v1/cert/certcrl items.
+        - Each body.id is the numeric CRL entry id carried as a string; the runner folds N ids into one batch item.
+        - The interface specification defines no single-object delete for this family, so batch delete is the only removal path.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_timeobject:
     atom_ref: atoms/fw/fw_config_timeobject.yaml
     intent: Build a time object create request.
@@ -5524,7 +5751,7 @@ operations:
     transport: ssh
     shell:
       command_template: "kill -9 {{pid}}"
-      success_pattern: "\\A\\z"
+      success_pattern: "\\A\\Z"
       prompt_timeout_ms: 30000
       privilege_level: user
     safety:

@@ -13,7 +13,7 @@ from atomic_ops.runner.errors import CREDENTIAL_INJECTION_HINT, RunnerError
 from atomic_ops.runner.http import request_json, request_text
 
 
-PUBLIC_KEY_SCRIPT_RE = re.compile(r'src="(/js/ras_public_key\.\d+\.js)"')
+PUBLIC_KEY_SCRIPT_RE = re.compile(r'src="(/js/ras_public_key(?:\.\d+)?\.js)"')
 
 
 def build_login_dry_run(
