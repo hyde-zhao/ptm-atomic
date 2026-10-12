@@ -2,9 +2,14 @@
 
 支持 4 种 scheduletype：
 - oneshot: 一次性计划，timequantum，time 格式 ``YYYY-MM-DD HH:MM:SS``
-- day:     日计划，timequantum，time 格式 ``HH:MM:SS``
-- week:    周计划，timequantum，time 格式 ``HH:MM:SS``，额外 weekday:int
+- day:     日计划，timequantum，time 格式 ``HH:MM``（设备实际口径；HH:MM:SS 输入自动归一）
+- week:    周计划，timequantum，time 格式 ``HH:MM``，额外 weekday:int（同上归一）
 - month:   月计划，timemonquantum（注意容器名不同），time:int + planday:str
+
+2026-10-12 真机实证（PC-STRATEGYROUTE-MNG-DFX-065 §避坑指南待闭合项 13）：设备对
+day/week 的 time 按 ``15:04`` 解析，``09:00:00`` 被拒——``eRequestParam: parsing
+time "09:00:00": extra text ":00"``（HTTP 400 / exit=48）；此前契约声明 HH:MM:SS 与
+设备不符，本 runner 统一归一为 ``HH:MM``。
 """
 
 from __future__ import annotations
@@ -368,18 +373,23 @@ def _parse_time_ranges(scheduletype: str, time_ranges: list[str]) -> list[dict[s
             if end_weekday is None:
                 # 端未写 weekday 时复用 start 的 weekday（与单段入口同语义）。
                 end_weekday = start_weekday
-        elif ":" in start_text and scheduletype == "day":
-            raise RunnerError(
-                "RUNNER_VALIDATION_FAILED",
-                "--time-range for day scheduletype must not carry a weekday prefix.",
-                {"field": "time_range", "value": text},
-            )
+        elif scheduletype == "day":
+            # day 不得带 weekday 前缀（``N:HH:MM[:SS]``）。2026-10-12 修复：原判据
+            # ``":" in start_text`` 对 day **恒真**（时间本身就含冒号）⇒ day 多段入口
+            # 恒拒；改为精确识别「数字前缀 + 剩余仍是完整时间」的星期前缀形态。
+            prefix, _sep, rest = start_text.partition(":")
+            if prefix.strip().isdigit() and rest.count(":") == 2:
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "--time-range for day scheduletype must not carry a weekday prefix.",
+                    {"field": "time_range", "value": text},
+                )
         if scheduletype == "oneshot":
             _validate_datetime("time_range start", start_text)
             _validate_datetime("time_range end", end_text)
         else:
-            _validate_time_only("time_range start", start_text)
-            _validate_time_only("time_range end", end_text)
+            start_text = _normalize_day_week_time("time_range start", start_text)
+            end_text = _normalize_day_week_time("time_range end", end_text)
         entry: dict[str, Any] = {
             "starttime": {"time": start_text},
             "endtime": {"time": end_text},
@@ -438,9 +448,9 @@ def _build_timequantum(
     if scheduletype == "oneshot":
         _validate_datetime("start_time", start_time)
         _validate_datetime("end_time", end_time)
-    else:  # day / week
-        _validate_time_only("start_time", start_time)
-        _validate_time_only("end_time", end_time)
+    else:  # day / week：统一归一为 HH:MM（设备实际口径，2026-10-12 真机实证）
+        start_time = _normalize_day_week_time("start_time", start_time)
+        end_time = _normalize_day_week_time("end_time", end_time)
     entry: dict[str, Any] = {
         "starttime": {"time": start_time},
         "endtime": {"time": end_time},
@@ -482,15 +492,24 @@ def _validate_datetime(field: str, value: str) -> None:
         ) from exc
 
 
-def _validate_time_only(field: str, value: str) -> None:
-    try:
-        datetime.strptime(value, "%H:%M:%S")
-    except ValueError as exc:
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            f"{field} must match HH:MM:SS for day/week scheduletype.",
-            {"field": field, "value": value},
-        ) from exc
+def _normalize_day_week_time(field: str, value: str) -> str:
+    """day/week 时间归一为 ``HH:MM``（设备实际口径，2026-10-12 真机实证）。
+
+    设备对 day/week 的 time 按 ``15:04`` 解析：``09:00:00`` 被拒
+    （eRequestParam: parsing time "09:00:00": extra text ":00"）。
+    输入兼容 ``HH:MM:SS`` 与 ``HH:MM`` 两种写法，一律产出 ``HH:MM``。
+    """
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            parsed = datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+        return f"{parsed.hour:02d}:{parsed.minute:02d}"
+    raise RunnerError(
+        "RUNNER_VALIDATION_FAILED",
+        f"{field} must match HH:MM (or HH:MM:SS, normalized to HH:MM) for day/week scheduletype.",
+        {"field": field, "value": value},
+    )
 
 
 def _validate_pagination(page: int, size: int) -> None:

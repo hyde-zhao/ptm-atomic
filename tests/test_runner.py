@@ -4556,7 +4556,7 @@ class TimeObjectPayloadTests(unittest.TestCase):
         payload = build_timeobject_payload(
             name="t1", scheduletype="day", start_time="00:00:00", end_time="23:59:59",
         )
-        self.assertEqual(payload["val"]["timequantum"][0]["endtime"]["time"], "23:59:59")
+        self.assertEqual(payload["val"]["timequantum"][0]["endtime"]["time"], "23:59")  # day/week 归一为 HH:MM（2026-10-12 设备口径）
 
     def test_build_week_payload_includes_weekday(self) -> None:
         payload = build_timeobject_payload(

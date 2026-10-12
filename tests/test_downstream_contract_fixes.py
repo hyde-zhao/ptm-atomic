@@ -444,16 +444,16 @@ class TimeObjectMultiSegmentTests(unittest.TestCase):
         )
         quantum = payload["val"]["timequantum"]
         self.assertEqual(len(quantum), 2)
-        self.assertEqual(quantum[0]["starttime"], {"time": "08:00:00", "weekday": 1})
-        self.assertEqual(quantum[0]["endtime"], {"time": "20:00:00", "weekday": 2})
-        self.assertEqual(quantum[1]["endtime"], {"time": "18:00:00", "weekday": 5})
+        self.assertEqual(quantum[0]["starttime"], {"time": "08:00", "weekday": 1})
+        self.assertEqual(quantum[0]["endtime"], {"time": "20:00", "weekday": 2})
+        self.assertEqual(quantum[1]["endtime"], {"time": "18:00", "weekday": 5})
 
     def test_week_segment_end_reuses_start_weekday_when_omitted(self) -> None:
         payload = build_timeobject_payload(
             name="obj", scheduletype="week", time_ranges=["3:08:00:00~09:00:00"],
         )
         quantum = payload["val"]["timequantum"]
-        self.assertEqual(quantum[0]["endtime"], {"time": "09:00:00", "weekday": 3})
+        self.assertEqual(quantum[0]["endtime"], {"time": "09:00", "weekday": 3})
 
     def test_oneshot_multi_segment(self) -> None:
         payload = build_timeobject_payload(
@@ -470,13 +470,13 @@ class TimeObjectMultiSegmentTests(unittest.TestCase):
         quanta = payload["val"]["timemonquantum"]
         self.assertEqual(quanta, [{"time": 15, "planday": "1,2,3"}, {"time": 20, "planday": "10"}])
 
-    def test_single_segment_path_unchanged_when_multi_flags_absent(self) -> None:
-        """默认路径回归：不传多段参数时仍是原单段构建。"""
+    def test_single_segment_path_built_when_multi_flags_absent(self) -> None:
+        """默认路径回归：不传多段参数时仍是原单段构建（时间已按设备口径归一为 HH:MM）。"""
         payload = build_timeobject_payload(
             name="obj", scheduletype="week", start_time="08:00:00", end_time="09:00:00", weekday=2,
         )
         quantum = payload["val"]["timequantum"]
-        self.assertEqual(quantum, [{"starttime": {"time": "08:00:00", "weekday": 2}, "endtime": {"time": "09:00:00", "weekday": 2}}])
+        self.assertEqual(quantum, [{"starttime": {"time": "08:00", "weekday": 2}, "endtime": {"time": "09:00", "weekday": 2}}])
 
     def test_time_range_conflicts_with_single_segment_args(self) -> None:
         with self.assertRaises(RunnerError) as context:
@@ -499,6 +499,60 @@ class TimeObjectMultiSegmentTests(unittest.TestCase):
         precondition_text = " ".join(atom["preconditions"])
         self.assertIn("escape hatch", precondition_text.lower())
         self.assertIn("--time-range", precondition_text)
+
+
+class TimeObjectTimeNormalizationTests(unittest.TestCase):
+    """day/week 时间归一为 HH:MM（2026-10-12 真机口径，避坑指南待闭合项 13）。
+
+    设备对 day/week 的 time 按 ``15:04`` 解析：``09:00:00`` 被拒
+    （eRequestParam: parsing time "09:00:00": extra text ":00"）。
+    """
+
+    def test_day_times_normalized_to_hhmm(self) -> None:
+        payload = build_timeobject_payload(
+            name="obj", scheduletype="day", start_time="09:00:00", end_time="18:00:00",
+        )
+        quantum = payload["val"]["timequantum"][0]
+        self.assertEqual(quantum["starttime"]["time"], "09:00")
+        self.assertEqual(quantum["endtime"]["time"], "18:00")
+
+    def test_day_hhmm_input_passthrough(self) -> None:
+        payload = build_timeobject_payload(
+            name="obj", scheduletype="day", start_time="09:00", end_time="18:00",
+        )
+        quantum = payload["val"]["timequantum"][0]
+        self.assertEqual(quantum["starttime"]["time"], "09:00")
+        self.assertEqual(quantum["endtime"]["time"], "18:00")
+
+    def test_week_times_normalized_keep_weekday(self) -> None:
+        payload = build_timeobject_payload(
+            name="obj", scheduletype="week", start_time="08:30:00", end_time="21:30:00", weekday=6,
+        )
+        quantum = payload["val"]["timequantum"][0]
+        self.assertEqual(quantum["starttime"], {"time": "08:30", "weekday": 6})
+        self.assertEqual(quantum["endtime"], {"time": "21:30", "weekday": 6})
+
+    def test_time_range_day_normalized(self) -> None:
+        payload = build_timeobject_payload(
+            name="obj", scheduletype="day", time_ranges=["23:55:00~23:59:00", "00:00:00~00:05:00"],
+        )
+        quantum = payload["val"]["timequantum"]
+        self.assertEqual(quantum[0], {"starttime": {"time": "23:55"}, "endtime": {"time": "23:59"}})
+        self.assertEqual(quantum[1], {"starttime": {"time": "00:00"}, "endtime": {"time": "00:05"}})
+
+    def test_oneshot_datetime_unchanged(self) -> None:
+        payload = build_timeobject_payload(
+            name="obj", scheduletype="oneshot",
+            start_time="2026-09-10 00:00:00", end_time="2026-09-10 23:59:59",
+        )
+        quantum = payload["val"]["timequantum"][0]
+        self.assertEqual(quantum["starttime"]["time"], "2026-09-10 00:00:00")
+        self.assertEqual(quantum["endtime"]["time"], "2026-09-10 23:59:59")
+
+    def test_invalid_time_rejected(self) -> None:
+        with self.assertRaises(RunnerError) as context:
+            build_timeobject_payload(name="obj", scheduletype="day", start_time="9点半", end_time="18:00")
+        self.assertEqual(context.exception.error_code, "RUNNER_VALIDATION_FAILED")
 
 
 # ---------------------------------------------------------------------------

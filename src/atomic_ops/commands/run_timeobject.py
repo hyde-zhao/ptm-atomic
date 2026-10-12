@@ -73,12 +73,12 @@ def _add_timeobject_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--start-time",
         default="",
-        help="Start time for oneshot (YYYY-MM-DD HH:MM:SS) or day/week (HH:MM:SS).",
+        help="Start time for oneshot (YYYY-MM-DD HH:MM:SS) or day/week (HH:MM; HH:MM:SS input is normalized to HH:MM).",
     )
     parser.add_argument(
         "--end-time",
         default="",
-        help="End time for oneshot (YYYY-MM-DD HH:MM:SS) or day/week (HH:MM:SS).",
+        help="End time for oneshot (YYYY-MM-DD HH:MM:SS) or day/week (HH:MM; HH:MM:SS input is normalized to HH:MM).",
     )
     parser.add_argument(
         "--weekday",
@@ -101,8 +101,9 @@ def _add_timeobject_args(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=None,
         help="Multi-segment timequantum entry (oneshot/day/week). Repeatable; each entry is "
-        "'START~END' (oneshot: 'YYYY-MM-DD HH:MM:SS~YYYY-MM-DD HH:MM:SS'; day: 'HH:MM:SS~HH:MM:SS'; "
-        "week: 'N:HH:MM:SS~M:HH:MM:SS', end weekday optional and defaults to start's). Must not be "
+        "'START~END' (oneshot: 'YYYY-MM-DD HH:MM:SS~YYYY-MM-DD HH:MM:SS'; day: 'HH:MM~HH:MM'; "
+        "week: 'N:HH:MM~M:HH:MM', end weekday optional and defaults to start's; day/week HH:MM:SS "
+        "input is normalized to HH:MM). Must not be "
         "combined with --start-time/--end-time/--weekday.",
     )
     parser.add_argument(

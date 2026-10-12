@@ -4994,7 +4994,7 @@ operations:
       notes:
         - scheduletype must be oneshot, day, week or month.
         - month uses timemonquantum; oneshot/day/week use timequantum.
-        - oneshot time format is YYYY-MM-DD HH:MM:SS; day/week time format is HH:MM:SS; week adds weekday:int.
+        - oneshot time format is YYYY-MM-DD HH:MM:SS; day/week time format is HH:MM (HH:MM:SS input is normalized to HH:MM); week adds weekday:int.
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_timeobject:
     atom_ref: atoms/fw/fw_update_timeobject.yaml
