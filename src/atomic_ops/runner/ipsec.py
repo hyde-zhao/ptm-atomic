@@ -206,6 +206,37 @@ def build_ipsec_dry_run(
     }
 
 
+def _fetch_ipsec_policy_names(
+    *, base_url: str, headers: dict[str, str], timeout: float, verify_tls: bool
+) -> set[str]:
+    """GET /api/v1/ipsec（与 verify-policy 同形）取现存策略名集合。
+
+    2026-10-12：用于 fw_config_ipsec_policy 的创建/更新分派——部分设备型号
+    （DAS-TGFW-G3300-HU 实测）的 PUT 是**严格更新**：对象不存在即拒
+    「Put请求试图修改不存在的内容」；创建必须走 POST {"val": ...}。
+    """
+    url = _request_url(base_url, "fw_verify_ipsec_policy")
+    status_code, response_payload, _text = request_json(
+        "GET", url, headers=headers, json_payload=None,
+        timeout=timeout, verify_tls=verify_tls,
+    )
+    if status_code not in GET_SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response_payload)
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "IPsec policy existence pre-check did not return a success status.",
+            {
+                "op_id": "fw_config_ipsec_policy",
+                "status_code": status_code,
+                "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
+            },
+        )
+    items: Any = response_payload.get("vals") if isinstance(response_payload, dict) else response_payload
+    if not isinstance(items, list):
+        items = []
+    return {str(it.get("name")) for it in items if isinstance(it, dict) and it.get("name")}
+
+
 def execute_ipsec(
     *,
     op_id: str,
@@ -225,19 +256,34 @@ def execute_ipsec(
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {"Content-Type": "application/json", auth_header: header_value}
+
+    # 2026-10-12：config-policy 的「存在则 PUT / 不存在则 POST」分派。
+    # 设备契约（实测）：PUT 为严格更新（不存在即拒），创建必须 POST {"val": ...}（无 id 信封）。
+    # 先在 GET 上查重，按结果选择方法；查重失败响亮报错（不蒙猜）。
+    upsert_method = method
+    if op_id == "fw_config_ipsec_policy":
+        policy_name = str((payload or {}).get("id") or "")
+        existing = _fetch_ipsec_policy_names(
+            base_url=base_url, headers=headers, timeout=timeout, verify_tls=verify_tls
+        )
+        if policy_name and policy_name not in existing:
+            upsert_method = "POST"
+            payload = {"val": (payload or {}).get("val")}
+            query = None
+
     status_code, response_payload, _text = request_json(
-        method,
+        upsert_method,
         _request_url(base_url, op_id, query=query),
         headers=headers,
         json_payload=None if op_id in NO_BODY_OPS else payload,
         timeout=timeout,
         verify_tls=verify_tls,
     )
-    success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
+    success_status = GET_SUCCESS_STATUS if upsert_method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload)
         raise RunnerError(
-            "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
+            "RUNNER_RESPONSE_INVALID" if upsert_method == "GET" else "RUNNER_CONFIG_REJECTED",
             "IPsec device request did not return a success status.",
             {
                 "op_id": op_id,
@@ -252,7 +298,7 @@ def execute_ipsec(
         "status": "success",
         "status_code": status_code,
         "request": {
-            "method": method,
+            "method": upsert_method,
             "path": path,
             "query": dict(query) if query else None,
             "auth": {"name": auth_header, "value": "<session-ref>"},

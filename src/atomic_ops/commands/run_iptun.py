@@ -52,7 +52,7 @@ def _add_iptun_args(parser: argparse.ArgumentParser) -> None:
     enabled_group.add_argument("--disabled", dest="enabled", action="store_false", help="Disable the IP tunnel.")
     parser.add_argument("--level", type=int, default=100, help="IP tunnel level field.")
     parser.add_argument("--gre-tunnel-type", type=int, default=1, help="GRE tunnel_type field (gre only).")
-    parser.add_argument("--gre-key", type=int, default=0, help="GRE key field (gre only).")
+    parser.add_argument("--gre-key", type=int, default=None, help="GRE key field (gre only; omitted by default — some device models' GreLink lacks this field and rejects it).")
     parser.add_argument("--gre-check-sum", action="store_true", default=False, help="Enable GRE checksum (gre only).")
     parser.add_argument("--gre-keepalive-enable", action="store_true", default=False, help="Enable GRE keepalive (gre only).")
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
@@ -119,7 +119,7 @@ def _run_iptun(args: argparse.Namespace, op_id: str) -> int:
                 src_addr=getattr(args, "src_addr"),
                 dst_addr=getattr(args, "dst_addr"),
                 gre_tunnel_type=int(getattr(args, "gre_tunnel_type", 1)),
-                gre_key=int(getattr(args, "gre_key", 0)),
+                gre_key=getattr(args, "gre_key", None),
                 gre_check_sum=bool(getattr(args, "gre_check_sum", False)),
                 gre_keepalive_enable=bool(getattr(args, "gre_keepalive_enable", False)),
             )

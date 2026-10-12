@@ -44,6 +44,7 @@ from atomic_ops.runner.ipsec import (
     build_ipsec_batch_delete_payload,
     build_ipsec_policy_payload,
     build_ipsec_port_payload,
+    execute_ipsec,
     validate_ipsec_payload,
 )
 from atomic_ops.runner.ngfw_login import login
@@ -2985,6 +2986,30 @@ class IptunPayloadTests(unittest.TestCase):
         self.assertEqual(payload["val"]["gre"]["tunnel_type"], 1)
         self.assertEqual(payload["val"]["gre"]["key"], 0)
         self.assertNotIn("ipip", payload["val"])
+
+    def test_build_gre_payload_omits_optional_fields_by_default(self) -> None:
+        # 2026-10-12：key/check_sum/keepalive_enable 缺省不携带——部分设备型号的
+        # GreLink 模型不含这些字段，恒发会被设备 eConfigWrite 拒绝。
+        payload = build_iptun_payload(
+            tunnel_type="gre", entry_id="tunnel3",
+            src_addr="7.7.7.1", dst_addr="7.7.7.2", ip_addresses=["6.6.6.6/24"],
+        )
+        gre = payload["val"]["gre"]
+        self.assertEqual(gre, {"tunnel_type": 1, "src_addr": "7.7.7.1", "dst_addr": "7.7.7.2"})
+        self.assertNotIn("key", gre)
+        self.assertNotIn("check_sum", gre)
+        self.assertNotIn("keepalive_enable", gre)
+
+    def test_build_gre_payload_includes_explicit_optional_fields(self) -> None:
+        payload = build_iptun_payload(
+            tunnel_type="gre", entry_id="tunnel3",
+            src_addr="7.7.7.1", dst_addr="7.7.7.2", ip_addresses=["6.6.6.6/24"],
+            gre_key=7, gre_check_sum=True, gre_keepalive_enable=True,
+        )
+        gre = payload["val"]["gre"]
+        self.assertEqual(gre["key"], 7)
+        self.assertTrue(gre["check_sum"])
+        self.assertTrue(gre["keepalive_enable"])
 
     def test_rejects_4over6_with_ipv4_endpoints(self) -> None:
         with self.assertRaises(RunnerError) as context:
@@ -6838,6 +6863,87 @@ class IpsecPayloadTests(unittest.TestCase):
             {"id": "0", "val": {"local_port": 4500}}, op_id="fw_update_ipsec_port"
         )
         self.assertEqual(payload["id"], "0")
+
+    def _run_execute_config_policy(self, existing_names, payload):
+        """执行 fw_config_ipsec_policy 并记录请求序列（mock request_json）。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+            calls = []
+
+            def fake_request_json(method, url, *, headers, json_payload, timeout, verify_tls):
+                calls.append((method, url, json_payload))
+                if method == "GET":
+                    return 200, {"count": len(existing_names),
+                                 "vals": [{"name": n} for n in existing_names]}, "{}"
+                return 200, {"msg": "success"}, "{}"
+
+            with patch("atomic_ops.runner.ipsec.request_json", side_effect=fake_request_json):
+                result = execute_ipsec(
+                    op_id="fw_config_ipsec_policy",
+                    base_url="https://192.0.2.1",
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=payload,
+                    verify_tls=False,
+                    timeout=10,
+                )
+        return calls, result
+
+    def test_execute_config_policy_creates_via_post_when_absent(self) -> None:
+        """2026-10-12：GET 查重未命中 → POST {"val": ...}（部分设备型号 PUT 为严格更新、拒创建）。"""
+        payload = {"id": "p1", "val": {"scene": "PTP", "name": "p1"}}
+        calls, result = self._run_execute_config_policy(existing_names=[], payload=payload)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual([c[0] for c in calls], ["GET", "POST"])
+        self.assertEqual(calls[1][1], "https://192.0.2.1/api/v1/ipsec")
+        self.assertEqual(calls[1][2], {"val": {"scene": "PTP", "name": "p1"}})
+        self.assertEqual(result["request"]["method"], "POST")
+
+    def test_execute_config_policy_updates_via_put_when_present(self) -> None:
+        """GET 命中同名 → 维持 PUT（更新；信封 id=策略名、val 直传）。"""
+        payload = {"id": "p1", "val": {"scene": "PTP", "name": "p1"}}
+        calls, result = self._run_execute_config_policy(existing_names=["other", "p1"], payload=payload)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual([c[0] for c in calls], ["GET", "PUT"])
+        self.assertEqual(calls[1][2], {"id": "p1", "val": {"scene": "PTP", "name": "p1"}})
+        self.assertEqual(result["request"]["method"], "PUT")
+
+    def test_execute_config_policy_fails_loud_on_precheck_error(self) -> None:
+        """查重 GET 失败必须响亮报错（不蒙猜方法）。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = Path(temp_dir) / "session.json"
+            write_session_file(
+                session_file,
+                base_url="https://192.0.2.1",
+                username="admin",
+                session_value="abc123",
+                source_op_id="fw_login_web_management",
+            )
+
+            def fake_request_json(method, url, *, headers, json_payload, timeout, verify_tls):
+                return 500, {"errMsg": "boom"}, "{}"
+
+            with patch("atomic_ops.runner.ipsec.request_json", side_effect=fake_request_json):
+                with self.assertRaises(RunnerError) as ctx:
+                    execute_ipsec(
+                        op_id="fw_config_ipsec_policy",
+                        base_url="https://192.0.2.1",
+                        session_file=session_file,
+                        auth_header="Authorization",
+                        payload={"id": "p1", "val": {"scene": "PTP", "name": "p1"}},
+                        verify_tls=False,
+                        timeout=10,
+                    )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_RESPONSE_INVALID")
 
     def test_no_body_ops_return_none(self) -> None:
         """GET 四个查询与 delete-policy 都不下发 body（delete 的 id 走查询串）。"""

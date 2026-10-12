@@ -93,7 +93,7 @@ def build_interface_payload(
     src_addr: str | None = None,
     dst_addr: str | None = None,
     gre_tunnel_type: int = 1,
-    gre_key: int = 0,
+    gre_key: int | None = None,
     gre_check_sum: bool = False,
     gre_keepalive_enable: bool = False,
     ip6_nd_prefixes: list[str] | None = None,
@@ -853,7 +853,7 @@ def _apply_tunnel(
     dst_addr: str | None,
     *,
     gre_tunnel_type: int,
-    gre_key: int,
+    gre_key: int | None,
     gre_check_sum: bool,
     gre_keepalive_enable: bool,
 ) -> None:
@@ -867,14 +867,20 @@ def _apply_tunnel(
     _validate_tunnel_endpoints(tunnel_type, src_addr or "", dst_addr or "")
     val["type"] = TUNNEL_TYPE_CODES[tunnel_type]
     if tunnel_type == "gre":
-        val["gre"] = {
+        # 2026-10-12：同 iptun runner —— key/check_sum/keepalive_enable 为可选字段，
+        # 部分设备型号的 GreLink 模型不含，缺省不携带（仅在显式请求时下发）。
+        gre_val: dict[str, Any] = {
             "tunnel_type": _validate_non_negative_int("gre_tunnel_type", gre_tunnel_type),
             "src_addr": src_addr,
             "dst_addr": dst_addr,
-            "key": _validate_non_negative_int("gre_key", gre_key),
-            "check_sum": bool(gre_check_sum),
-            "keepalive_enable": bool(gre_keepalive_enable),
         }
+        if gre_key is not None:
+            gre_val["key"] = _validate_non_negative_int("gre_key", gre_key)
+        if gre_check_sum:
+            gre_val["check_sum"] = True
+        if gre_keepalive_enable:
+            gre_val["keepalive_enable"] = True
+        val["gre"] = gre_val
     else:
         val["ipip"] = {"src_addr": src_addr, "dst_addr": dst_addr}
 
