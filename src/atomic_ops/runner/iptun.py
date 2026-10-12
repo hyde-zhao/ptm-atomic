@@ -6,7 +6,8 @@ tunnel-endpoint subobject:
 - 4over6 (type 15): ``val.ipip`` with IPv6 ``src_addr`` / ``dst_addr``
 - 6over4 (type 16): ``val.ipip`` with IPv4 ``src_addr`` / ``dst_addr``
 - gre   (type 11): ``val.gre``  with ``tunnel_type`` / ``src_addr`` /
-  ``dst_addr`` / ``key`` / ``check_sum`` / ``keepalive_enable``
+  ``dst_addr``（``key`` / ``check_sum`` / ``keepalive_enable`` 为**可选**字段，
+  仅在调用方显式请求时下发——部分设备型号的 GreLink 模型不含这些字段）
 
 Creating an IP tunnel also brings up an associated tunnel interface on
 ``/api/v1/intf``; that tunnel interface is configured through the interface
@@ -91,7 +92,7 @@ def build_iptun_payload(
     src_addr: str,
     dst_addr: str,
     gre_tunnel_type: int = 1,
-    gre_key: int = 0,
+    gre_key: int | None = None,
     gre_check_sum: bool = False,
     gre_keepalive_enable: bool = False,
 ) -> dict[str, Any]:
@@ -109,14 +110,22 @@ def build_iptun_payload(
         "ip_addresses": addresses,
     }
     if tunnel_type == "gre":
-        val["gre"] = {
+        # 2026-10-12：key/check_sum/keepalive_enable 为**可选**字段——部分设备型号的
+        # GreLink 模型不含这些字段（DAS-TGFW-G3300-HU 实测：恒发 key/check_sum 被
+        # eConfigWrite 拒绝 `unknown field "key" in ligato.vpp.interfaces.GreLink`）。
+        # 缺省不携带；仅在调用方显式请求时下发。
+        gre_val: dict[str, Any] = {
             "tunnel_type": _validate_non_negative_int("gre_tunnel_type", gre_tunnel_type),
             "src_addr": src_addr,
             "dst_addr": dst_addr,
-            "key": _validate_non_negative_int("gre_key", gre_key),
-            "check_sum": bool(gre_check_sum),
-            "keepalive_enable": bool(gre_keepalive_enable),
         }
+        if gre_key is not None:
+            gre_val["key"] = _validate_non_negative_int("gre_key", gre_key)
+        if gre_check_sum:
+            gre_val["check_sum"] = True
+        if gre_keepalive_enable:
+            gre_val["keepalive_enable"] = True
+        val["gre"] = gre_val
     else:
         val["ipip"] = {"src_addr": src_addr, "dst_addr": dst_addr}
 

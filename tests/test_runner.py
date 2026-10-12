@@ -2986,6 +2986,30 @@ class IptunPayloadTests(unittest.TestCase):
         self.assertEqual(payload["val"]["gre"]["key"], 0)
         self.assertNotIn("ipip", payload["val"])
 
+    def test_build_gre_payload_omits_optional_fields_by_default(self) -> None:
+        # 2026-10-12：key/check_sum/keepalive_enable 缺省不携带——部分设备型号的
+        # GreLink 模型不含这些字段，恒发会被设备 eConfigWrite 拒绝。
+        payload = build_iptun_payload(
+            tunnel_type="gre", entry_id="tunnel3",
+            src_addr="7.7.7.1", dst_addr="7.7.7.2", ip_addresses=["6.6.6.6/24"],
+        )
+        gre = payload["val"]["gre"]
+        self.assertEqual(gre, {"tunnel_type": 1, "src_addr": "7.7.7.1", "dst_addr": "7.7.7.2"})
+        self.assertNotIn("key", gre)
+        self.assertNotIn("check_sum", gre)
+        self.assertNotIn("keepalive_enable", gre)
+
+    def test_build_gre_payload_includes_explicit_optional_fields(self) -> None:
+        payload = build_iptun_payload(
+            tunnel_type="gre", entry_id="tunnel3",
+            src_addr="7.7.7.1", dst_addr="7.7.7.2", ip_addresses=["6.6.6.6/24"],
+            gre_key=7, gre_check_sum=True, gre_keepalive_enable=True,
+        )
+        gre = payload["val"]["gre"]
+        self.assertEqual(gre["key"], 7)
+        self.assertTrue(gre["check_sum"])
+        self.assertTrue(gre["keepalive_enable"])
+
     def test_rejects_4over6_with_ipv4_endpoints(self) -> None:
         with self.assertRaises(RunnerError) as context:
             build_iptun_payload(

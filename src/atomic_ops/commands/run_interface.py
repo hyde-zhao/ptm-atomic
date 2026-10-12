@@ -94,7 +94,7 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--src-addr", help="Tunnel source endpoint address (tunnel kind only).")
     parser.add_argument("--dst-addr", help="Tunnel destination endpoint address (tunnel kind only).")
     parser.add_argument("--gre-tunnel-type", type=int, default=1, help="GRE tunnel_type field (gre only).")
-    parser.add_argument("--gre-key", type=int, default=0, help="GRE key field (gre only).")
+    parser.add_argument("--gre-key", type=int, default=None, help="GRE key field (gre only; omitted by default — some device models' GreLink lacks this field and rejects it).")
     parser.add_argument("--gre-check-sum", action="store_true", default=False, help="Enable GRE checksum (gre only).")
     parser.add_argument("--gre-keepalive-enable", action="store_true", default=False, help="Enable GRE keepalive (gre only).")
     parser.add_argument("--ip6-nd-prefix", action="append", default=None, help="IPv6 ND prefix for val.ip6_nd.ip_prefix (bvi/sub only), e.g. 66::/96. May be repeated. Omitted from the payload when not set.")
@@ -372,7 +372,7 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                     src_addr=getattr(args, "src_addr"),
                     dst_addr=getattr(args, "dst_addr"),
                     gre_tunnel_type=int(getattr(args, "gre_tunnel_type", 1)),
-                    gre_key=int(getattr(args, "gre_key", 0)),
+                    gre_key=getattr(args, "gre_key", None),
                     gre_check_sum=bool(getattr(args, "gre_check_sum", False)),
                     gre_keepalive_enable=bool(getattr(args, "gre_keepalive_enable", False)),
                     ip6_nd_prefixes=list(getattr(args, "ip6_nd_prefix") or []) or None,
