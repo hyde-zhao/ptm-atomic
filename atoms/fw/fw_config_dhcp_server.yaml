@@ -1,0 +1,125 @@
+schema_version: "1.1"
+op_id: fw_config_dhcp_server
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_dhcp_server
+description: Create an IPv4 DHCP server bound to an interface through /api/v1/dhcp.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dhcp for this operation.
+  params:
+    type: json
+    required: true
+    description: IPv4 DHCP server configuration with the bound interface name, mode, and a server object carrying subnets, lease, DNS servers and optional static host bindings. The lease object is mandatory in practice; see postconditions.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: dhcp
+  params:
+    ifname: GE0_13
+    ifmode: SERVER
+    server:
+      enable: true
+      name: GE0_13
+      subnets:
+        - subnet: 8.1.1.0/24
+          range:
+            - start: 8.1.1.1
+              end: 8.1.1.5
+          gateway: 8.1.1.1
+      lease:
+        limited: true
+        default_seconds: 86400
+      dns1: 123.5.5.5
+      dns2: 233.5.5.5
+      hosts:
+        - name: test
+          addr: 8.1.1.2
+          mac: 08:00:20:0A:8C:6D
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: dhcp
+      applied_ref: "<dhcp-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+side_effect: state_mutation
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_dhcp_server
+  snapshot_required: false
+  required_inputs:
+    - ifname
+  id_source: args
+  id_field: ifname
+  notes: The DHCP server is identified by its bound interface name; the inverse operation deletes the configuration for that interface.
+pre_snapshot:
+  op_id: fw_verify_dhcp_server
+  capture_fields:
+    - ifname
+    - existence
+post_verify:
+  op_id: fw_verify_dhcp_server
+  expected_state: present
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: An IPv4 DHCP server hands out addresses and options to clients on the bound interface segment and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk configuration contract is used.
+  - The bound interface already carries an IPv4 address, and every configured subnet sits inside that interface's own IPv4 subnet; otherwise the device answers eDhcpdConfigIpPoolLimit.
+  - Every static host binding address falls inside its subnet's range pool, not merely inside the subnet; otherwise the device answers eDhcpdConfigHostIpInNet ("DHCP服务器保留IP应在地址池范围内").
+postconditions:
+  - Configuration result and diagnostic references are available to the caller.
+  - The device's management service stays up only because val.server.lease is present in the request body. Live isolation on 2026-10-13 (<DUT_IP>) proved that omitting it, on POST or PUT alike, crashes the management service (nginx 502, roughly 90 seconds of outage, then sessions must be re-established). The interface specification marks the field optional; the device does not tolerate its absence.
+  - The interface command layer, not the device, owns the rejection of a lease-less payload.
+tags:
+  - firewall
+  - capacity
+  - dhcp
+  - configuration
+aliases:
+  - dhcp-server
+  - dhcp-service
+  - dhcp-scope
+since_version: "1.14.0"

@@ -169,3 +169,7 @@ operations:
   - fw_config_crl
   - fw_download_crl
   - fw_delete_batch_crl
+  - fw_config_dhcp_server
+  - fw_update_dhcp_server
+  - fw_delete_dhcp_server
+  - fw_delete_batch_dhcp_static_ip

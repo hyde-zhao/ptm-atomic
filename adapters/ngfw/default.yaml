@@ -6979,3 +6979,160 @@ operations:
         - "The response is {\"BatchResult\":[{\"msg\":\"success\"},...]} in request order."
         - "This op batches operations inside one device; multi-device orchestration is a separate contract."
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_dhcp_server:
+    atom_ref: atoms/fw/fw_config_dhcp_server.yaml
+    intent: Build an IPv4 DHCP server create request bound to an interface.
+    request:
+      method: POST
+      path: /api/v1/dhcp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcp-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - An IPv4 DHCP server is identified by the interface name it is bound to; the device returns no separate numeric id.
+        - "val.server.lease must be present: live isolation on 2026-10-13 proved that omitting it crashes the device management service (nginx 502, roughly 90 seconds of outage, then sessions must be re-established). The interface specification marks the field optional."
+        - The bound interface must already carry an IPv4 address and each subnet must sit inside that same subnet, otherwise the device answers eDhcpdConfigIpPoolLimit.
+        - Each static binding address must fall inside its subnet's range pool, not merely inside the subnet, otherwise the device answers eDhcpdConfigHostIpInNet (DHCP服务器保留IP应在地址池范围内).
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_dhcp_server:
+    atom_ref: atoms/fw/fw_update_dhcp_server.yaml
+    intent: Build an IPv4 DHCP server update request by bound interface name.
+    request:
+      method: PUT
+      path: /api/v1/dhcp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcp-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Update addresses the server by its bound interface name; the create path is POST, so this family carries separate config and update operations.
+        - The device replaces the whole configuration rather than merging fields, so a full val is required.
+        - "val.server.lease must be present: live isolation on 2026-10-13 proved the omission crashes the device management service here too."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_dhcp_server:
+    atom_ref: atoms/fw/fw_verify_dhcp_server.yaml
+    intent: Build an IPv4 DHCP server query request.
+    request:
+      method: GET
+      path: /api/v1/dhcp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <dhcp-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET sends no JSON body and returns vals, each carrying ifname, ifmode and a server object.
+        - No query parameter filters this endpoint; key, keywords, name, ifname, page, size and search were all measured as silently ignored on 2026-10-13, so the runner exposes none of them.
+        - "The interface specification documents no GET for this family; the endpoint was found by live probing."
+  fw_delete_dhcp_server:
+    atom_ref: atoms/fw/fw_delete_dhcp_server.yaml
+    intent: Build an IPv4 DHCP server delete request by query id.
+    request:
+      method: DELETE
+      path: /api/v1/dhcp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcp-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE sends the interface name as ?id=<interface-name> and sends no JSON body.
+        - A repeat delete answers 400 eDhcpdConfigGetFail, which is registered as the family's resource-not-found judgement so cleanup steps stay idempotent.
+        - Static address bindings of the deleted server go with it; they have no separate storage.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_dhcp_static_ip:
+    atom_ref: atoms/fw/fw_verify_dhcp_static_ip.yaml
+    intent: Build a static address binding query by projecting the DHCP server list.
+    request:
+      method: GET
+      path: /api/v1/dhcp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <dhcp-static-ip-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "/api/v1/dhcpstaticip exposes no GET (405 MethodNotAllowd) and has no storage of its own: static bindings are only a projection of each DHCP entry's server.hosts."
+        - This op therefore reads /api/v1/dhcp and emits one row per binding carrying ifname, name, addr and mac.
+        - Each row's addr is the value fw_delete_batch_dhcp_static_ip takes as its id.
+  fw_delete_batch_dhcp_static_ip:
+    atom_ref: atoms/fw/fw_delete_batch_dhcp_static_ip.yaml
+    intent: Build a batch static address binding delete request for a single device.
+    request:
+      method: POST
+      path: /api/v1/batchv2
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch: "{{ params.batch }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcp-static-ip-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "Batch body carries one DELETE item per address, each with a single-element id list. The device honours only the first element of a multi-element id list and reports only that one in BatchResult, silently dropping the rest: measured 2026-10-13, ids [8.1.1.101, 8.1.1.102] in one item deleted 8.1.1.101 alone and answered one BatchResult entry, leaving 8.1.1.102 in place with no error."
+        - "Each item resource is /api/v1/dhcpstaticip and each id is a binding address (hosts[].addr), not a name."
+        - "/api/v1/batchv2 is an opt-in variant of /api/v1/batch with an identical payload shape; the device's own frontend selects between them per request."
+        - "The response is {\"BatchResult\":[{\"id\":\"8.1.1.2\",\"data\":\"success\"}]}; the device answers data rather than a status key, so the standard batch summary counters are not produced."
+        - ptm-atomic run can execute this request only when --execute is explicit.

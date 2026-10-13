@@ -201,6 +201,18 @@ from atomic_ops.runner.crl import (
     build_crl_batch_delete_payload,
     validate_crl_payload,
 )
+from atomic_ops.runner.dhcp import (
+    BATCH_V2_PATH,
+    build_dhcp_binding,
+    build_dhcp_delete_query,
+    build_dhcp_payload,
+    build_dhcp_server_val,
+    build_dhcp_static_ip_batch_delete_payload,
+    build_dhcp_subnet,
+    build_dhcp_update_payload,
+    flatten_static_bindings,
+    validate_dhcp_payload,
+)
 from atomic_ops.runner.trex import (
     IDEMPOTENT_ERROR_TYPES,
     execute_trex,
@@ -7506,6 +7518,332 @@ class CrlCliDryRunTests(unittest.TestCase):
         batch = request["payload"]["batch"]
         self.assertEqual(batch[0]["resource"], "/api/v1/cert/certcrl")
         self.assertEqual(batch[0]["body"]["id"], ["7", "8"])
+
+
+class DhcpPayloadTests(unittest.TestCase):
+    """DHCP payload 构建器：形状、必填校验与 lease 崩溃护栏。"""
+
+    def _subnet(self) -> dict:
+        return build_dhcp_subnet(
+            subnet="8.1.1.0/24", range_start="8.1.1.1", range_end="8.1.1.5", gateway="8.1.1.1"
+        )
+
+    def test_subnet_shape_matches_spec(self) -> None:
+        self.assertEqual(
+            self._subnet(),
+            {
+                "subnet": "8.1.1.0/24",
+                "range": [{"start": "8.1.1.1", "end": "8.1.1.5"}],
+                "gateway": "8.1.1.1",
+            },
+        )
+
+    def test_subnet_requires_all_four_fields(self) -> None:
+        for missing in ("subnet", "range_start", "range_end", "gateway"):
+            fields = {
+                "subnet": "8.1.1.0/24",
+                "range_start": "8.1.1.1",
+                "range_end": "8.1.1.5",
+                "gateway": "8.1.1.1",
+            }
+            fields[missing] = ""
+            with self.subTest(missing=missing), self.assertRaises(RunnerError):
+                build_dhcp_subnet(**fields)
+
+    def test_binding_requires_all_three_fields(self) -> None:
+        self.assertEqual(
+            build_dhcp_binding(name="h1", addr="8.1.1.2", mac="08:00:20:0A:8C:6D"),
+            {"name": "h1", "addr": "8.1.1.2", "mac": "08:00:20:0A:8C:6D"},
+        )
+        with self.assertRaises(RunnerError):
+            build_dhcp_binding(name="h1", addr="", mac="08:00:20:0A:8C:6D")
+
+    def test_config_payload_wraps_val_and_defaults_ifmode_server(self) -> None:
+        payload = build_dhcp_payload(ifname="GE0_13", subnets=[self._subnet()])
+        self.assertEqual(list(payload), ["val"])
+        val = payload["val"]
+        self.assertEqual(val["ifname"], "GE0_13")
+        self.assertEqual(val["ifmode"], "SERVER")
+        self.assertEqual(val["server"]["name"], "GE0_13")
+        self.assertTrue(val["server"]["enable"])
+        self.assertEqual(val["server"]["subnets"], [self._subnet()])
+
+    def test_config_payload_always_emits_lease(self) -> None:
+        # 设备在缺 lease 时崩管理面（实测 502），故 lease 必须恒在，且不可为 None。
+        val = build_dhcp_payload(ifname="GE0_13", subnets=[self._subnet()])["val"]
+        self.assertEqual(val["server"]["lease"], {"limited": True, "default_seconds": 86400})
+
+    def test_server_val_rejects_unknown_ifmode(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_dhcp_server_val(ifname="GE0_13", subnets=[self._subnet()], ifmode="RELAY")
+
+    def test_server_val_requires_at_least_one_subnet(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_dhcp_server_val(ifname="GE0_13", subnets=[])
+
+    def test_update_payload_carries_ifname_as_id(self) -> None:
+        payload = build_dhcp_update_payload(
+            entry_id="GE0_13", ifname="GE0_13", subnets=[self._subnet()], dns1="1.1.1.1"
+        )
+        self.assertEqual(payload["id"], "GE0_13")
+        self.assertEqual(payload["val"]["server"]["dns1"], "1.1.1.1")
+        self.assertIn("lease", payload["val"]["server"])
+
+    def test_update_payload_requires_id(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_dhcp_update_payload(entry_id="", ifname="GE0_13", subnets=[self._subnet()])
+
+    def test_delete_query_is_a_query_carrier_not_a_body(self) -> None:
+        self.assertEqual(build_dhcp_delete_query(entry_id="GE0_13"), {"id": "GE0_13"})
+        with self.assertRaises(RunnerError):
+            build_dhcp_delete_query(entry_id="")
+
+    def test_lease_guard_rejects_lease_less_payload(self) -> None:
+        """护栏的核心回归：任何来源的载荷缺 lease 都必须被拒，不得下发到设备。"""
+        payload = {"val": {"ifname": "GE0_13", "ifmode": "SERVER", "server": {"name": "GE0_13"}}}
+        for op_id in ("fw_config_dhcp_server", "fw_update_dhcp_server"):
+            with self.subTest(op_id=op_id), self.assertRaises(RunnerError):
+                validate_dhcp_payload(payload, op_id=op_id)
+
+    def test_lease_guard_rejects_non_object_lease(self) -> None:
+        for bad in (None, "", [], 0):
+            payload = {"val": {"ifname": "GE0_13", "server": {"lease": bad}}}
+            with self.subTest(lease=bad), self.assertRaises(RunnerError):
+                validate_dhcp_payload(payload, op_id="fw_config_dhcp_server")
+
+    def test_lease_guard_accepts_complete_payload(self) -> None:
+        payload = build_dhcp_payload(ifname="GE0_13", subnets=[self._subnet()])
+        self.assertIs(validate_dhcp_payload(payload, op_id="fw_config_dhcp_server"), payload)
+
+    def test_batch_delete_delegates_to_shared_builder_with_per_id_items(self) -> None:
+        from atomic_ops.runner.batch import build_batch_delete_payload
+
+        expected = build_batch_delete_payload(
+            entry_ids=["8.1.1.2", "8.1.1.3"],
+            resource="/api/v1/dhcpstaticip",
+            carrier="per_id_item",
+        )
+        actual = build_dhcp_static_ip_batch_delete_payload(entry_ids=["8.1.1.2", "8.1.1.3"])
+        self.assertEqual(actual, expected)
+        self.assertEqual(BATCH_V2_PATH, "/api/v1/batchv2")
+        self.assertEqual(
+            [item["resource"] for item in actual["batch"]],
+            ["/api/v1/dhcpstaticip", "/api/v1/dhcpstaticip"],
+        )
+
+    def test_batch_delete_emits_one_item_per_id(self) -> None:
+        """本设备只认 body.id 的首元素：打包成一个 item 会静默漏删（实测 2026-10-13）。
+
+        这条测试钉住 carrier="per_id_item" —— 若有人改回共享构建器的默认
+        single_item 形态，两条 id 会被合并进一个 item，本断言必须失败。
+        """
+        batch = build_dhcp_static_ip_batch_delete_payload(
+            entry_ids=["8.1.1.101", "8.1.1.102", "8.1.1.103"]
+        )["batch"]
+        self.assertEqual(len(batch), 3)
+        self.assertEqual(
+            [item["body"]["id"] for item in batch],
+            [["8.1.1.101"], ["8.1.1.102"], ["8.1.1.103"]],
+        )
+        for item in batch:
+            self.assertEqual(item["method"], "DELETE")
+            self.assertEqual(len(item["body"]["id"]), 1)
+
+    def test_batch_delete_requires_at_least_one_id(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_dhcp_static_ip_batch_delete_payload(entry_ids=[])
+
+    def test_validate_batch_rejects_foreign_resource(self) -> None:
+        payload = {"batch": [{"method": "DELETE", "resource": "/api/v1/dhcp", "body": {"id": ["x"]}}]}
+        with self.assertRaises(RunnerError):
+            validate_dhcp_payload(payload, op_id="fw_delete_batch_dhcp_static_ip")
+
+    def test_flatten_static_bindings_projects_hosts_across_entries(self) -> None:
+        vals = [
+            {
+                "ifname": "GE0_13",
+                "server": {
+                    "hosts": [
+                        {"name": "a", "addr": "8.1.1.2", "mac": "08:00:20:0A:8C:6D"},
+                        {"name": "b", "addr": "8.1.1.3", "mac": "08:00:20:0A:8C:6E"},
+                    ]
+                },
+            },
+            {"ifname": "GE0_14", "server": {"hosts": [{"name": "c", "addr": "9.1.1.2", "mac": "m3"}]}},
+        ]
+        rows = flatten_static_bindings(vals)
+        self.assertEqual([row["addr"] for row in rows], ["8.1.1.2", "8.1.1.3", "9.1.1.2"])
+        self.assertEqual(rows[0], {"ifname": "GE0_13", "name": "a", "addr": "8.1.1.2", "mac": "08:00:20:0A:8C:6D"})
+        self.assertEqual(rows[2]["ifname"], "GE0_14")
+
+    def test_flatten_static_bindings_tolerates_missing_hosts(self) -> None:
+        self.assertEqual(flatten_static_bindings([]), [])
+        self.assertEqual(flatten_static_bindings([{"ifname": "GE0_13"}]), [])
+        self.assertEqual(flatten_static_bindings([{"ifname": "GE0_13", "server": {}}]), [])
+        self.assertEqual(flatten_static_bindings([{"ifname": "GE0_13", "server": {"hosts": []}}]), [])
+        self.assertEqual(flatten_static_bindings(None), [])
+
+
+class DhcpCliDryRunTests(unittest.TestCase):
+    """DHCP CLI dry-run：六个子命令的 method/url/payload 与规范对齐。"""
+
+    BASE = "https://192.0.2.1"
+
+    def _dry_run(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "dhcp", *argv])
+        self.assertEqual(exit_code, 0, stderr.getvalue())
+        return json.loads(stdout.getvalue())
+
+    def _dry_run_error(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(["run", "--format", "json", "--base-url", self.BASE, "dhcp", *argv])
+        self.assertNotEqual(exit_code, 0)
+        text = stdout.getvalue() if stdout.getvalue().strip() else stderr.getvalue()
+        return json.loads(text)
+
+    def test_config_posts_val_body_with_lease(self) -> None:
+        payload = self._dry_run(
+            [
+                "config",
+                "--ifname", "GE0_13",
+                "--subnet", "8.1.1.0/24",
+                "--range-start", "8.1.1.1",
+                "--range-end", "8.1.1.5",
+                "--gateway", "8.1.1.1",
+                "--binding", "test,8.1.1.2,08:00:20:0A:8C:6D",
+            ]
+        )
+        self.assertEqual(payload["op_id"], "fw_config_dhcp_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcp")
+        val = request["payload"]["val"]
+        self.assertEqual(val["ifname"], "GE0_13")
+        self.assertEqual(val["server"]["lease"], {"limited": True, "default_seconds": 86400})
+        self.assertEqual(
+            val["server"]["hosts"], [{"name": "test", "addr": "8.1.1.2", "mac": "08:00:20:0A:8C:6D"}]
+        )
+
+    def test_update_puts_id_and_val_body(self) -> None:
+        payload = self._dry_run(
+            [
+                "update",
+                "--id", "GE0_13",
+                "--ifname", "GE0_13",
+                "--subnet", "8.1.1.0/24",
+                "--range-start", "8.1.1.1",
+                "--range-end", "8.1.1.5",
+                "--gateway", "8.1.1.1",
+            ]
+        )
+        self.assertEqual(payload["op_id"], "fw_update_dhcp_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcp")
+        self.assertEqual(request["payload"]["id"], "GE0_13")
+        self.assertIn("lease", request["payload"]["val"]["server"])
+
+    def test_verify_gets_bare_endpoint_without_payload_or_query(self) -> None:
+        # 实测七个候选过滤参数全部被静默忽略，故 CLI 一个都不暴露。
+        payload = self._dry_run(["verify"])
+        self.assertEqual(payload["op_id"], "fw_verify_dhcp_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "GET")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcp")
+        self.assertIsNone(request["payload"])
+
+    def test_delete_uses_query_id_and_sends_no_body(self) -> None:
+        payload = self._dry_run(["delete", "--id", "GE0_13"])
+        self.assertEqual(payload["op_id"], "fw_delete_dhcp_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "DELETE")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcp?id=GE0_13")
+        self.assertIsNone(request["payload"])
+
+    def test_static_ip_verify_is_a_projection_over_the_dhcp_endpoint(self) -> None:
+        payload = self._dry_run(["static-ip-verify"])
+        self.assertEqual(payload["op_id"], "fw_verify_dhcp_static_ip")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "GET")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcp")
+        self.assertIsNone(request["payload"])
+        self.assertEqual(payload["data"]["projection"]["source_op"], "fw_verify_dhcp_server")
+
+    def test_static_ip_delete_batch_posts_batchv2(self) -> None:
+        payload = self._dry_run(["static-ip-delete-batch", "--id", "8.1.1.2", "--id", "8.1.1.3"])
+        self.assertEqual(payload["op_id"], "fw_delete_batch_dhcp_static_ip")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/batchv2")
+        batch = request["payload"]["batch"]
+        self.assertEqual(len(batch), 2)
+        self.assertEqual(batch[0]["resource"], "/api/v1/dhcpstaticip")
+        self.assertEqual(batch[0]["body"]["id"], ["8.1.1.2"])
+        self.assertEqual(batch[1]["body"]["id"], ["8.1.1.3"])
+
+    def test_config_rejects_a_repeated_subnet_flag_loudly(self) -> None:
+        # 嵌套数组不做按下标对齐的平行 flag；重复给出必须报错并指向 --payload-json。
+        error = self._dry_run_error(
+            [
+                "config",
+                "--ifname", "GE0_13",
+                "--subnet", "8.1.1.0/24",
+                "--subnet", "9.9.9.0/24",
+                "--range-start", "8.1.1.1",
+                "--range-end", "8.1.1.5",
+                "--gateway", "8.1.1.1",
+            ]
+        )
+        self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+        self.assertEqual(error["message"], "Runner argument can only be provided once for this operation.")
+        self.assertEqual(error["details"], {"argument": "--subnet"})
+
+    def test_config_rejects_any_repeated_scalar_flag(self) -> None:
+        # 统一不变量：所有标量 flag 走 action="append" + _single_arg，重复即报错。
+        base = [
+            "--ifname", "GE0_13",
+            "--subnet", "8.1.1.0/24",
+            "--range-start", "8.1.1.1",
+            "--range-end", "8.1.1.5",
+            "--gateway", "8.1.1.1",
+        ]
+        for flag, value in (
+            ("--ifname", "GE0_14"),
+            ("--range-start", "8.1.1.6"),
+            ("--range-end", "8.1.1.9"),
+            ("--gateway", "8.1.1.254"),
+            ("--dns1", "1.1.1.1"),
+            ("--ifmode", "SERVER"),
+            ("--server-name", "srv"),
+        ):
+            with self.subTest(flag=flag):
+                error = self._dry_run_error(["config", *base, *(flag, value) * 2])
+                self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+                self.assertEqual(error["details"], {"argument": flag})
+
+    def test_config_requires_ifname(self) -> None:
+        self._dry_run_error(
+            ["config", "--subnet", "8.1.1.0/24", "--range-start", "8.1.1.1",
+             "--range-end", "8.1.1.5", "--gateway", "8.1.1.1"]
+        )
+
+    def test_static_ip_delete_batch_requires_an_id(self) -> None:
+        # --id 是 argparse 级 required（与 cert／geoip／keyword 族同款），故缺参由 argparse 退出 2。
+        with self.assertRaises(SystemExit) as context:
+            cli_main(
+                ["run", "--format", "json", "--base-url", self.BASE, "dhcp", "static-ip-delete-batch"]
+            )
+        self.assertEqual(context.exception.code, 2)
+
+    def test_delete_requires_an_id(self) -> None:
+        with self.assertRaises(SystemExit) as context:
+            cli_main(["run", "--format", "json", "--base-url", self.BASE, "dhcp", "delete"])
+        self.assertEqual(context.exception.code, 2)
 
 
 if __name__ == "__main__":

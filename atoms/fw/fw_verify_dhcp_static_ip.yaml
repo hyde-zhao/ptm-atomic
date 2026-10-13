@@ -1,0 +1,65 @@
+schema_version: "1.1"
+op_id: fw_verify_dhcp_static_ip
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_dhcp_static_ip
+description: List static address bindings by projecting each DHCP server's server.hosts through /api/v1/dhcp.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dhcp for this operation.
+  params:
+    type: json
+    required: true
+    description: Static address binding query envelope; GET sends no JSON body and no query parameters, and the device's DHCP entry list is projected down to the binding rows.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: dhcp
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<dhcp-static-ip-state-ref>"
+    bindings_ref: "<dhcp-static-ip-bindings-ref>"
+    binding_count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: dhcp_static_ip_projection_returns_rows
+      input_ref: "<dhcp-static-ip-query-result-ref>"
+      expected_result: the runner reads /api/v1/dhcp and emits one row per static binding carrying ifname, name, addr and mac; each row's addr is the value fw_delete_batch_dhcp_static_ip takes as its id.
+  summary_ref: "<dhcp-static-ip-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Query result and diagnostic references are available to the caller.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - dhcp
+  - verification
+aliases:
+  - dhcp-static-ip
+  - dhcp-binding
+  - static-binding
+since_version: "1.14.0"

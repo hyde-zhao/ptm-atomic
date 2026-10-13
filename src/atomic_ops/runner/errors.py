@@ -208,6 +208,14 @@ IDEMPOTENT_ERROR_TYPES: dict[str, frozenset[str]] = {
     "fw_delete_localcert": frozenset({"RESOURCE_NOT_FOUND"}),
     # batch 族（本域无单条删除原子）；G4 新登记逆删
     "fw_delete_batch_localcacert": frozenset({"RESOURCE_NOT_FOUND"}),
+    # DHCP 服务删除（2026-10-13 实测，<DUT_IP>）：删自己创建的 DHCP 配置时
+    # 用例清理步会重复删，设备答 400 eDhcpdConfigGetFail「从数据库中获取数据失败」。
+    # 三例对照证明该码**专用**于「目标配置不存在」：①已删过的网卡 ②真实存在但无
+    # DHCP 配置的网卡(GE0_1) ③完全不存在的名字(NO_SUCH_INTF) —— 三者同码同文案，
+    # 且带不带 JSON body 都一样。与 eIntfGetTypeByName 同为专用码（非通用参数码），
+    # 故入 RESOURCE_NOT_FOUND_ERR_CODES 明确集而非 generic 集。
+    # 注意：本族删除**不做**引用保护检查，不存在 eIntfisRefed 那类反例。
+    "fw_delete_dhcp_server": frozenset({"RESOURCE_NOT_FOUND"}),
 }
 
 _IDEMPOTENT_DECL_FIELD = "idempotent"
@@ -349,6 +357,15 @@ RESOURCE_NOT_FOUND_ERR_CODES = frozenset({
     # {bond1(6), GE0_3.100(4), bvi1(4)}，无其它文案形态。该码另见于
     # fw_config_interface 的「配置不存在接口」负例 —— 那类 op 未登记幂等表，天然免疫。
     "eIntfGetTypeByName",
+    # 字面为「从数据库取 DHCP 配置失败」，实测语义即「该网卡没有可删的 DHCP 配置」。
+    # 三例对照（2026-10-13，<DUT_IP>）全部同码同文案，无一例外：
+    #   ①重复删已删过的网卡 ②删真实存在但无 DHCP 配置的网卡(GE0_1)
+    #   ③删完全不存在的名字(NO_SUCH_INTF)
+    # 与 eIntfGetTypeByName 同性质：**专用**前缀码（本条 eDhcpd* 只属 dhcp 模块），
+    # 非 eRequestParam 那样的通用参数码，故入明确集合。带不带 JSON body 结果不变。
+    # 该码另见于 fw_config/fw_update 的负例（如 PUT 不存在的网卡）—— 那两类 op 的
+    # 载荷护栏在 runner 层先行拦下（lease 崩溃护栏），且未登记幂等表，天然免疫。
+    "eDhcpdConfigGetFail",
 })
 # eRequestParam 是通用参数错误码，单凭它不足以判定「不存在」，须配 errMsg 文案佐证。
 _RESOURCE_NOT_FOUND_GENERIC_ERR_CODES = frozenset({"eRequestParam"})

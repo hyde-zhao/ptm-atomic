@@ -59,3 +59,5 @@ operations:
   - fw_verify_geoip
   - fw_verify_keyword
   - fw_verify_crl
+  - fw_verify_dhcp_server
+  - fw_verify_dhcp_static_ip

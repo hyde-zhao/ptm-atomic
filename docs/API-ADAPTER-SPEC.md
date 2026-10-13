@@ -11,6 +11,7 @@
 | v0.5 | 2026-07-17 | meta-dev | Add trex.default adapter profile for tg TRex operations. |
 | v0.6 | 2026-07-30 | meta-dev | Add tg_acquire_ports/tg_release_ports/tg_verify_ownership operations and user_id field for multi-user port ownership. |
 | v0.7 | 2026-09-14 | meta-dev | Align schema with implemented runner behaviour: `request.content_type` admits `multipart/form-data` (file-upload operations), `request.query_params` models paginated GETs, and `shell.privilege_level` admits `privileged`/`root` for appliance SSH targets. |
+| v0.8 | 2026-10-13 | meta-dev | Add the IPv4 DHCP operation family and document `POST /api/v1/batchv2`, the first batch endpoint outside `/api/v1/batch`. |
 
 ## Purpose
 
@@ -158,6 +159,33 @@ Most `ptm-atomic` commands remain read-only. `ptm-atomic run` is the only execut
 `val.forwarding_paths[].next_hop_ip` may be empty for outgoing-interface forwarding mode. When it is provided, it must be a valid IPv4 or IPv6 address matching `val.type`.
 
 The runner obtains live session material from the local session file created by `ptm-atomic run auth login --execute`.
+
+## DHCP Profile
+
+The IPv4 DHCP family is the first to use a batch endpoint other than `/api/v1/batch`. `POST /api/v1/batchv2` carries the same payload shape as `/api/v1/batch` — `{"batch": [{"method": "DELETE", "resource": "<path>", "body": {"id": ["<entry-id>"]}}]}` — but answers with a differently shaped response whose per-item keys are `id` and `data` rather than `status`/`msg`. The runner therefore does not wire `runner/batch.py#summarize_batch_result` for this family: that helper reads only `status`/`msg`/`message`/`errMsg`, so every item would be judged indeterminate and the whole batch downgraded, leaving `success_count`/`failed_count` permanently `null`. The raw response is returned instead.
+
+`batchv2` also honours only the **first** element of a multi-element `body.id` list. Measured on 2026-10-13, a single item carrying `["8.1.1.101", "8.1.1.102"]` deleted `8.1.1.101` alone, answered one `BatchResult` entry, and left `8.1.1.102` in place with no error — a silent partial success. The body must carry **one item per id**. `build_dhcp_static_ip_batch_delete_payload` passes `carrier="per_id_item"` to the shared builder for this reason, overriding its `single_item` default; the specification's own example body is a single-element `id`, consistent with the observed behaviour.
+
+| Operation | Method | Path | Body |
+|---|---|---|---|
+| `fw_config_dhcp_server` | `POST` | `/api/v1/dhcp` | `{"val": {...}}` |
+| `fw_update_dhcp_server` | `PUT` | `/api/v1/dhcp` | `{"id": "<interface-name>", "val": {...}}` |
+| `fw_verify_dhcp_server` | `GET` | `/api/v1/dhcp` | none |
+| `fw_delete_dhcp_server` | `DELETE` | `/api/v1/dhcp?id=<interface-name>` | none |
+| `fw_verify_dhcp_static_ip` | `GET` | `/api/v1/dhcp` | none |
+| `fw_delete_batch_dhcp_static_ip` | `POST` | `/api/v1/batchv2` | `{"batch": [...]}`, one item per binding address |
+
+A DHCP server is identified by the interface it binds to, so `val.ifname` is also the `?id=` value and the `fw_update_dhcp_server` body id — the create response carries no separate identifier.
+
+The bound interface must already carry an IPv4 address and each configured subnet must sit inside that interface's own IPv4 subnet, otherwise the device answers `eDhcpdConfigIpPoolLimit`. Each static host binding address must additionally fall inside its subnet's `range` pool, not merely inside the subnet; the device answers `eDhcpdConfigHostIpInNet` (DHCP服务器保留IP应在地址池范围内) otherwise.
+
+`val.server.lease` is a validated invariant rather than a default. The interface specification marks it optional, but a single-variable isolation test on 2026-10-13 proved that a `POST` or `PUT` to `/api/v1/dhcp` without it crashes the device management service (nginx 502, roughly 90 seconds of outage, then sessions must be re-established). The runner rejects a lease-less payload from any source — flat flags or `--payload-json` — so a caller cannot reach the device with one.
+
+`/api/v1/dhcpstaticip` is reachable only through batch delete; `GET` and `POST` both answer 405, and the resource has no storage of its own. Static address bindings are a projection of each DHCP entry's `server.hosts`, and they disappear with the server that declares them. `fw_verify_dhcp_static_ip` is therefore a client-side projection that reads `/api/v1/dhcp` and emits one `{ifname, name, addr, mac}` row per binding; the `addr` in each row is the value `fw_delete_batch_dhcp_static_ip` takes as its id.
+
+The DHCP query endpoint supports no filtering or pagination. Seven candidate parameters (`key`, `keywords`, `name`, `ifname`, `page`, `size`, `search`) were each measured as silently ignored on 2026-10-13 — the device returns the full list rather than rejecting the parameter — so the two query operations expose no query flags at all.
+
+## OSPFv2 and Related Profiles
 
 OSPFv2 operations are represented one HTTP method at a time because adapter schema v1.0 has a single `request.method` per operation. The default NGFW profile maps:
 

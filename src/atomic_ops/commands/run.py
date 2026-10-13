@@ -211,6 +211,14 @@ CRL_OPS = (
     "fw_download_crl",
     "fw_delete_batch_crl",
 )
+DHCP_OPS = (
+    "fw_config_dhcp_server",
+    "fw_update_dhcp_server",
+    "fw_verify_dhcp_server",
+    "fw_delete_dhcp_server",
+    "fw_verify_dhcp_static_ip",
+    "fw_delete_batch_dhcp_static_ip",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
@@ -247,6 +255,7 @@ SUPPORTED_OPS = (
     *OBJECT_TRANSFER_OPS,
     *KEYWORD_OPS,
     *CRL_OPS,
+    *DHCP_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -441,6 +450,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_arp_scan as run_arp_scan
     from atomic_ops.commands import run_garp as run_garp
     from atomic_ops.commands import run_keyword as run_keyword
+    from atomic_ops.commands import run_dhcp as run_dhcp
 
     return (
         CommandGroup(
@@ -596,6 +606,15 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="Keyword object operations.",
             description="Keyword object config, update, verify, and batch-delete operations.",
             children=run_keyword.build_subtree(),
+        ),
+        CommandGroup(
+            name="dhcp",
+            help="IPv4 DHCP server and static address binding operations.",
+            description=(
+                "IPv4 DHCP server config, update, verify, and delete operations, plus "
+                "static address binding verify and batch-delete operations."
+            ),
+            children=run_dhcp.build_subtree(),
         ),
         CommandGroup(
             name="cli",
