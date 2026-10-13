@@ -71,7 +71,10 @@ def build_acl_policy_payload(
     _validate_policy_type(policy_type)
     val: dict[str, Any] = {
         "enable": enable,
-        "do_reset": False,
+        # do_reset：设备固件（DAS-TGFW-G3300-HU，2026-10-12 实测）以
+        # `unknown field "do_reset" in ligato.ip4policyproto.ip4_policy_conf` 拒绝该字段
+        # （exit=48 RUNNER_CONFIG_REJECTED）⇒ 不发送；历史 2026-09-23 该字段曾被接受，
+        # 属固件口径变更。若后续机型需要，改由 adapter 模板按型号条件注入。
         "session_switch": False,
         "action": action,
         "session_time": 0,

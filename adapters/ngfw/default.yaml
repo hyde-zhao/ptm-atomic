@@ -2701,7 +2701,6 @@ operations:
         val:
           name: "{{ params.name }}"
           enable: "{{ params.enable }}"
-          do_reset: false
           session_switch: false
           action: "{{ params.action }}"
           session_time: 0
@@ -2763,7 +2762,6 @@ operations:
         val:
           name: "{{ params.name }}"
           enable: "{{ params.enable }}"
-          do_reset: false
           session_switch: false
           action: "{{ params.action }}"
           session_time: 0
