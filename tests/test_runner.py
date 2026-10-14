@@ -777,6 +777,60 @@ class InterfacePayloadTests(unittest.TestCase):
         self.assertEqual(payload["batch"][0]["body"], {"id": ["bvi109", "GE0_2.106"]})
 
 
+class InterfaceGarpPayloadTests(unittest.TestCase):
+    """免费 ARP 定时发送字段（2026-09-12）。
+
+    设备契约来源：设备前端 EditIntf 弹窗 + FW1 真机 API 往返实测（非推断）。
+    端点与接口配置同一个 PUT /api/v1/intf。
+    """
+
+    def _val(self, **kwargs) -> dict:
+        payload = build_interface_payload(
+            interface_kind="physical", entry_id="GE0_18",
+            ip_addresses=["11.1.1.1/24"], **kwargs,
+        )
+        return payload["val"]
+
+    def test_enable_with_interval(self) -> None:
+        val = self._val(garp_timed_send=True, garp_send_interval=30)
+        self.assertIs(val["enable_garp_timed_send"], True)
+        self.assertEqual(val["garp_send_interval"], 30)
+
+    def test_disable_omits_interval(self) -> None:
+        """关闭时不下发 garp_send_interval（与设备 UI 一致：undefined 被 JSON 丢弃）。"""
+        val = self._val(garp_timed_send=False, garp_send_interval=30)
+        self.assertIs(val["enable_garp_timed_send"], False)
+        self.assertNotIn("garp_send_interval", val)
+
+    def test_interval_alone_implies_enable(self) -> None:
+        """只给间隔 = 隐含启用，避免设备把 interval 当无效配置静默丢弃。"""
+        val = self._val(garp_send_interval=60)
+        self.assertIs(val["enable_garp_timed_send"], True)
+        self.assertEqual(val["garp_send_interval"], 60)
+
+    def test_absent_leaves_config_untouched(self) -> None:
+        """两个参数都不传 -> 不触碰（新建时走设备默认）。"""
+        val = self._val()
+        self.assertNotIn("enable_garp_timed_send", val)
+        self.assertNotIn("garp_send_interval", val)
+
+    def test_numeric_string_normalized_to_int(self) -> None:
+        """CLI 传入的数字串归一为 int。"""
+        val = self._val(garp_send_interval="45")
+        self.assertEqual(val["garp_send_interval"], 45)
+        self.assertIsInstance(val["garp_send_interval"], int)
+
+    def test_out_of_range_passed_through(self) -> None:
+        """0 / 超上限原样透传：runner 不校验范围，由 DUT 报错（CR-039 同口径，负例才测得到）。"""
+        self.assertEqual(self._val(garp_send_interval=0)["garp_send_interval"], 0)
+        self.assertEqual(self._val(garp_send_interval=9999)["garp_send_interval"], 9999)
+
+    def test_non_numeric_passed_through(self) -> None:
+        """非数字原样透传为字符串，由 DUT 拒绝。"""
+        val = self._val(garp_send_interval="abc")
+        self.assertEqual(val["garp_send_interval"], "abc")
+
+
 class PolicyRoutePayloadTests(unittest.TestCase):
     def test_build_ipv4_policy_route_payload(self) -> None:
         payload = build_policy_route_payload(

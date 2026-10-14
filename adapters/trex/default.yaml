@@ -99,6 +99,72 @@ operations:
         - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
         - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_start_capture:
+    atom_ref: atoms/tg/tg_start_capture.yaml
+    intent: Start rx (default) or tx packet capture on a TRex port; pair with tg_stop_capture.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_start_capture
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        ports: "{{ params.ports }}"
+        rxport: "{{ params.rxport }}"
+        txport: "{{ params.txport }}"
+        capture_port: "{{ params.capture_port }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-capture-start-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - The capture session is located at stop time by (user_id, capture_port) -> rxport unless capture_port=tx.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_stop_capture:
+    atom_ref: atoms/tg/tg_stop_capture.yaml
+    intent: Stop packet capture, return parsed packets (incl. ARP fields) and evaluate check_* assertions.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_stop_capture
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        ports: "{{ params.ports }}"
+        rxport: "{{ params.rxport }}"
+        txport: "{{ params.txport }}"
+        capture_port: "{{ params.capture_port }}"
+        check_vlan: "{{ params.check_vlan }}"
+        check_no_vlan: "{{ params.check_no_vlan }}"
+        check_fragment: "{{ params.check_fragment }}"
+        check_l4_protocol: "{{ params.check_l4_protocol }}"
+        check_ip_version: "{{ params.check_ip_version }}"
+        check_min_packets: "{{ params.check_min_packets }}"
+        check_arp_opcode: "{{ params.check_arp_opcode }}"
+        check_eth_dst: "{{ params.check_eth_dst }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-capture-stop-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - trex-api is an unauthenticated lab service; no credential header is sent at runtime.
+        - Only the check_* fields that are supplied take part in the verdict; with no check_* the call is observation-only and always succeeds.
+        - A failed check returns error_type STATE_MISMATCH (not an HTTP error), which the CLI maps to RUNNER_VALIDATION_FAILED so case assertions can drive PASS/FAIL.
+        - ARP assertions (check_arp_opcode) require the trex-api ARP parse branch added 2026-09-12; ARP packets deliberately keep l4_protocol=None so they stay excluded from count-stream flow filtering.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   tg_verify_traffic_loss:
     atom_ref: atoms/tg/tg_verify_traffic_loss.yaml
     intent: Build a TRex port-stat loss verification request against a maximum allowed loss ratio.
