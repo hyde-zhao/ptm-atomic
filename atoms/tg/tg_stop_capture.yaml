@@ -1,0 +1,130 @@
+schema_version: "1.1"
+op_id: tg_stop_capture
+device_type: tg
+description: Stop packet capture, return parsed packets (incl. ARP fields) and evaluate check_* assertions.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_stop_capture
+parameters:
+  user_id:
+    type: string
+    required: false
+    description: >-
+      TRex multi-user owner id. Defaults to "default" (legacy force mode).
+      Must match the tg_start_capture call.
+  ports:
+    type: list
+    required: true
+    description: TRex port IDs occupied by this traffic instance.
+  rxport:
+    type: string
+    required: true
+    description: TRex port ID that receives traffic.
+  txport:
+    type: string
+    required: false
+    description: TRex port ID that transmits traffic. Required when capture_port=tx.
+  capture_port:
+    type: string
+    required: false
+    description: "Which port was captured: rx (default) or tx. Must match tg_start_capture."
+  check_vlan:
+    type: int
+    required: false
+    description: Every captured packet must carry this VLAN tag.
+  check_no_vlan:
+    type: bool
+    required: false
+    description: Every captured packet must be untagged.
+  check_fragment:
+    type: bool
+    required: false
+    description: true = fragmented packets must be present; false = must be absent.
+  check_l4_protocol:
+    type: string
+    required: false
+    description: L4 protocol of every captured IP packet (tcp or udp).
+  check_ip_version:
+    type: int
+    required: false
+    description: IP version of every captured IP packet (4 or 6).
+  check_min_packets:
+    type: int
+    required: false
+    description: At least this many packets must have been captured.
+  check_arp_opcode:
+    type: int
+    required: false
+    description: >-
+      Every captured ARP packet must have this opcode (1=request, 2=reply) and
+      at least one ARP packet must exist. Requires the trex-api ARP parse branch
+      (2026-09-12).
+  check_eth_dst:
+    type: string
+    required: false
+    description: >-
+      At least one captured packet must have this destination MAC (case-insensitive).
+      Used for static-ARP DMAC-rewrite assertions. Requires the capture port to be
+      acquired (promiscuous) or the frame to be broadcast - the NIC hardware MAC
+      filter drops unicast frames addressed elsewhere otherwise.
+inputs:
+  user_id: default
+  ports: ["2_3", "2_4"]
+  rxport: "2_4"
+  check_arp_opcode: 1
+  check_eth_dst: "00:11:32:a7:7f:46"
+side_effect: observation
+returns:
+  status: success
+  data:
+    user_id: default
+    capture_port: "2_4"
+    packet_count: 12
+    packets: []
+    summary:
+      packet_count: 12
+      arp_count: 12
+      arp_opcodes: [1]
+      arp_sender_ips: ["11.1.1.1"]
+      eth_dsts: ["00:11:32:a7:7f:46"]
+    checks: []
+    passed: true
+    mismatches: []
+    status: stopped
+  error_type: STATE_MISMATCH
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - STATE_MISMATCH
+  - INTERNAL_ERROR
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+verification:
+  kind: capacity_domain
+  rules:
+    - name: capture_stopped_and_checks_passed
+      input_ref: "<capture-stop-ref>"
+      expected_result: >-
+        Capture session closed, parsed packets returned, and every requested check_*
+        assertion matched (no mismatches).
+  summary_ref: "<capture-stop-summary-ref>"
+preconditions:
+  - A capture session was opened by tg_start_capture with the same user_id/ports/capture_port.
+postconditions:
+  - The capture session is closed; parsed packets and check results are captured in diag_snapshot_ref.
+tags:
+  - tg
+  - trex
+  - capture
+  - packet
+  - arp
+  - verify
+  - observation
+aliases:
+  - stop-capture
+  - tg-capture-stop
+since_version: "1.10.0"

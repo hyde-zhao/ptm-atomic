@@ -100,6 +100,8 @@ def build_interface_payload(
     ip6_racfg_suppress: int | None = None,
     ipv4_gateway: str | None = None,
     ipv4_reverse_path: bool = False,
+    garp_timed_send: bool | None = None,
+    garp_send_interval: int | str | None = None,
 ) -> dict[str, Any]:
     interface_kind = _validate_interface_kind(interface_kind)
     mode = _validate_mode(interface_kind, mode)
@@ -151,6 +153,7 @@ def build_interface_payload(
     )
 
     _apply_mode_fields(val, interface_kind, mode, pvid=pvid, allow_pass=allow_pass, link_type=link_type)
+    _apply_garp(val, garp_timed_send, garp_send_interval)
     payload = {"id": entry_id, "val": val}
     validate_interface_payload(payload, op_id="fw_update_interface")
     return payload
@@ -992,6 +995,41 @@ def _apply_mode_fields(
         val["allowPass"] = allow_pass if allow_pass is not None else "1-4094"
     elif mode in {"Switch", "Pair"}:
         val["allowPass"] = allow_pass if allow_pass is not None else ""
+
+
+def _apply_garp(
+    val: dict[str, Any],
+    enable: bool | None,
+    interval: int | str | None,
+) -> None:
+    """免费 ARP 定时发送（接口级，PUT /api/v1/intf 的 val 字段）。
+
+    设备契约（2026-09-12 实测确立，非推断）：
+      - 端点/范围：与接口配置**同一个请求** `PUT /api/v1/intf`，**接口级**
+        （证据：设备前端 `EditIntf` 弹窗把两字段摊进接口对象全量后保存）
+      - `enable_garp_timed_send`: bool，对应 UI 开关「定时发送免费arp」
+      - `garp_send_interval`: 秒，UI 标注 1-3600；**仅启用时下发**
+        （关闭时 UI 发 `undefined` → JSON 丢弃该字段，故关闭态 GET 看不到它）
+      - 实测往返：写 true/30 → `GET /api/v1/intf` 回读 true/30；置回 false 还原
+
+    设计取舍：
+      - 两参都未传 -> 不触碰该配置（新建时走设备默认）
+      - 只给 interval 不给 enable -> **隐含启用**；否则设备会把 interval 当无效配置丢弃，
+        造成「配了但没生效」的静默空转，比隐式启用更糟
+      - **不校验 1-3600 范围**：非法值（0 / 超上限 / 非数字）原样透传由 DUT 校验报错
+        （CR-039 同口径：runner 侧不拦非法值，负例才测得到设备真实行为）
+    """
+    if enable is None and interval is None:
+        return
+    if interval is not None and enable is None:
+        enable = True
+    val["enable_garp_timed_send"] = bool(enable)
+    if enable and interval is not None:
+        # 数字串（CLI 传入的 "30"）归一为 int；非数字原样透传，交给 DUT 报错
+        if isinstance(interval, str):
+            stripped = interval.strip()
+            interval = int(stripped) if stripped.lstrip("-").isdigit() else interval
+        val["garp_send_interval"] = interval
 
 
 def _validate_batch_payload(payload: dict[str, Any]) -> dict[str, Any]:

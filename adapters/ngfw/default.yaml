@@ -6381,7 +6381,7 @@ operations:
         - rate is in pps (device range 1-4096); capacity is the burst capacity (observed fixed at 16).
         - id is fixed to "0"; the backend locates the setting by the val object.
         - GET /api/v1/neighbor/garplimitrate returns {"vals":[{"rate":...,"capacity":...}]} for read-back.
-        - Interface-level gratuitous ARP enable (enable_garp_timed_send / garp_send_interval) is covered by fw_config_interface / fw_update_interface over PUT /api/v1/intf.
+        - "Interface-level gratuitous ARP enable (enable_garp_timed_send / garp_send_interval) goes through this same PUT /api/v1/intf request; the CLI exposes it as --enable-garp-timed-send / --disable-garp-timed-send / --garp-send-interval (2026-09-12, evidence = device web UI EditIntf modal + live API round-trip, not inferred). --garp-send-interval implies enable; the 1-3600 range is NOT checked by the runner so that out-of-range / non-numeric values reach the DUT for negative testing (CR-039 precedent)."
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_config_nat_snat:
     atom_ref: atoms/fw/fw_config_nat_snat.yaml
