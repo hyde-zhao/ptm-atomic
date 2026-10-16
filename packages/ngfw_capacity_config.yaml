@@ -171,5 +171,11 @@ operations:
   - fw_delete_batch_crl
   - fw_config_dhcp_server
   - fw_update_dhcp_server
+  - fw_disable_dhcp_server
   - fw_delete_dhcp_server
   - fw_delete_batch_dhcp_static_ip
+  - fw_config_dhcpv6_server
+  - fw_update_dhcpv6_server
+  - fw_disable_dhcpv6_server
+  - fw_delete_dhcpv6_server
+  - fw_delete_dhcpv6_static_ip

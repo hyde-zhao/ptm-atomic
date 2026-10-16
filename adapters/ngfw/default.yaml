@@ -7035,6 +7035,35 @@ operations:
         - The device replaces the whole configuration rather than merging fields, so a full val is required.
         - "val.server.lease must be present: live isolation on 2026-10-13 proved the omission crashes the device management service here too."
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_disable_dhcp_server:
+    atom_ref: atoms/fw/fw_disable_dhcp_server.yaml
+    intent: Disable an IPv4 DHCP server by replaying its live configuration with both enable flags false.
+    request:
+      method: PUT
+      path: /api/v1/dhcp
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "<live-readback-with-both-enable-flags-false>"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcp-disable-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - This is a read-modify-write in two steps against /api/v1/dhcp; the adapter body shown here is the second step, whose val is generated at execution time from the configuration the device returns in the first step.
+        - A minimal body cannot disable a server. Live probing rejected enable-only bodies, which proves PUT replaces the whole configuration rather than merging fields.
+        - The caller supplies the interface name only. Restating the configuration would risk dropping fields the replay preserves.
+        - The replayed body still carries server.lease, so it passes the same crash guard as an update.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_dhcp_server:
     atom_ref: atoms/fw/fw_verify_dhcp_server.yaml
     intent: Build an IPv4 DHCP server query request.
@@ -7069,8 +7098,9 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      payload_template:
+      query_params:
         id: "{{ params.id }}"
+      payload_template: {}
     response:
       success_status:
         - 200
@@ -7133,6 +7163,207 @@ operations:
       notes:
         - "Batch body carries one DELETE item per address, each with a single-element id list. The device honours only the first element of a multi-element id list and reports only that one in BatchResult, silently dropping the rest: measured 2026-10-13, ids [8.1.1.101, 8.1.1.102] in one item deleted 8.1.1.101 alone and answered one BatchResult entry, leaving 8.1.1.102 in place with no error."
         - "Each item resource is /api/v1/dhcpstaticip and each id is a binding address (hosts[].addr), not a name."
+        - "This batch form is not the only reachable path: /api/v1/dhcpstaticip also accepts a direct single DELETE ?id=<addr>, measured on 2026-10-16, and that endpoint is shared between the IPv4 and IPv6 families. An earlier note here claimed the batch form was the only route; that was too narrow, because the first probing round covered GET, POST and batchv2 but never tried a direct single delete."
+        - "The direct path is also far more permissive than the batch one: it answers 200 with a success body for a repeat delete, for an address that never existed and even for a DELETE carrying no id at all, so it cannot report whether anything was removed. The batch form answers per-id results in BatchResult, which is why this family keeps it."
         - "/api/v1/batchv2 is an opt-in variant of /api/v1/batch with an identical payload shape; the device's own frontend selects between them per request."
         - "The response is {\"BatchResult\":[{\"id\":\"8.1.1.2\",\"data\":\"success\"}]}; the device answers data rather than a status key, so the standard batch summary counters are not produced."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_config_dhcpv6_server:
+    atom_ref: atoms/fw/fw_config_dhcpv6_server.yaml
+    intent: Build a DHCPv6 server create request bound to an interface.
+    request:
+      method: POST
+      path: /api/v1/dhcpv6
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcpv6-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - A DHCPv6 server is identified by the interface name it is bound to; the device returns no separate numeric id.
+        - "val.server.lease and val.server.subnet must both be present. Omitting subnet crashes the device management service (nginx 502, roughly 3 minutes of outage); that was proven locally on 2026-10-16. Omitting lease does the same, a conclusion inherited from live isolation on the IPv4 sibling family rather than repeated here. The interface specification marks lease optional."
+        - "Unlike the IPv4 family, server.subnet does not have to sit on the interface's own IPv6 network; live probing accepted 9999::/96 on an interface whose own network differs."
+        - "server.subnet and server.prefix must differ, otherwise the device answers eDhcpdNetworkDuplicateWithDetail. server.prefix itself may equal the interface's own network, and it is normalised on readback: 8888::1111/96 reads back as 8888::/96."
+        - "server.prefix_len must fall in the inclusive range from the prefix length to that length plus 16, otherwise the device answers eDhcpdPrefixRangeErrorWithDetail."
+        - "Every static binding address must fall inside server.subnet, otherwise the device answers eDhcpdConfigHostIpWithinSubnetWithDetail, meaning the reserved IPv6 address is not inside the subnet."
+        - "ifmode accepts SERVER only; CLIENT, RELAY, OFF and an unknown value were all rejected with 400 eRequestParam. Static bindings are addressed by duid, not by the IPv4 family's mac."
+        - "The duid must be written as colon-separated hex, for example 00:03:00:01:00:00:00:00:01:01. The unseparated form is rejected with 400 eDhcpdConfigHostDuidFormatErrorWithDetail, meaning the reserved address DUID has a format error. Emitting the value verbatim is deliberate: the runner performs no format rewriting, and the device's message names the offending field."
+        - "A failed request answers a nested error object carrying code and message, not the flat errCode shape used by every other endpoint in this repository."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_dhcpv6_server:
+    atom_ref: atoms/fw/fw_update_dhcpv6_server.yaml
+    intent: Build a DHCPv6 server update request by bound interface name.
+    request:
+      method: PUT
+      path: /api/v1/dhcpv6
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "{{ params.val }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcpv6-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - Update addresses the server by its bound interface name; the create path is POST, so this family carries separate config and update operations.
+        - "The device replaces the whole configuration rather than merging fields, so a full val is required. Live probing rejected enable-only bodies: eRequestParam on its own, and eDhcpdNoPrefixOrNetworkWithDetail when the address pool was missing too."
+        - "val.server.lease and val.server.subnet are crash guards here as well, and the same device note about the interface specification marking lease optional applies."
+        - "A failed request answers a nested error object carrying code and message, not the flat errCode shape used by every other endpoint in this repository."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_disable_dhcpv6_server:
+    atom_ref: atoms/fw/fw_disable_dhcpv6_server.yaml
+    intent: Disable a DHCPv6 server by replaying its live configuration with both enable flags false.
+    request:
+      method: PUT
+      path: /api/v1/dhcpv6
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val: "<live-readback-with-both-enable-flags-false>"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcpv6-disable-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - This is a read-modify-write in two steps against /api/v1/dhcpv6; the adapter body shown here is the second step, whose val is generated at execution time from the configuration the device returns in the first step.
+        - "A minimal body cannot disable a server. Live probing rejected enable-only bodies with eRequestParam and with eDhcpdNoPrefixOrNetworkWithDetail once the address pool was missing as well, which proves PUT replaces the whole configuration rather than merging fields."
+        - "The caller supplies the interface name only. Restating the configuration would risk dropping fields the replay preserves; round-trip probing on 2026-10-16 showed a key-by-key diff ignoring the enable flags is empty, and the change is reversible."
+        - "Both enable flags are written, at the val level and inside server. The device materialises false for a top-level enable that is never sent, which used to make the entry drift after any static address deletion."
+        - "The replayed body still carries server.lease and server.subnet, so it passes the same crash guards as an update."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_dhcpv6_server:
+    atom_ref: atoms/fw/fw_verify_dhcpv6_server.yaml
+    intent: Build a DHCPv6 server query request.
+    request:
+      method: GET
+      path: /api/v1/dhcpv6
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <dhcpv6-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "GET sends no JSON body and returns a data list; each entry carries ifname, ifmode, enable and a server object with enable, name, subnet, prefix, prefix_len, lease, dns1, dns2, hosts, sip, sntp and domain. The IPv4 family returns the same shape under vals, and that key is the only response-shape divergence between the two."
+        - "The device returns no count field; callers take the length of the list."
+        - "No query parameter filters this endpoint; key, keywords, name, ifname, page, size and search were all measured as silently ignored on 2026-10-16, so the runner exposes none of them."
+        - "The interface specification documents no GET for this family either; the endpoint was confirmed by live probing."
+  fw_delete_dhcpv6_server:
+    atom_ref: atoms/fw/fw_delete_dhcpv6_server.yaml
+    intent: Build a DHCPv6 server delete request by query id.
+    request:
+      method: DELETE
+      path: /api/v1/dhcpv6
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "{{ params.id }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcpv6-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - DELETE sends the interface name as ?id=<interface-name> and sends no JSON body.
+        - "A DELETE with an id that no longer has a configuration answers 400 eRequestParam with the message http request parameter error. That generic code carries no not-found wording, so this operation alone registers the code-and-message combination as its not-found judgement; the registration is scoped to this single operation and does not widen any other delete family."
+        - "The id must be non-empty. A DELETE carrying no id at all answers 200 with a success body while leaving the configuration untouched, which is a false success; the runner refuses an empty id before the request leaves. A wrong HTTP method answers 405 and is never read as not-found."
+        - Static address bindings of the deleted server go with it; they have no separate storage.
+        - "A failed request answers a nested error object carrying code and message, not the flat errCode shape used by every other endpoint in this repository."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_dhcpv6_static_ip:
+    atom_ref: atoms/fw/fw_verify_dhcpv6_static_ip.yaml
+    intent: Build a static address binding query by projecting the DHCPv6 server list.
+    request:
+      method: GET
+      path: /api/v1/dhcpv6
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <dhcpv6-static-ip-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "/api/v1/dhcpstaticip exposes no GET and has no storage of its own: static bindings are only a projection of each DHCPv6 entry's server.hosts."
+        - This op therefore reads /api/v1/dhcpv6 and emits one row per binding carrying ifname, name, addr and duid.
+        - "This is the only view that can confirm whether a static delete removed anything, because the delete endpoint answers 200 unconditionally."
+        - Each row's addr is the value fw_delete_dhcpv6_static_ip takes as its id.
+  fw_delete_dhcpv6_static_ip:
+    atom_ref: atoms/fw/fw_delete_dhcpv6_static_ip.yaml
+    intent: Build a single static address binding delete request by query id.
+    request:
+      method: DELETE
+      path: /api/v1/dhcpstaticip
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "{{ params.id }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <dhcpv6-static-ip-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The id is the binding address, a hosts[].addr value, not a name. The address contains colons, which urlencode escapes as %3A; live differential probing on 2026-10-16 confirmed the device decodes the escaped form and removes exactly the addressed binding."
+        - "This endpoint is shared with the IPv4 family and reaches the same storage, so an IPv4 binding address is a valid id here too."
+        - "It is extremely permissive: a repeat delete, an address that never existed and even a DELETE carrying no id at all each answer 200 with a success body. A success therefore does not establish that a binding was removed, and no resource-not-found judgement is possible on this endpoint. Confirm the effect with fw_verify_dhcpv6_static_ip."
+        - The id must be non-empty; the runner refuses an empty one before the request leaves.
         - ptm-atomic run can execute this request only when --execute is explicit.

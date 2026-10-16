@@ -1,0 +1,112 @@
+schema_version: "1.1"
+op_id: fw_delete_dhcpv6_static_ip
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_dhcpv6_static_ip
+description: Delete a single DHCPv6 static address binding through DELETE /api/v1/dhcpstaticip?id=<addr>.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dhcpv6 for this operation.
+  params:
+    type: json
+    required: true
+    description: Static address binding delete selector with the binding's IPv6 address as the id query value; DELETE sends no JSON body. This endpoint is shared with the IPv4 sibling family.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: dhcpv6
+  params:
+    id: "1111::100"
+  idempotency_key: "<idempotency-key>"
+side_effect: destructive
+returns:
+  status: success
+  data:
+    object_name: "1111::100"
+    config_result:
+      status: succeeded
+      config_domain: dhcpv6
+      applied_ref: "<dhcpv6-static-ip-delete-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+# 设备级幂等：重复删、删不存在的地址、乃至完全不带 id 都答 200。因此本 op **不**声明
+# RESOURCE_NOT_FOUND —— 设备从不报告「不存在」，没有可归一的错误面，故也不登记进
+# errors.py 的 IDEMPOTENT_ERROR_TYPES（登记即为空转）。
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - full_config
+  notes: Recreate the binding by re-applying the pre-delete server configuration through fw_update_dhcpv6_server. A binding has no storage of its own, so restoring the host entry restores it.
+pre_snapshot:
+  op_id: fw_verify_dhcpv6_static_ip
+  capture_fields:
+    - full_config
+rollback_apply:
+  op_id: fw_update_dhcpv6_server
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_dhcpv6_static_ip
+  expected_state: absent
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Removing a DHCPv6 static address binding takes a reserved address away from its client and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk binding deletion is used.
+  - The id is the binding address, that is a hosts[].addr value as reported by fw_verify_dhcpv6_static_ip, not a name.
+  - The id must be non-empty; the runner refuses an empty one before the request leaves.
+postconditions:
+  - Static address binding deletion result and diagnostic references are available to the caller.
+  - This operation confirms only that the request was accepted. The endpoint answers 200 with a success body for a repeat delete, for an address that never existed and even for a DELETE carrying no id at all, so a success here does NOT establish that a binding was removed. Confirm the effect with fw_verify_dhcpv6_static_ip.
+  - A binding has no storage of its own; it is a projection of its parent server's hosts array.
+  - The endpoint /api/v1/dhcpstaticip is shared with the IPv4 sibling family, which reaches the same storage. An IPv4 binding address and an IPv6 binding address are both valid ids here.
+tags:
+  - firewall
+  - capacity
+  - dhcpv6
+  - configuration
+aliases:
+  - dhcpv6-static-ip
+  - dhcpv6-binding
+  - static-binding-v6
+since_version: "1.15.0"

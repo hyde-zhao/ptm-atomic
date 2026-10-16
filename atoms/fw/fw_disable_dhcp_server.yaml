@@ -1,0 +1,114 @@
+schema_version: "1.1"
+op_id: fw_disable_dhcp_server
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_disable_dhcp_server
+description: Disable an IPv4 DHCP server by interface name, replaying its live configuration with both enable flags false.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dhcp for this operation.
+  params:
+    type: json
+    required: true
+    description: IPv4 DHCP server disable selector with the bound interface name as its id. No configuration fields are accepted, because the request body is built at execution time from the configuration the device reads back.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: dhcp
+  params:
+    id: GE0_13
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    object_name: GE0_13
+    readback_ref: "<dhcp-pre-disable-readback-ref>"
+    config_result:
+      status: succeeded
+      config_domain: dhcp
+      applied_ref: "<dhcp-disable-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+# ── 幂等删除契约（CT-REM-ATOM-DELETE）──
+# 条目不存在 ⇒ 该网卡本就没有在服务的 DHCP 配置 ⇒ 禁用的目标状态已达成。
+# 判据由 runner 在**本地**给出（读回是成功的空列表，无设备错误可引用），并经
+# errors.py 的 IDEMPOTENT_ERROR_TYPES 登记本 op 后带上幂等键。
+idempotent: true
+side_effect: state_mutation
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - full_config
+  notes: Re-apply the full pre-disable val captured before the change through fw_update_dhcp_server with both enable flags true. There is no dedicated enable operation; enabling is an ordinary update.
+pre_snapshot:
+  op_id: fw_verify_dhcp_server
+  capture_fields:
+    - full_config
+rollback_apply:
+  op_id: fw_update_dhcp_server
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_dhcp_server
+  expected_state: present
+dry_run_supported: true
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - RESOURCE_NOT_FOUND
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Disabling an IPv4 DHCP server stops address assignment on the bound interface segment and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk DHCP server disable is used.
+  - Only the interface name is accepted. A caller cannot restate the configuration, because PUT replaces the whole entry and the body is generated from the live readback instead.
+postconditions:
+  - Disable result, the readback it was derived from, and diagnostic references are available to the caller.
+  - The operation is a read-modify-write in two steps, both against /api/v1/dhcp. A GET selects the entry whose ifname matches, then a PUT replays that entry verbatim with enable set to false at both the val and server levels. Live round-trip probing on 2026-10-16 showed the replay is lossless - a key-by-key diff ignoring the enable flags is empty - and reversible.
+  - A caller that targets an interface with no DHCP entry gets the resource-not-found contract rather than a device error, because the readback is a successful empty list.
+  - The device's management service stays up only because val.server.lease is present in the replayed body; the replay therefore passes through the same crash guard as an update.
+  - Both enable flags are written. This is the fix for a state drift the family previously caused itself - the payload builder used to omit the top-level enable, which let the device materialise false for that key after any static address deletion.
+tags:
+  - firewall
+  - capacity
+  - dhcp
+  - configuration
+aliases:
+  - dhcp-server
+  - dhcp-service
+  - dhcp-scope
+since_version: "1.15.0"

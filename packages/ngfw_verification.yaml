@@ -61,3 +61,5 @@ operations:
   - fw_verify_crl
   - fw_verify_dhcp_server
   - fw_verify_dhcp_static_ip
+  - fw_verify_dhcpv6_server
+  - fw_verify_dhcpv6_static_ip

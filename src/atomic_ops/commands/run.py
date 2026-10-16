@@ -214,10 +214,20 @@ CRL_OPS = (
 DHCP_OPS = (
     "fw_config_dhcp_server",
     "fw_update_dhcp_server",
+    "fw_disable_dhcp_server",
     "fw_verify_dhcp_server",
     "fw_delete_dhcp_server",
     "fw_verify_dhcp_static_ip",
     "fw_delete_batch_dhcp_static_ip",
+)
+DHCPV6_OPS = (
+    "fw_config_dhcpv6_server",
+    "fw_update_dhcpv6_server",
+    "fw_disable_dhcpv6_server",
+    "fw_verify_dhcpv6_server",
+    "fw_delete_dhcpv6_server",
+    "fw_verify_dhcpv6_static_ip",
+    "fw_delete_dhcpv6_static_ip",
 )
 SUPPORTED_OPS = (
     "fw_login_web_management",
@@ -256,6 +266,7 @@ SUPPORTED_OPS = (
     *KEYWORD_OPS,
     *CRL_OPS,
     *DHCP_OPS,
+    *DHCPV6_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -451,6 +462,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_garp as run_garp
     from atomic_ops.commands import run_keyword as run_keyword
     from atomic_ops.commands import run_dhcp as run_dhcp
+    from atomic_ops.commands import run_dhcpv6 as run_dhcpv6
 
     return (
         CommandGroup(
@@ -611,10 +623,19 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             name="dhcp",
             help="IPv4 DHCP server and static address binding operations.",
             description=(
-                "IPv4 DHCP server config, update, verify, and delete operations, plus "
+                "IPv4 DHCP server config, update, disable, verify, and delete operations, plus "
                 "static address binding verify and batch-delete operations."
             ),
             children=run_dhcp.build_subtree(),
+        ),
+        CommandGroup(
+            name="dhcpv6",
+            help="DHCPv6 server and static address binding operations.",
+            description=(
+                "DHCPv6 server config, update, disable, verify, and delete operations, plus "
+                "static address binding verify and single-delete operations."
+            ),
+            children=run_dhcpv6.build_subtree(),
         ),
         CommandGroup(
             name="cli",

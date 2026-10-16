@@ -18,6 +18,12 @@ from atomic_ops.errors import CliError, write_error, write_warning
 from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.session import resolve_session_file
 
+# 只靠 id 定位、没有任何载荷参数的子命令。它们的 --id 必填校验由 _run_dhcp 在
+# try 块内完成，见该处的说明。
+_ID_ONLY_OPS = frozenset(
+    {"fw_delete_dhcp_server", "fw_disable_dhcp_server", "fw_delete_batch_dhcp_static_ip"}
+)
+
 
 def build_subtree() -> tuple[CommandSpec, ...]:
     return (
@@ -34,6 +40,18 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             description="Update an NGFW IPv4 DHCP server by interface name through /api/v1/dhcp.",
             handler=_run_update,
             add_args=_add_update_args,
+        ),
+        CommandSpec(
+            name="disable",
+            help="Disable an IPv4 DHCP server by interface name.",
+            description=(
+                "Disable an NGFW IPv4 DHCP server by reading its live configuration back, "
+                "flipping both enable flags to false and replaying the entry verbatim through "
+                "PUT /api/v1/dhcp. PUT replaces the whole configuration, so the body cannot be "
+                "restated from flags: only --id is accepted."
+            ),
+            handler=_run_disable,
+            add_args=_add_disable_args,
         ),
         CommandSpec(
             name="verify",
@@ -164,6 +182,20 @@ def _add_delete_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_disable_args(parser: argparse.ArgumentParser) -> None:
+    """禁用**只接受 ``--id``**。
+
+    body 在执行期由读回的现有条目生成（PUT 是全量替换，最小 body 会被设备拒绝），
+    故不给任何配置 flag —— 给了反而会让调用方以为「没说到的字段会保留」。
+    """
+    parser.add_argument(
+        "--id",
+        action="append",
+        required=True,
+        help="Interface name of the DHCP server to disable.",
+    )
+
+
 def _add_no_args(parser: argparse.ArgumentParser) -> None:
     """本族 verify **刻意不接受任何参数**。
 
@@ -195,8 +227,11 @@ def _run_verify(args: argparse.Namespace) -> int:
 
 
 def _run_delete(args: argparse.Namespace) -> int:
-    _require_arg(args, "id")
     return _run_dhcp(args, "fw_delete_dhcp_server")
+
+
+def _run_disable(args: argparse.Namespace) -> int:
+    return _run_dhcp(args, "fw_disable_dhcp_server")
 
 
 def _run_static_ip_verify(args: argparse.Namespace) -> int:
@@ -204,7 +239,6 @@ def _run_static_ip_verify(args: argparse.Namespace) -> int:
 
 
 def _run_static_ip_delete_batch(args: argparse.Namespace) -> int:
-    _require_arg(args, "id")
     return _run_dhcp(args, "fw_delete_batch_dhcp_static_ip")
 
 
@@ -247,11 +281,17 @@ def _run_dhcp(args: argparse.Namespace, op_id: str) -> int:
 
         session_file = resolve_session_file(ctx.get("session_file"))
         payload: dict[str, Any] | None
+        # 只靠 id 定位的 op：必需的 --id 在这里校验，**必须在 try 内** —— 放在
+        # handler 里（调用本函数之前）抛出的 RunnerError 会越过下面的 except，
+        # 变成裸 traceback 而不是结构化错误。
+        if op_id in _ID_ONLY_OPS:
+            _require_arg(args, "id")
         # entry_id 只在「以网卡名定位单个条目」的两个 op 上有意义；批量删的 --id
         # 是 append 列表，绝不能走 _single_arg（那会误报「只能给一次」）。
         entry_id = _single_arg(args, "id") or "" if op_id in {
             "fw_update_dhcp_server",
             "fw_delete_dhcp_server",
+            "fw_disable_dhcp_server",
         } else ""
 
         if op_id in {"fw_config_dhcp_server", "fw_update_dhcp_server"}:

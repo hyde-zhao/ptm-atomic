@@ -203,6 +203,7 @@ from atomic_ops.runner.crl import (
 )
 from atomic_ops.runner.dhcp import (
     BATCH_V2_PATH,
+    READ_MODIFY_WRITE_OPS,
     build_dhcp_binding,
     build_dhcp_delete_query,
     build_dhcp_payload,
@@ -210,8 +211,21 @@ from atomic_ops.runner.dhcp import (
     build_dhcp_static_ip_batch_delete_payload,
     build_dhcp_subnet,
     build_dhcp_update_payload,
+    build_disabled_dhcp_val,
     flatten_static_bindings,
     validate_dhcp_payload,
+)
+from atomic_ops.runner.dhcpv6 import (
+    DHCP_STATIC_IP_RESOURCE,
+    DHCPV6_RESOURCE,
+    build_dhcpv6_binding,
+    build_dhcpv6_delete_query,
+    build_dhcpv6_payload,
+    build_dhcpv6_server_val,
+    build_dhcpv6_update_payload,
+    build_disabled_dhcpv6_val,
+    flatten_dhcpv6_static_bindings,
+    validate_dhcpv6_payload,
 )
 from atomic_ops.runner.trex import (
     IDEMPOTENT_ERROR_TYPES,
@@ -7844,6 +7858,536 @@ class DhcpCliDryRunTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as context:
             cli_main(["run", "--format", "json", "--base-url", self.BASE, "dhcp", "delete"])
         self.assertEqual(context.exception.code, 2)
+
+    def test_an_empty_id_fails_structurally_instead_of_raising(self) -> None:
+        """空 id 是设备「静默空操作答 200」的入口，拒绝必须是结构化的。
+
+        回归：这些 handler 曾在调用 _run_dhcp **之前**做 _require_arg，于是
+        RunnerError 越过函数内的 except，变成裸 traceback + 非 JSON 输出。
+        """
+        for argv in (
+            ["delete", "--id", ""],
+            ["disable", "--id", ""],
+            ["static-ip-delete-batch", "--id", ""],
+        ):
+            with self.subTest(argv=argv):
+                error = self._dry_run_error(argv)
+                self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+                self.assertEqual(error["details"], {"argument": "--id"})
+
+
+class DhcpEnableDriftTests(unittest.TestCase):
+    """v4 族的 enable 漂移修复 + 禁用读取改写（2026-10-16 实测）。"""
+
+    def _subnet(self) -> dict:
+        return build_dhcp_subnet(
+            subnet="8.1.1.0/24", range_start="8.1.1.1", range_end="8.1.1.5", gateway="8.1.1.1"
+        )
+
+    def test_server_val_emits_both_enable_levels(self) -> None:
+        """顶层 enable 曾经缺失：任何一次静态地址删除都会把条目漂成 enable=false。
+
+        设备对一个**未发送**的顶层 enable 会实体化为 false，故它必须显式出现。
+        这条测试是那次漂移的回归钉子。
+        """
+        val = build_dhcp_server_val(ifname="GE0_13", subnets=[self._subnet()])
+        self.assertIn("enable", val)
+        self.assertIs(val["enable"], True)
+        self.assertTrue(val["server"]["enable"])
+
+    def test_server_val_enable_false_propagates_to_both_levels(self) -> None:
+        # 构建器把一个 enable 同时写到两级；真正的「读取改写」由 build_disabled_*_val
+        # 承担（它按回读原样翻转，不经过构建器）。
+        val = build_dhcp_server_val(ifname="GE0_13", subnets=[self._subnet()], enable=False)
+        self.assertIs(val["enable"], False)
+        self.assertIs(val["server"]["enable"], False)
+
+    def test_disabled_val_flips_both_enable_levels(self) -> None:
+        entry = {"ifname": "GE0_13", "enable": True, "server": {"enable": True, "hosts": []}}
+        disabled = build_disabled_dhcp_val(entry)
+        self.assertIs(disabled["enable"], False)
+        self.assertIs(disabled["server"]["enable"], False)
+
+    def test_disabled_val_preserves_every_other_key(self) -> None:
+        entry = {
+            "ifname": "GE0_13",
+            "enable": True,
+            "server": {
+                "enable": True,
+                "subnets": [self._subnet()],
+                "lease": {"limited": True, "default_seconds": 86400},
+            },
+        }
+        disabled = build_disabled_dhcp_val(entry)
+        self.assertEqual(disabled["server"]["subnets"], entry["server"]["subnets"])
+        self.assertEqual(disabled["server"]["lease"], entry["server"]["lease"])
+        self.assertEqual(entry["enable"], True, "不得就地改写设备回读的原对象")
+
+    def test_disable_is_registered_as_a_read_modify_write_op(self) -> None:
+        self.assertEqual(READ_MODIFY_WRITE_OPS, {"fw_disable_dhcp_server"})
+
+    def test_disabled_v6_val_flips_both_enable_levels(self) -> None:
+        entry = {"ifname": "GE0_13", "enable": True, "server": {"enable": True, "hosts": []}}
+        disabled = build_disabled_dhcpv6_val(entry)
+        self.assertIs(disabled["enable"], False)
+        self.assertIs(disabled["server"]["enable"], False)
+        self.assertIs(entry["enable"], True)
+
+
+class DhcpNestedErrorEnvelopeTests(unittest.TestCase):
+    """DHCPv6 是仓库里第一个嵌套 error 信封；归一化必须在判定前发生。"""
+
+    NESTED = {
+        "error": {
+            "code": "eRequestParam",
+            "message": "http请求参数错误",
+            "target": "/api/v1/dhcpv6",
+            "details": [],
+            "innererror": {},
+        }
+    }
+
+    def test_flatten_promotes_nested_code_and_message_to_flat_keys(self) -> None:
+        from atomic_ops.runner.dhcpv6 import _flatten_device_error
+
+        flat = _flatten_device_error(self.NESTED)
+        self.assertEqual(flat["errCode"], "eRequestParam")
+        self.assertEqual(flat["errMsg"], "http请求参数错误")
+        self.assertIn("error", flat, "原始嵌套对象保留，供诊断")
+
+    def test_flatten_is_identity_for_flat_and_non_mapping_payloads(self) -> None:
+        from atomic_ops.runner.dhcpv6 import _flatten_device_error
+
+        flat = {"errCode": "eIntfisRefed", "errMsg": "该接口已被引用"}
+        self.assertEqual(_flatten_device_error(flat), flat)
+        self.assertIsNone(_flatten_device_error(None))
+        self.assertEqual(_flatten_device_error("boom"), "boom")
+        self.assertEqual(_flatten_device_error({"error": "not-a-mapping"}), {"error": "not-a-mapping"})
+
+    def test_nested_form_alone_is_invisible_to_the_judgement(self) -> None:
+        """判定读的是**扁平**键，故归一化必须先于判定发生；否则本族永不自愈。
+
+        同一条「已不存在」报文：直接喂给判定函数（不先扁平化）不归一 —— 这正是
+        runner 把 ``_flatten_device_error`` 放在 ``raise_if_resource_not_found``
+        之前的原因。
+        """
+        from atomic_ops.runner.errors import raise_if_resource_not_found
+
+        self.assertIsNone(
+            raise_if_resource_not_found(400, self.NESTED, op_id="fw_delete_dhcpv6_server")
+        )
+
+
+class OpScopedNotFoundMarkerTests(unittest.TestCase):
+    """op 专属「不存在」判据：eRequestParam + 文案，作用域锁死单个 op。"""
+
+    def _raises_for(self, op_id: str, payload: dict) -> bool:
+        from atomic_ops.runner.errors import raise_if_resource_not_found
+
+        try:
+            raise_if_resource_not_found(400, payload, op_id=op_id)
+        except RunnerError as error:
+            self.assertEqual(error.details["error_type"], "RESOURCE_NOT_FOUND")
+            self.assertIs(error.details["idempotent"], True)
+            return True
+        return False
+
+    def test_marked_op_normalizes_on_code_plus_message(self) -> None:
+        from atomic_ops.runner.dhcpv6 import _flatten_device_error
+
+        flattened = _flatten_device_error(
+            {"error": {"code": "eRequestParam", "message": "http请求参数错误"}}
+        )
+        self.assertTrue(self._raises_for("fw_delete_dhcpv6_server", flattened))
+
+    def test_same_code_without_the_marker_message_is_not_normalized(self) -> None:
+        # 真·畸形请求（同码、异文案）必须保真为真失败，不得报「已达成」。
+        payload = {"errCode": "eRequestParam", "errMsg": "参数校验失败"}
+        self.assertFalse(self._raises_for("fw_delete_dhcpv6_server", payload))
+
+    def test_marker_is_scoped_to_one_op_and_does_not_leak(self) -> None:
+        payload = {"errCode": "eRequestParam", "errMsg": "http请求参数错误"}
+        self.assertFalse(self._raises_for("fw_delete_dhcp_server", payload))
+        self.assertFalse(self._raises_for("fw_delete_timeobject", payload))
+
+    def test_v6_disable_is_registered_but_static_delete_is_not(self) -> None:
+        """静态删端点从不报告「不存在」，登记即为空转，故刻意留在表外。"""
+        from atomic_ops.runner.errors import IDEMPOTENT_ERROR_TYPES
+
+        self.assertIn("RESOURCE_NOT_FOUND", IDEMPOTENT_ERROR_TYPES["fw_disable_dhcpv6_server"])
+        self.assertIn("RESOURCE_NOT_FOUND", IDEMPOTENT_ERROR_TYPES["fw_disable_dhcp_server"])
+        self.assertNotIn(
+            "RESOURCE_NOT_FOUND",
+            IDEMPOTENT_ERROR_TYPES.get("fw_delete_dhcpv6_static_ip", frozenset()),
+        )
+
+    def test_marker_ops_are_all_registered_gate_authorities(self) -> None:
+        from atomic_ops.runner.errors import (
+            IDEMPOTENT_ERROR_TYPES,
+            RESOURCE_NOT_FOUND_OP_CODE_MARKERS,
+        )
+
+        self.assertEqual(set(RESOURCE_NOT_FOUND_OP_CODE_MARKERS), {"fw_delete_dhcpv6_server"})
+        for op_id in RESOURCE_NOT_FOUND_OP_CODE_MARKERS:
+            self.assertIn(op_id, IDEMPOTENT_ERROR_TYPES)
+
+
+class Dhcpv6PayloadTests(unittest.TestCase):
+    """DHCPv6 payload 构建器：形状、必填校验与两道崩溃护栏。"""
+
+    def _val(self, **overrides: object) -> dict:
+        kwargs = {
+            "ifname": "GE0_13",
+            "subnet": "1111::/96",
+            "prefix": "8888::1111/96",
+            "prefix_len": 96,
+        }
+        kwargs.update(overrides)
+        return build_dhcpv6_server_val(**kwargs)
+
+    def test_val_shape_matches_spec(self) -> None:
+        val = self._val()
+        self.assertEqual(val["ifname"], "GE0_13")
+        self.assertEqual(val["ifmode"], "SERVER")
+        self.assertIs(val["enable"], True)
+        server = val["server"]
+        self.assertEqual(server["name"], "GE0_13")
+        self.assertEqual(server["subnet"], "1111::/96")
+        self.assertEqual(server["prefix"], "8888::1111/96")
+        self.assertEqual(server["prefix_len"], 96)
+        self.assertEqual(server["hosts"], [])
+        # v4 的 server.subnets[] 是 {subnet, range, gateway} 列表；v6 退化为单个字符串。
+        self.assertNotIn("subnets", server)
+        self.assertIsInstance(server["subnet"], str)
+
+    def test_val_always_emits_lease(self) -> None:
+        self.assertEqual(
+            self._val()["server"]["lease"], {"limited": True, "default_seconds": 86400}
+        )
+
+    def test_val_always_emits_the_three_v6_only_option_keys(self) -> None:
+        # 实测空串被接受且回读会实体化全部 12 个键，故显式补齐而非省略。
+        server = self._val()["server"]
+        for key in ("sip", "sntp", "domain"):
+            self.assertEqual(server[key], "")
+
+    def test_binding_uses_duid_not_mac(self) -> None:
+        binding = build_dhcpv6_binding(name="h1", addr="1111::100", duid="00:03:00:01:00:00:00:00:01:01")
+        self.assertEqual(binding, {"name": "h1", "addr": "1111::100", "duid": "00:03:00:01:00:00:00:00:01:01"})
+        self.assertNotIn("mac", binding)
+        for missing in ("name", "addr", "duid"):
+            with self.subTest(missing=missing), self.assertRaises(RunnerError):
+                build_dhcpv6_binding(**{**binding, missing: ""})
+
+    def test_val_rejects_unknown_ifmode(self) -> None:
+        # 实测 CLIENT / RELAY / OFF / 垃圾值全部 400 eRequestParam，只认 SERVER。
+        for ifmode in ("CLIENT", "RELAY", "OFF", "garbage"):
+            with self.subTest(ifmode=ifmode), self.assertRaises(RunnerError):
+                self._val(ifmode=ifmode)
+
+    def test_val_requires_subnet_prefix_and_prefix_len(self) -> None:
+        for missing, blank in (
+            ("subnet", ""),
+            ("prefix", ""),
+            ("prefix_len", None),
+        ):
+            with self.subTest(missing=missing), self.assertRaises(RunnerError):
+                self._val(**{missing: blank})
+
+    def test_val_rejects_subnet_equal_to_prefix(self) -> None:
+        # 实测 eDhcpdNetworkDuplicateWithDetail，但那是**设备**规则：本地不做 CIDR
+        # 解析，构建器只如实透传，判定权留给 DUT（与 v4「格式由 DUT 校验」同口径）。
+        val = self._val(subnet="8888::1111/96", prefix="8888::1111/96")
+        self.assertEqual(val["server"]["subnet"], val["server"]["prefix"])
+
+    def test_val_tolerates_a_subnet_outside_the_interface_network(self) -> None:
+        # 与 v4 相反：v6 没有「子网须落在网卡自身子网内」这条规则（实测 9999::/96 通过）。
+        self.assertEqual(self._val(subnet="9999::/96")["server"]["subnet"], "9999::/96")
+
+    def test_prefix_len_guard_checks_type_only(self) -> None:
+        """本地只验类型与非负；[前缀长度, +16] 的区间是设备规则，不复制一份本地 CIDR 解析。"""
+        for bad in (None, "96", 96.0, True):
+            with self.subTest(prefix_len=bad), self.assertRaises(RunnerError):
+                self._val(prefix_len=bad)
+        with self.assertRaises(RunnerError):
+            self._val(prefix_len=-1)
+        # 95 与 128 本地**放行**（区间判定归设备），故构建器如实透传。
+        for prefix_len in (95, 128):
+            with self.subTest(prefix_len=prefix_len):
+                self.assertEqual(
+                    self._val(prefix_len=prefix_len)["server"]["prefix_len"], prefix_len
+                )
+
+    def test_config_payload_wraps_val(self) -> None:
+        payload = build_dhcpv6_payload(ifname="GE0_13", subnet="1111::/96", prefix="8888::1111/96", prefix_len=96)
+        self.assertEqual(list(payload), ["val"])
+        self.assertEqual(payload["val"]["server"]["subnet"], "1111::/96")
+
+    def test_update_payload_carries_ifname_as_id(self) -> None:
+        payload = build_dhcpv6_update_payload(
+            entry_id="GE0_13", ifname="GE0_13", subnet="1111::/96", prefix="8888::1111/96", prefix_len=96
+        )
+        self.assertEqual(payload["id"], "GE0_13")
+        self.assertIn("lease", payload["val"]["server"])
+        with self.assertRaises(RunnerError):
+            build_dhcpv6_update_payload(
+                entry_id="", ifname="GE0_13", subnet="1111::/96", prefix="8888::1111/96", prefix_len=96
+            )
+
+    def test_delete_query_is_a_query_carrier_not_a_body(self) -> None:
+        self.assertEqual(build_dhcpv6_delete_query(entry_id="GE0_13"), {"id": "GE0_13"})
+        with self.assertRaises(RunnerError):
+            build_dhcpv6_delete_query(entry_id="")
+
+    def test_crash_guards_reject_payloads_missing_lease_or_subnet(self) -> None:
+        """护栏的核心回归：缺 lease 或 subnet 会崩设备管理面（实测 502）。"""
+        cases = (
+            {"val": {"ifname": "GE0_13", "ifmode": "SERVER", "server": {"subnet": "1111::/96"}}},
+            {"val": {"ifname": "GE0_13", "ifmode": "SERVER", "server": {"lease": {"limited": True}}}},
+            {"val": {"ifname": "GE0_13", "ifmode": "SERVER", "server": {}}},
+        )
+        for payload in cases:
+            for op_id in ("fw_config_dhcpv6_server", "fw_update_dhcpv6_server"):
+                with self.subTest(op_id=op_id), self.assertRaises(RunnerError):
+                    validate_dhcpv6_payload(payload, op_id=op_id)
+
+    def test_crash_guard_accepts_complete_payload(self) -> None:
+        payload = build_dhcpv6_payload(
+            ifname="GE0_13", subnet="1111::/96", prefix="8888::1111/96", prefix_len=96
+        )
+        self.assertIs(validate_dhcpv6_payload(payload, op_id="fw_config_dhcpv6_server"), payload)
+
+    def test_binding_requires_name_addr_and_duid(self) -> None:
+        """本地只验三键非空；「地址须落在 subnet 内」是设备规则（见下条）。"""
+        binding = build_dhcpv6_binding(name="h1", addr="1111::100", duid="d1")
+        with self.assertRaises(RunnerError):
+            build_dhcpv6_server_val(
+                ifname="GE0_13", subnet="1111::/96", prefix="8888::1111/96", prefix_len=96,
+                bindings=[{**binding, "duid": ""}],
+            )
+
+    def test_binding_outside_subnet_is_passed_through_to_the_device(self) -> None:
+        # _validate_bindings 不做 CIDR 判定；越界由设备答
+        # eDhcpdConfigHostIpWithinSubnetWithDetail，本地不复制一份可能不一致的解析。
+        from atomic_ops.runner.dhcpv6 import _validate_bindings
+
+        binding = build_dhcpv6_binding(name="h1", addr="2222::100", duid="d1")
+        self.assertEqual(_validate_bindings([binding]), [binding])
+
+    def test_flatten_static_bindings_projects_hosts_across_entries(self) -> None:
+        data = [
+            {
+                "ifname": "GE0_13",
+                "server": {
+                    "hosts": [
+                        {"name": "a", "addr": "1111::100", "duid": "d1"},
+                        {"name": "b", "addr": "1111::101", "duid": "d2"},
+                    ]
+                },
+            },
+            {"ifname": "GE0_14", "server": {"hosts": [{"name": "c", "addr": "2222::100", "duid": "d3"}]}},
+        ]
+        rows = flatten_dhcpv6_static_bindings(data)
+        self.assertEqual([row["addr"] for row in rows], ["1111::100", "1111::101", "2222::100"])
+        self.assertEqual(
+            rows[0], {"ifname": "GE0_13", "name": "a", "addr": "1111::100", "duid": "d1"}
+        )
+        self.assertEqual(rows[2]["ifname"], "GE0_14")
+
+    def test_flatten_static_bindings_tolerates_missing_hosts(self) -> None:
+        for entries in ([], None, [{"ifname": "GE0_13"}], [{"ifname": "GE0_13", "server": {}}]):
+            with self.subTest(entries=entries):
+                self.assertEqual(flatten_dhcpv6_static_bindings(entries), [])
+
+    def test_endpoints_share_the_static_delete_resource_with_v4(self) -> None:
+        from atomic_ops.runner.dhcp import DHCP_STATIC_IP_RESOURCE as v4_static
+
+        self.assertEqual(DHCP_STATIC_IP_RESOURCE, v4_static)
+        self.assertEqual(DHCPV6_RESOURCE, "/api/v1/dhcpv6")
+
+
+class Dhcpv6CliDryRunTests(unittest.TestCase):
+    """DHCPv6 CLI dry-run：七个子命令的 method/url/payload 与规范对齐。"""
+
+    BASE = "https://192.0.2.1"
+
+    def _dry_run(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", self.BASE, "dhcpv6", *argv]
+            )
+        self.assertEqual(exit_code, 0, stderr.getvalue())
+        return json.loads(stdout.getvalue())
+
+    def _dry_run_error(self, argv: list[str]) -> dict:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = cli_main(
+                ["run", "--format", "json", "--base-url", self.BASE, "dhcpv6", *argv]
+            )
+        self.assertNotEqual(exit_code, 0)
+        text = stdout.getvalue() if stdout.getvalue().strip() else stderr.getvalue()
+        return json.loads(text)
+
+    def _config_argv(self) -> list[str]:
+        return [
+            "config",
+            "--ifname", "GE0_13",
+            "--subnet", "1111::/96",
+            "--prefix", "8888::1111/96",
+            "--prefix-len", "96",
+            "--binding", "test,1111::100,00:03:00:01:00:00:00:00:01:01",
+        ]
+
+    def test_config_posts_val_body_with_lease(self) -> None:
+        payload = self._dry_run(self._config_argv())
+        self.assertEqual(payload["op_id"], "fw_config_dhcpv6_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcpv6")
+        val = request["payload"]["val"]
+        self.assertEqual(val["ifmode"], "SERVER")
+        self.assertEqual(val["server"]["subnet"], "1111::/96")
+        self.assertEqual(val["server"]["prefix_len"], 96)
+        self.assertEqual(val["server"]["lease"], {"limited": True, "default_seconds": 86400})
+        self.assertEqual(
+            val["server"]["hosts"], [{"name": "test", "addr": "1111::100", "duid": "00:03:00:01:00:00:00:00:01:01"}]
+        )
+
+    def test_update_puts_id_and_val_body(self) -> None:
+        payload = self._dry_run(["update", "--id", "GE0_13", *self._config_argv()[1:]])
+        self.assertEqual(payload["op_id"], "fw_update_dhcpv6_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcpv6")
+        self.assertEqual(request["payload"]["id"], "GE0_13")
+        self.assertIn("lease", request["payload"]["val"]["server"])
+
+    def test_disable_is_a_two_step_read_modify_write(self) -> None:
+        payload = self._dry_run(["disable", "--id", "GE0_13"])
+        self.assertEqual(payload["op_id"], "fw_disable_dhcpv6_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcpv6")
+        self.assertIsNone(request["payload"], "载荷在执行期由回读生成，dry-run 无可展示 body")
+        steps = payload["data"]["disable_steps"]
+        self.assertEqual([step["method"] for step in steps], ["GET", "PUT"])
+        self.assertEqual([step["path"] for step in steps], ["/api/v1/dhcpv6", "/api/v1/dhcpv6"])
+
+    def test_verify_gets_bare_endpoint_without_payload_or_query(self) -> None:
+        payload = self._dry_run(["verify"])
+        self.assertEqual(payload["op_id"], "fw_verify_dhcpv6_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "GET")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcpv6")
+        self.assertIsNone(request["payload"])
+
+    def test_delete_uses_query_id_and_sends_no_body(self) -> None:
+        payload = self._dry_run(["delete", "--id", "GE0_13"])
+        self.assertEqual(payload["op_id"], "fw_delete_dhcpv6_server")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "DELETE")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcpv6?id=GE0_13")
+        self.assertIsNone(request["payload"])
+
+    def test_static_ip_verify_is_a_projection_over_the_dhcpv6_endpoint(self) -> None:
+        payload = self._dry_run(["static-ip-verify"])
+        self.assertEqual(payload["op_id"], "fw_verify_dhcpv6_static_ip")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "GET")
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcpv6")
+        self.assertIsNone(request["payload"])
+        self.assertEqual(payload["data"]["projection"]["source_op"], "fw_verify_dhcpv6_server")
+
+    def test_static_ip_delete_uses_the_address_as_a_url_encoded_query_id(self) -> None:
+        payload = self._dry_run(["static-ip-delete", "--id", "1111::100"])
+        self.assertEqual(payload["op_id"], "fw_delete_dhcpv6_static_ip")
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "DELETE")
+        # 冒号被转义；实测设备能正确解码 %3A 并**精确**删掉所寻址的那条绑定。
+        self.assertEqual(request["url"], f"{self.BASE}/api/v1/dhcpstaticip?id=1111%3A%3A100")
+        self.assertIsNone(request["payload"])
+
+    def test_config_rejects_a_repeated_scalar_flag(self) -> None:
+        # 字符串标量 flag 一律走 action="append" + _single_arg，重复即报错。
+        # **整数标量例外**（--prefix-len、--lease-default-seconds）与 v4 族逐字同款：
+        # 它们是纯标量，重复由 argparse 后者胜出。此处刻意不钉，以免两族的
+        # 同名 op 在重复 flag 语义上分岔。
+        for flag, value in (
+            ("--ifname", "GE0_14"),
+            ("--subnet", "2222::/96"),
+            ("--prefix", "8888::2222/96"),
+            ("--ifmode", "SERVER"),
+            ("--dns1", "1111::4133"),
+            ("--sip", "1111::4111"),
+            ("--domain", "example.internal"),
+        ):
+            with self.subTest(flag=flag):
+                error = self._dry_run_error([*self._config_argv(), *(flag, value) * 2])
+                self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+                self.assertEqual(error["details"], {"argument": flag})
+
+    def test_config_accepts_a_repeated_binding_flag(self) -> None:
+        # --binding 与标量 flag 相反：可重复，是唯一的多值入口。
+        payload = self._dry_run(
+            [*self._config_argv(), "--binding", "second,1111::101,0001000122334456"]
+        )
+        hosts = payload["data"]["request"]["payload"]["val"]["server"]["hosts"]
+        self.assertEqual([host["addr"] for host in hosts], ["1111::100", "1111::101"])
+
+    def test_config_requires_ifname_and_subnet(self) -> None:
+        # 四个必填 flag 各自缺失都必须报错，不得下发给设备。
+        base = [
+            "--ifname", "GE0_13",
+            "--subnet", "1111::/96",
+            "--prefix", "8888::1111/96",
+            "--prefix-len", "96",
+        ]
+        for index in (0, 2, 4, 6):
+            argv = base[:index] + base[index + 2 :]
+            with self.subTest(missing=base[index]):
+                error = self._dry_run_error(["config", *argv])
+                self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+
+    def test_delete_and_static_ip_delete_require_an_id(self) -> None:
+        for subcommand in ("delete", "static-ip-delete"):
+            with self.subTest(subcommand=subcommand):
+                with self.assertRaises(SystemExit) as context:
+                    cli_main(
+                        ["run", "--format", "json", "--base-url", self.BASE, "dhcpv6", subcommand]
+                    )
+                self.assertEqual(context.exception.code, 2)
+
+    def test_an_empty_id_fails_structurally_instead_of_raising(self) -> None:
+        """空 id 是设备「静默空操作答 200」的入口，拒绝必须是结构化的。
+
+        回归：这些 handler 曾在调用 _run_dhcpv6 **之前**做 _require_arg，于是
+        RunnerError 越过函数内的 except，变成裸 traceback + 非 JSON 输出。
+        """
+        for subcommand in ("delete", "static-ip-delete", "disable"):
+            with self.subTest(subcommand=subcommand):
+                error = self._dry_run_error([subcommand, "--id", ""])
+                self.assertEqual(error["error_code"], "RUNNER_VALIDATION_FAILED")
+                self.assertEqual(error["details"], {"argument": "--id"})
+
+    def test_disable_declares_only_an_id_argument(self) -> None:
+        """disable 只收 --id：正文由回读生成，任何配置字段都不该被调用方重述。
+
+        用**解析器**断言而非「未知 flag 报错」——cli.py:184 全局走
+        ``parse_known_args`` 并丢弃未知项（既有、全族一致的行为），故「多给一个 flag
+        是否报错」在此仓库不是可钉的性质。可钉的是 disable 自己一个配置 flag 都没有。
+        """
+        import argparse as _argparse
+
+        from atomic_ops.commands.run_dhcpv6 import _add_disable_args
+
+        parser = _argparse.ArgumentParser(prog="disable")
+        _add_disable_args(parser)
+        declared = {action.dest for action in parser._actions}
+        self.assertEqual(declared, {"id", "help"})
 
 
 if __name__ == "__main__":

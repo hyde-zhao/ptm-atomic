@@ -2,11 +2,13 @@
 
 本模块覆盖两个资源：
 
-- **IPv4 DHCP 服务**（``/api/v1/dhcp``）—— 新建（POST）、编辑（PUT）、删除
-  （DELETE ``?id=<网卡名>``）、查询（GET）。条目身份就是 ``ifname``：设备回读的
-  ``val`` 与写入的 body **逐字节一致**，没有单独的 id 字段，也没有额外的包装层。
-- **IPv4 静态地址分配**（``/api/v1/dhcpstaticip``）—— **纯删除资源**，只能经
-  ``POST /api/v1/batchv2`` 操作。
+- **IPv4 DHCP 服务**（``/api/v1/dhcp``）—— 新建（POST）、编辑（PUT）、禁用（PUT，
+  读改写）、删除（DELETE ``?id=<网卡名>``）、查询（GET）。条目身份就是 ``ifname``：
+  设备回读的 ``val`` 与写入的 body **逐字节一致**，没有单独的 id 字段，也没有额外的
+  包装层。
+- **IPv4 静态地址分配**（``/api/v1/dhcpstaticip``）—— **纯删除资源**，两个可用路径：
+  单条 ``DELETE ?id=<地址>``（直连，2026-10-16 实测可用）与
+  ``POST /api/v1/batchv2``（批量）。本模块的 ``fw_delete_batch_dhcp_static_ip`` 走后者。
 
 字段真相全部来自 2026-10-13 在 <DUT_IP> 的实机探测（P1~P8），规格文档
 ``dhcp,API规范文档.txt`` 在其中数处与设备实际行为不符，逐条见下。
@@ -38,6 +40,30 @@
     实现为**对 ``GET /api/v1/dhcp`` 的客户端投影**：同样的 URL，但只输出展平后的
     绑定行 ``[{ifname, name, addr, mac}]``。这与本仓「URL 按 op_id 分派、不按族」
     的既有约定一致，也是批量删除唯一能观察前后状态的视角。
+
+**``/api/v1/dhcpstaticip`` 另有直连单删路径（更正本仓此前的过窄断言）**：该端点接受
+    ``DELETE ?id=<地址>``，且 **v4/v6 共用**（2026-10-16 实测：删 ``8.1.1.20`` 与删
+    v6 的 ``1111::100`` 走同一路径）。此前交付文档里「只能经批量删除」的说法
+    （``adapters/ngfw/default.yaml`` 与 ``docs/API-ADAPTER-SPEC.md``）**过窄** ——
+    那轮只探了 GET／POST（405）与 batchv2，没探过直接单删。本次更正文档，本模块的
+    ``fw_delete_batch_dhcp_static_ip`` **保留不动**（批量形态仍是有效路径）。
+    该端点**极端宽松**：重复删 200、删不存在的地址 200、**完全不带 id 也 200** ——
+    设备级幂等，但也因此**永远无法报告是否真的删掉了什么**。故批量删除的响应
+    ``BatchResult`` 才是唯一能确认「删了哪几条」的证据。
+
+**``enable`` 有两层，且必须显式发出（2026-10-16 修复本模块的一处自身缺陷）**
+    ``val.enable`` 与 ``val.server.enable`` 都参与「是否服务」。本模块此前的
+    :func:`build_dhcp_server_val` **漏发顶层** ``enable``：设备会为这个从未发出的键
+    物化出 ``false``，且任何一次 ``/api/v1/dhcpstaticip`` 删除之后回读即变
+    ``enable: false`` —— 即本族的 op 自己造成了状态漂移。实测显式发出后漂移消失
+    （发 ``val.enable: true`` 再删静态地址，两层 enable 都不再翻转）。``--disable``
+    的语义也随之修正为「两层同时置 false」，与规格给出的禁用示例一致。
+
+**禁用 = 读改写（PUT 是全量替换）**
+    实测：只给 ``enable`` 的最小 body 被拒（``eDhcpdConfigBuildFail``）；PUT 是
+    **全量替换**而非字段合并。故 ``fw_disable_dhcp_server`` 实现为**读回现有条目 →
+    翻转两层 enable → 原样回写**（与 v6 族同构）。往返保真已实测：忽略 ``enable``
+    前后逐键 diff 为空，且可逆（再启用同样干净）。
 
 **查询无过滤能力**：``key``／``keywords``／``name``／``ifname``／``page``／
     ``size``／``search`` 七个候选参数实测**全部被静默忽略**（count 恒为全量），
@@ -76,6 +102,7 @@ from atomic_ops.runner.errors import (
     RunnerError,
     raise_if_device_session_rejected,
     raise_if_resource_not_found,
+    resource_not_found_error,
 )
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
@@ -94,6 +121,9 @@ BATCH_V2_PATH = "/api/v1/batchv2"
 DHCP_ENDPOINTS = {
     "fw_config_dhcp_server": ("POST", DHCP_RESOURCE),
     "fw_update_dhcp_server": ("PUT", DHCP_RESOURCE),
+    # 禁用走 PUT，但 body 在**执行期**由读回的现有条目生成（见 :func:`_execute_disable`），
+    # 不在 CLI 侧构造。
+    "fw_disable_dhcp_server": ("PUT", DHCP_RESOURCE),
     "fw_verify_dhcp_server": ("GET", DHCP_RESOURCE),
     "fw_delete_dhcp_server": ("DELETE", DHCP_RESOURCE),
     # 投影视图：同 URL，不同输出形状（见模块 docstring）。
@@ -108,8 +138,14 @@ QUERY_ID_OPS = {"fw_delete_dhcp_server"}
 NO_BODY_OPS = GET_OPS | QUERY_ID_OPS
 BATCH_OPS = {"fw_delete_batch_dhcp_static_ip"}
 CONFIG_OPS = {"fw_config_dhcp_server", "fw_update_dhcp_server"}
-# 需要校验「最终载荷含 lease」的 op（崩溃护栏）。
-LEASE_GUARDED_OPS = CONFIG_OPS
+# 读改写：先 GET 读回现有条目，再 PUT 原样回写（两层 enable 已翻转）。
+READ_MODIFY_WRITE_OPS = {"fw_disable_dhcp_server"}
+# 需要校验「最终载荷含 lease」的 op（崩溃护栏）。读改写的回写体同样过这道闸 ——
+# 读回若缺 lease，本地 fail-loud 而不是把设备打挂。
+LEASE_GUARDED_OPS = CONFIG_OPS | READ_MODIFY_WRITE_OPS
+# dry-run 里 ``request.payload`` 显示 ``null`` 的 op：GET／DELETE 本就不发 body，
+# 禁用则在执行期才生成 body，三者都不该让审阅者看到一个「其实不发」的载荷。
+PAYLOADLESS_DRY_RUN_OPS = NO_BODY_OPS | READ_MODIFY_WRITE_OPS
 
 DEFAULT_IFMODE = "SERVER"
 DEFAULT_LEASE_LIMITED = True
@@ -187,6 +223,12 @@ def build_dhcp_server_val(
     return {
         "ifname": ifname,
         "ifmode": ifmode,
+        # 顶层 enable 必须显式发出（2026-10-16 修复）：省略时设备会为这个**从未发出
+        # 的键**物化出 false，且任何一次 /api/v1/dhcpstaticip 删除之后回读即变
+        # ``enable: false`` —— 即本构造器此前漏发该键，会让自己的 op 造成状态漂移。
+        # 显式发出后实测该漂移消失（发 ``val.enable: true`` 再删静态地址，两层
+        # enable 都不再翻转）。两层 enable 都参与「是否服务」，故一律同值发出。
+        "enable": bool(enable),
         "server": {
             "enable": bool(enable),
             "name": server_name if server_name is not None else ifname,
@@ -228,6 +270,22 @@ def build_dhcp_delete_query(*, entry_id: str) -> dict[str, str]:
     """
     _validate_non_empty("id", entry_id)
     return {"id": entry_id}
+
+
+def build_disabled_dhcp_val(entry: dict[str, Any]) -> dict[str, Any]:
+    """把读回的现有条目改造成「两层 ``enable`` 均为 false」的 ``val``。
+
+    只动 ``enable`` 两个键，**其余逐键原样保留** —— 实测 PUT 是全量替换而非字段合并，
+    故任何省略都会丢配置：只给 ``enable`` 的最小 body 被设备直接拒绝
+    （``eDhcpdConfigBuildFail``）。逐键原样回写已实测无损（忽略 ``enable`` 前后 diff
+    为空，且可逆）。
+    """
+    val = dict(entry)
+    val["enable"] = False
+    server = val.get("server")
+    if isinstance(server, dict):
+        val["server"] = {**server, "enable": False}
+    return val
 
 
 def build_dhcp_static_ip_batch_delete_payload(*, entry_ids: list[str]) -> dict[str, Any]:
@@ -308,7 +366,10 @@ def build_dhcp_dry_run(
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
-    """构造 dry-run 信封。``fw_verify_dhcp_static_ip`` 额外声明其投影关系。"""
+    """构造 dry-run 信封。``fw_verify_dhcp_static_ip`` 额外声明其投影关系；
+    ``fw_disable_dhcp_server`` 声明读改写两步（两个请求都不发出，第二步的 body 要
+    执行期才由读回结果生成）。
+    """
     method, _path = _method_path(op_id)
     result: dict[str, Any] = {
         "op_id": op_id,
@@ -319,7 +380,7 @@ def build_dhcp_dry_run(
             "url": _request_url(base_url, op_id, entry_id=entry_id),
             "auth": {"name": auth_header, "value": "<session-ref>"},
             "content_type": "application/json",
-            "payload": None if op_id in NO_BODY_OPS else payload,
+            "payload": None if op_id in PAYLOADLESS_DRY_RUN_OPS else payload,
         },
         "session_file": str(session_file),
         "verify_tls": verify_tls,
@@ -335,6 +396,23 @@ def build_dhcp_dry_run(
                 "ifname/name/addr/mac rows."
             ),
         }
+    if op_id in READ_MODIFY_WRITE_OPS:
+        result["disable_steps"] = [
+            {
+                "method": "GET",
+                "path": DHCP_RESOURCE,
+                "note": f"read the live entry whose ifname is {entry_id or '<id>'}",
+            },
+            {
+                "method": "PUT",
+                "path": DHCP_RESOURCE,
+                "note": (
+                    "replay that entry verbatim as val with enable=false at both the val "
+                    "and server levels; PUT replaces the whole configuration, so no field "
+                    "may be restated or omitted by the caller"
+                ),
+            },
+        ]
     return result
 
 
@@ -349,11 +427,18 @@ def execute_dhcp(
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
+    headers = _session_headers(session_file, base_url, auth_header)
+    if op_id in READ_MODIFY_WRITE_OPS:
+        return _execute_disable(
+            op_id=op_id,
+            base_url=base_url,
+            headers=headers,
+            auth_header=auth_header,
+            entry_id=entry_id,
+            verify_tls=verify_tls,
+            timeout=timeout,
+        )
     method, path = _method_path(op_id)
-    session_payload = read_session_file(session_file, expect_base_url=base_url)
-    session_value = str(session_payload["session_value"])
-    header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
-    headers = {"Content-Type": "application/json", auth_header: header_value}
     status_code, response_payload, _text = request_json(
         method,
         _request_url(base_url, op_id, entry_id=entry_id),
@@ -362,22 +447,8 @@ def execute_dhcp(
         timeout=timeout,
         verify_tls=verify_tls,
     )
-    success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
-    if status_code not in success_status:
-        raise_if_device_session_rejected(status_code, response_payload)
-        # 目标资源不存在 == 目标状态已达成（幂等删除契约，权威门见 errors.py 登记表）
-        raise_if_resource_not_found(status_code, response_payload, op_id=op_id)
-        raise RunnerError(
-            "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
-            "DHCP device request did not return a success status.",
-            {
-                "op_id": op_id,
-                "status_code": status_code,
-                "err_code": response_payload.get("errCode"),
-                "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
-                "response_keys": sorted(response_payload.keys()),
-            },
-        )
+    if status_code not in (GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS):
+        _raise_request_failure(op_id, method, status_code, response_payload)
     result: dict[str, Any] = {
         "op_id": op_id,
         "status": "success",
@@ -394,6 +465,134 @@ def execute_dhcp(
         result["bindings"] = flatten_static_bindings(response_payload.get("vals"))
         result["binding_count"] = len(result["bindings"])
     return result
+
+
+def _execute_disable(
+    *,
+    op_id: str,
+    base_url: str,
+    headers: dict[str, str],
+    auth_header: str,
+    entry_id: str,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    """读改写：GET 读回条目 → 翻转两层 enable → PUT 原样回写（见模块 docstring）。
+
+    条目不存在时按「目标状态已达成」处理（该网卡本就没有在服务的 DHCP 配置），经
+    :func:`resource_not_found_error` 抛带幂等键的结构化错误 —— 注意此处**没有**设备
+    错误可引用（读回是成功的空列表），故 ``err_code``／``err_msg`` 为 ``None``，判据
+    来源写进 ``extra_details``。
+    """
+    _validate_non_empty("id", entry_id)
+    get_status, get_payload, _text = request_json(
+        "GET",
+        _request_url(base_url, "fw_verify_dhcp_server", entry_id=""),
+        headers=headers,
+        json_payload=None,
+        timeout=timeout,
+        verify_tls=verify_tls,
+    )
+    if get_status not in GET_SUCCESS_STATUS:
+        _raise_request_failure("fw_verify_dhcp_server", "GET", get_status, get_payload)
+    entry = _find_entry(get_payload.get("vals"), entry_id)
+    if entry is None:
+        raise resource_not_found_error(
+            get_status,
+            get_payload,
+            op_id=op_id,
+            extra_details={
+                "id": entry_id,
+                "judgement": (
+                    "no DHCP entry is bound to this interface name, so it is not serving; "
+                    "the goal state of a disable is already reached"
+                ),
+            },
+        )
+    val = build_disabled_dhcp_val(entry)
+    # 回写的 body 也过崩溃护栏：读回若缺 lease，本地 fail-loud 而不是把设备打挂
+    # （读回正常时此检查恒过）。
+    validate_dhcp_payload({"val": val}, op_id="fw_update_dhcp_server")
+    if val.get("ifname") and str(val["ifname"]) != entry_id:
+        # 条目身份就是 ifname，回写时以调用方给的 id 为准会把配置挪到别的网卡上。
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "The live entry's ifname does not match the requested id.",
+            {"field": "id", "requested": entry_id, "live_ifname": val.get("ifname")},
+        )
+    put_status, put_payload, _text = request_json(
+        "PUT",
+        _request_url(base_url, op_id, entry_id=""),
+        headers=headers,
+        json_payload={"id": entry_id, "val": val},
+        timeout=timeout,
+        verify_tls=verify_tls,
+    )
+    if put_status not in SUCCESS_STATUS:
+        _raise_request_failure(op_id, "PUT", put_status, put_payload)
+    return {
+        "op_id": op_id,
+        "status": "success",
+        "status_code": put_status,
+        "request": {
+            "method": "PUT",
+            "path": DHCP_RESOURCE,
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+        },
+        "disable_steps": [
+            {
+                "step": "read",
+                "method": "GET",
+                "status_code": get_status,
+                "count": _count_of(get_payload),
+            },
+            {"step": "write", "method": "PUT", "status_code": put_status},
+        ],
+        "readback": entry,
+        "response": put_payload,
+    }
+
+
+def _session_headers(session_file: Path, base_url: str, auth_header: str) -> dict[str, str]:
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
+    session_value = str(session_payload["session_value"])
+    header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
+    return {"Content-Type": "application/json", auth_header: header_value}
+
+
+def _raise_request_failure(
+    op_id: str, method: str, status_code: int, response_payload: Any
+) -> None:
+    """统一的失败分支（单请求路径与读改写路径共用，判定顺序与改动前逐字一致）。"""
+    raise_if_device_session_rejected(status_code, response_payload)
+    # 目标资源不存在 == 目标状态已达成（幂等删除契约，权威门见 errors.py 登记表）
+    raise_if_resource_not_found(status_code, response_payload, op_id=op_id)
+    raise RunnerError(
+        "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
+        "DHCP device request did not return a success status.",
+        {
+            "op_id": op_id,
+            "status_code": status_code,
+            "err_code": response_payload.get("errCode"),
+            "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
+            "response_keys": sorted(response_payload.keys()),
+        },
+    )
+
+
+def _find_entry(entries: Any, entry_id: str) -> dict[str, Any] | None:
+    """按 ``ifname`` 定位单个条目（条目身份就是网卡名，没有单独的数字 id）。"""
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if isinstance(entry, dict) and str(entry.get("ifname") or "") == entry_id:
+            return entry
+    return None
+
+
+def _count_of(payload: Any) -> int:
+    entries = payload.get("vals") if isinstance(payload, dict) else None
+    return len(entries) if isinstance(entries, list) else 0
 
 
 def _request_url(base_url: str, op_id: str, *, entry_id: str) -> str:

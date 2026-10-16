@@ -1,0 +1,131 @@
+schema_version: "1.1"
+op_id: fw_config_dhcpv6_server
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_dhcpv6_server
+description: Create a DHCPv6 server bound to an interface through /api/v1/dhcpv6.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dhcpv6 for this operation.
+  params:
+    type: json
+    required: true
+    description: DHCPv6 server configuration with the bound interface name, mode, both enable flags, and a server object carrying a single subnet, a prefix with its length, lease, DNS servers and optional static host bindings addressed by DUID. The lease and subnet keys are mandatory in practice; see postconditions.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: dhcpv6
+  params:
+    ifname: GE0_13
+    ifmode: SERVER
+    enable: true
+    server:
+      enable: true
+      name: GE0_13
+      subnet: 1111::/96
+      prefix: 8888::1111/96
+      prefix_len: 96
+      lease:
+        limited: true
+        default_seconds: 86400
+      dns1: 1111::4133
+      dns2: 1123::4556
+      hosts:
+        - name: host1
+          addr: 1111::100
+          duid: "00:03:00:01:00:00:00:00:01:01"
+      sip: 1111::4111
+      sntp: 1666::4666
+      domain: example.internal
+  idempotency_key: "<idempotency-key>"
+returns:
+  status: success
+  data:
+    config_result:
+      status: succeeded
+      config_domain: dhcpv6
+      applied_ref: "<dhcpv6-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+side_effect: state_mutation
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_dhcpv6_server
+  snapshot_required: false
+  required_inputs:
+    - ifname
+  id_source: args
+  id_field: ifname
+  notes: The DHCPv6 server is identified by its bound interface name; the inverse operation deletes the configuration for that interface.
+pre_snapshot:
+  op_id: fw_verify_dhcpv6_server
+  capture_fields:
+    - ifname
+    - existence
+post_verify:
+  op_id: fw_verify_dhcpv6_server
+  expected_state: present
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: A DHCPv6 server hands out addresses and options to clients on the bound interface segment and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk configuration contract is used.
+  - Unlike the IPv4 sibling family, server.subnet does NOT have to sit on the interface's own IPv6 network; live probing accepted 9999::/96 on an interface whose own network differs. The IPv4 rule eDhcpdConfigIpPoolLimit has no IPv6 counterpart.
+  - server.subnet and server.prefix must differ, otherwise the device answers eDhcpdNetworkDuplicateWithDetail ("network address conflict"). server.prefix MAY equal the interface's own network, and server.prefix is normalised on readback (8888::1111/96 reads back as 8888::/96).
+  - server.prefix_len must fall in the inclusive range from the prefix length to that length plus 16, otherwise the device answers eDhcpdPrefixRangeErrorWithDetail.
+  - Every static host binding address must fall inside server.subnet, otherwise the device answers eDhcpdConfigHostIpWithinSubnetWithDetail ("reserved IPv6 address is not inside the subnet").
+  - ifmode accepts SERVER only; CLIENT, RELAY and OFF were all rejected with 400 eRequestParam in live probing.
+  - Each static binding needs a colon-separated hex duid such as 00:03:00:01:00:00:00:00:01:01; the unseparated form answers eDhcpdConfigHostDuidFormatErrorWithDetail, meaning the reserved address DUID has a format error.
+postconditions:
+  - Configuration result and diagnostic references are available to the caller.
+  - The device's management service stays up only because val.server.lease and val.server.subnet are both present in the request body. Omitting lease crashes the management service (nginx 502, roughly 90 seconds of outage) - a conclusion inherited from live isolation on the IPv4 sibling family rather than repeated locally. Omitting subnet was proven to crash it locally on 2026-10-16, also nginx 502, roughly 3 minutes of outage. The interface specification marks lease optional; the device does not tolerate its absence.
+  - The interface command layer, not the device, owns the rejection of a payload missing either key.
+  - A failed request answers a nested error object carrying code and message, rather than the flat errCode shape used by every other endpoint in this repository.
+tags:
+  - firewall
+  - capacity
+  - dhcpv6
+  - configuration
+aliases:
+  - dhcpv6-server
+  - dhcpv6-service
+  - dhcpv6-scope
+since_version: "1.15.0"

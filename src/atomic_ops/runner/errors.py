@@ -216,6 +216,22 @@ IDEMPOTENT_ERROR_TYPES: dict[str, frozenset[str]] = {
     # 故入 RESOURCE_NOT_FOUND_ERR_CODES 明确集而非 generic 集。
     # 注意：本族删除**不做**引用保护检查，不存在 eIntfisRefed 那类反例。
     "fw_delete_dhcp_server": frozenset({"RESOURCE_NOT_FOUND"}),
+    # DHCPv6（2026-10-16 实测，<DUT_IP>）：五例对照证明 400 eRequestParam
+    # 「http请求参数错误」在本 op 上**唯一**对应「该网卡没有可删的 DHCPv6 配置」
+    # （①重复删 ②从不存在的名字 ③空串同码同文案；不带 id 是 200 静默空操作，
+    # 已由 runner 在本地拦下；方法错误走 405）。与 v4 的 eDhcpdConfigGetFail 不同，
+    # 这是**通用**码，不能入 RESOURCE_NOT_FOUND_ERR_CODES（会波及全部已登记 op），
+    # 也不能加进全局 marker（真·畸形请求会被误判成「已达成」→ 漏报真残留）。
+    # 故用 op 专属组合表 RESOURCE_NOT_FOUND_OP_CODE_MARKERS，见该处。
+    "fw_delete_dhcpv6_server": frozenset({"RESOURCE_NOT_FOUND"}),
+    # DHCP 禁用（2026-10-16）：与 v6 同构 —— 条目不存在 ⇒ 该网卡本就没有在服务的
+    # DHCP 配置 ⇒ 禁用的目标状态已达成。两个禁用 op 的判据都由 runner 在**本地**
+    # 给出（读回是成功的空列表，无设备错误可引用），故都不走 is_resource_not_found。
+    "fw_disable_dhcp_server": frozenset({"RESOURCE_NOT_FOUND"}),
+    # DHCPv6 禁用（2026-10-16）：条目不存在 ⇒ 该网卡本就没有在服务的 DHCPv6 配置
+    # ⇒ 禁用的目标状态已达成。与删除族同构，故入表；判据由 runner 在**本地**给出
+    # （读回是成功的空列表，无设备错误可引用），不走 is_resource_not_found。
+    "fw_disable_dhcpv6_server": frozenset({"RESOURCE_NOT_FOUND"}),
 }
 
 _IDEMPOTENT_DECL_FIELD = "idempotent"
@@ -298,8 +314,9 @@ def validate_idempotent_registry(
     ``declarations`` 为可选的**声明面注入**（契约矩阵 / 单测用，形如
     ``{op_id: atom_yaml_dict}``）；为 ``None`` 时对登记表中的每个 op 走本地 cache 只读。
     **反向检查（漏登记）只在声明面被显式注入时可用** —— 无注入时只覆盖登记表内 op
-    （避免在守卫里全量枚举 cache）。本函数是**显式调用**（测试 / 运维），
-    不在 runner 热路径上执行。
+    （避免在守卫里全量枚举 cache）。另检查 ``RESOURCE_NOT_FOUND_OP_CODE_MARKERS`` 的
+    每个键都在登记表内（否则该组合永远走不到，属静默失效）。本函数是**显式调用**
+    （测试 / 运维），不在 runner 热路径上执行。
     """
     findings: list[str] = []
 
@@ -329,6 +346,12 @@ def validate_idempotent_registry(
                 continue
             if _IDEMPOTENT_SUCCESS_ERROR_TYPE in _declared_error_types(candidate):
                 findings.append(f"missing-registration:{op_id}")
+
+    # op 专属组合表的键必须是幂等表的成员：否则该组合永远走不到（raise_if_resource_
+    # not_found 先过登记表门），属于静默失效的死配置 —— 显式报出，不静默通过。
+    for op_id in sorted(RESOURCE_NOT_FOUND_OP_CODE_MARKERS):
+        if op_id not in IDEMPOTENT_ERROR_TYPES:
+            findings.append(f"marker-op-not-registered:{op_id}")
 
     return findings
 
@@ -371,14 +394,40 @@ RESOURCE_NOT_FOUND_ERR_CODES = frozenset({
 _RESOURCE_NOT_FOUND_GENERIC_ERR_CODES = frozenset({"eRequestParam"})
 RESOURCE_NOT_FOUND_MESSAGE_MARKERS = ("Couldn't found", "不存在")
 
+# ── op 专属的「通用码 + 文案」组合（2026-10-16 新增，DHCPv6 删除族首用）──────
+# 背景：某设备族对「目标不存在」答的是**通用**码，文案也不含全局 marker
+# （``eRequestParam`` +「http请求参数错误」）。两条既有出路都不成立：
+#   · 入 RESOURCE_NOT_FOUND_ERR_CODES —— 那是**码级**明确集，会把该码在**所有**
+#     已登记 op 上都判成「不存在」，波及面过大；
+#   · 加进 RESOURCE_NOT_FOUND_MESSAGE_MARKERS —— 那是**全局**文案集，同样会放宽
+#     其它 op：真·畸形请求会被误判成「已达成」→ **漏报真残留**（本模块最不可
+#     接受的方向，同 _rollback_idempotent_hit 的保守侧）。
+# 故把作用域收敛到单个 op：键必须是 IDEMPOTENT_ERROR_TYPES 的成员（由
+# validate_idempotent_registry 强制，见 marker-op-not-registered），值是该 op 上
+# **实测唯一**对应「目标不存在」的 (通用码, 文案子串元组)。
+# 空 id／畸形方法等「请求本身有问题」的情形必须在此表之外被排除，否则判定失效 ——
+# DHCPv6 删除族靠 runner 侧的本地空 id 拦截（不带 id 的删除答 200 却什么都不删）
+# 与 405 方法错误来保证这一点，见 runner/dhcpv6.py 模块 docstring。
+RESOURCE_NOT_FOUND_OP_CODE_MARKERS: dict[str, tuple[str, tuple[str, ...]]] = {
+    # 2026-10-16 在 <DUT_IP> 实测五例对照，见 IDEMPOTENT_ERROR_TYPES 处注释。
+    "fw_delete_dhcpv6_server": ("eRequestParam", ("http请求参数错误",)),
+}
 
-def is_resource_not_found(status_code: int, response_payload: Any = None) -> bool:
+
+def is_resource_not_found(
+    status_code: int, response_payload: Any = None, *, op_id: str | None = None
+) -> bool:
     """判定设备响应是否为「目标资源不存在」。
 
     判据（任一成立）：
     - errCode 命中明确集合（``RESOURCE_NOT_FOUND_ERR_CODES``）；
     - errCode 为通用参数码（``_RESOURCE_NOT_FOUND_GENERIC_ERR_CODES``）且
-      errMsg/errMessage/message 命中「不存在」文案特征。
+      errMsg/errMessage/message 命中「不存在」文案特征；
+    - ``op_id`` 有专属组合登记（``RESOURCE_NOT_FOUND_OP_CODE_MARKERS``）且
+      errCode 与文案**同时**命中 —— 作用域限定到该 op，不影响其它调用方。
+
+    ``op_id`` 缺省为 ``None``：既有调用方（含只传位置参数的）行为**逐字不变**，
+    专属组合永不参与判定。
     """
     if not isinstance(response_payload, dict):
         return False
@@ -392,7 +441,11 @@ def is_resource_not_found(status_code: int, response_payload: Any = None) -> boo
             str(response_payload.get(key) or "")
             for key in ("errMsg", "errMessage", "message")
         )
-        return any(marker in blob for marker in RESOURCE_NOT_FOUND_MESSAGE_MARKERS)
+        if any(marker in blob for marker in RESOURCE_NOT_FOUND_MESSAGE_MARKERS):
+            return True
+        scoped = RESOURCE_NOT_FOUND_OP_CODE_MARKERS.get(op_id or "")
+        if scoped and err_code == scoped[0]:
+            return any(marker in blob for marker in scoped[1])
     return False
 
 
@@ -462,6 +515,9 @@ def raise_if_resource_not_found(
     ``raise_if_device_session_rejected(...)`` 之后、既有 ``raise RunnerError(...)``
     之前），**无需按 op_id 分支** —— ``IDEMPOTENT_ERROR_TYPES`` 登记表是唯一权威门，
     未登记的 op（创建 / 查询 / 未登记更新、以及「被引用」类拒绝）天然免疫。
+    ``op_id`` 另透传给 :func:`is_resource_not_found`，使
+    ``RESOURCE_NOT_FOUND_OP_CODE_MARKERS`` 里登记的 op 专属组合生效（作用域仍由
+    登记表门控，两张表缺一不可）。
     误判方向（把真失败当幂等成功）会漏报真残留，最不可接受（同
     ``_rollback_idempotent_hit`` 的保守侧），故登记表只收「目标不存在 == 目标状态
     已达成」语义的 op。未命中时流程照旧走原有 error_type，既有映射与退出码均不变。
@@ -471,7 +527,7 @@ def raise_if_resource_not_found(
     declared = IDEMPOTENT_ERROR_TYPES.get(op_id)
     if not declared or _IDEMPOTENT_SUCCESS_ERROR_TYPE not in declared:
         return
-    if is_resource_not_found(status_code, response_payload):
+    if is_resource_not_found(status_code, response_payload, op_id=op_id):
         raise resource_not_found_error(
             status_code,
             response_payload,

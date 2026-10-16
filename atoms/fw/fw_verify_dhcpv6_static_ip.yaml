@@ -1,0 +1,66 @@
+schema_version: "1.1"
+op_id: fw_verify_dhcpv6_static_ip
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_dhcpv6_static_ip
+description: List DHCPv6 static address bindings by projecting each server's server.hosts through /api/v1/dhcpv6.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be dhcpv6 for this operation.
+  params:
+    type: json
+    required: true
+    description: Static address binding query envelope; GET sends no JSON body and no query parameters, and the device's DHCPv6 entry list is projected down to the binding rows.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: dhcpv6
+  params: {}
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<dhcpv6-static-ip-state-ref>"
+    bindings_ref: "<dhcpv6-static-ip-bindings-ref>"
+    binding_count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: dhcpv6_static_ip_projection_returns_rows
+      input_ref: "<dhcpv6-static-ip-query-result-ref>"
+      expected_result: the runner reads /api/v1/dhcpv6 and emits one row per static binding carrying ifname, name, addr and duid; each row's addr is the value fw_delete_dhcpv6_static_ip takes as its id.
+  summary_ref: "<dhcpv6-static-ip-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Query result and diagnostic references are available to the caller.
+  - This is the only view that can confirm whether a static delete actually removed anything. The delete endpoint itself answers 200 unconditionally, so it cannot report its own effect.
+  - Any failed check is reported for manual handling.
+tags:
+  - firewall
+  - capacity
+  - dhcpv6
+  - verification
+aliases:
+  - dhcpv6-static-ip
+  - dhcpv6-binding
+  - static-binding-v6
+since_version: "1.15.0"
