@@ -52,6 +52,9 @@ TREX_OPS: dict[str, tuple[str, str]] = {
         "tg_delete_traffic_template",
         "tg_release_ports",
         "tg_query_port_status",
+        # 2026-09-12：抓包（start/stop capture）
+        "tg_start_capture",
+        "tg_stop_capture",
     )
 }
 # ownership 走独立 GET 端点，非 /api/v1/ops/{op_id} 调度
@@ -75,6 +78,8 @@ _USER_ID_FORWARD_OPS = {
     "tg_stop_traffic_stream",
     "tg_delete_traffic_template",
     "tg_query_port_status",
+    "tg_start_capture",
+    "tg_stop_capture",
 }
 # Stateful (ASTF) ops also forward user_id
 _USER_ID_FORWARD_OPS.update(TREX_STATEFUL_OPS)
@@ -243,6 +248,29 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
         ports = params.get("ports")
         if ports:
             payload["ports"] = ports
+    elif op_id in {"tg_start_capture", "tg_stop_capture"}:
+        ports = params.get("ports")
+        if not isinstance(ports, list) or not ports:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ports must be a non-empty list of logical port names.",
+                {"field": "ports"},
+            )
+        payload = {
+            "ports": ports,
+            "rxport": params.get("rxport"),
+        }
+        for key in ("txport", "capture_port"):
+            value = params.get(key)
+            if value is not None:
+                payload[key] = value
+        if op_id == "tg_stop_capture":
+            for key in ("check_vlan", "check_no_vlan", "check_fragment", "check_l4_protocol",
+                        "check_ip_version", "check_min_packets", "check_arp_opcode",
+                        "check_eth_dst", "check_arp_sender_ips"):
+                value = params.get(key)
+                if value is not None:
+                    payload[key] = value
     else:
         raise RunnerError(
             "RUNNER_UNSUPPORTED_OP",
@@ -438,6 +466,83 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
                 "duration must be -1 (continuous) or a positive integer.",
                 {"field": "duration"},
             )
+    elif op_id in {"tg_start_capture", "tg_stop_capture"}:
+        ports = payload.get("ports")
+        if not isinstance(ports, list) or not ports:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ports must be a non-empty list of logical port names.",
+                {"field": "ports"},
+            )
+        _require_payload_str(payload, "rxport")
+        if payload.get("rxport") not in ports:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "rxport must be included in ports.",
+                {"field": "rxport", "rxport": payload.get("rxport"), "ports": ports},
+            )
+        txport = payload.get("txport")
+        capture_port = payload.get("capture_port")
+        if capture_port is not None and capture_port not in ("rx", "tx"):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "capture_port must be 'rx' or 'tx'.",
+                {"field": "capture_port"},
+            )
+        if capture_port == "tx" and not txport:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "txport is required when capture_port=tx.",
+                {"field": "txport"},
+            )
+        if txport is not None and txport not in ports:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "txport must be included in ports.",
+                {"field": "txport", "txport": txport, "ports": ports},
+            )
+        protocol = payload.get("check_l4_protocol")
+        if protocol is not None and protocol not in ("tcp", "udp"):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "check_l4_protocol must be tcp or udp.",
+                {"field": "check_l4_protocol"},
+            )
+        ip_version = payload.get("check_ip_version")
+        if ip_version is not None and ip_version not in (4, 6):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "check_ip_version must be 4 or 6.",
+                {"field": "check_ip_version"},
+            )
+        arp_opcode = payload.get("check_arp_opcode")
+        if arp_opcode is not None and arp_opcode not in (1, 2):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "check_arp_opcode must be 1 (request) or 2 (reply).",
+                {"field": "check_arp_opcode"},
+            )
+        if payload.get("check_vlan") is not None and payload.get("check_no_vlan") is True:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "check_vlan and check_no_vlan are mutually exclusive.",
+                {"field": "check_vlan"},
+            )
+        sender_ips = payload.get("check_arp_sender_ips")
+        if sender_ips is not None:
+            if not isinstance(sender_ips, list) or not [x for x in sender_ips if str(x).strip()]:
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "check_arp_sender_ips must be a non-empty list of IP addresses.",
+                    {"field": "check_arp_sender_ips"},
+                )
+        eth_dst = payload.get("check_eth_dst")
+        if eth_dst is not None and not str(eth_dst).strip():
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "check_eth_dst must be a non-empty MAC address.",
+                {"field": "check_eth_dst"},
+            )
     elif op_id in {"tg_verify_stateful_metrics", "tg_stop_stateful_stream", "tg_delete_stateful_template"}:
         pass  # no required fields beyond optional user_id
     elif op_id == "tg_verify_ownership":
@@ -545,12 +650,14 @@ def execute_trex(
         )
     envelope_status = str(response_payload.get("status") or "")
     if envelope_status == "success":
+        data = response_payload.get("data") or {}
+        _verify_capture_checks_echoed(op_id, payload, data)
         return {
             "op_id": op_id,
             "status": "success",
             "status_code": status_code,
             "request": {"method": method, "path": path, "auth": {"name": "(none)"}},
-            "response": response_payload.get("data") or {},
+            "response": data,
         }
     error_type = str(response_payload.get("error_type") or "INTERNAL_ERROR")
     error_code, retryable = ERROR_TYPE_MAP.get(error_type, ("RUNNER_RESPONSE_INVALID", False))
@@ -569,6 +676,43 @@ def execute_trex(
         details,
         retryable=retryable,
     )
+
+
+def _verify_capture_checks_echoed(op_id: str, payload: dict[str, Any], data: dict[str, Any]) -> None:
+    """防「静默空过」：请求了 check_* 但响应 checks[] 里没有对应项，判为部署不匹配。
+
+    背景（2026-09-12 真机实测）：服务端 pydantic 对**未知字段默认静默忽略**，所以把
+    新断言（如 check_arp_opcode）发给**尚未部署该断言**的旧版 trex-api 时，会被悄悄丢弃 ——
+    没做任何判定 -> checks=[] -> mismatches=[] -> passed=true -> 上层的用例**假绿通过**。
+
+    这里按 `check_<name>` -> 响应 checks[].name 回读核对；缺哪项就报错并提示部署。
+    仅对 tg_stop_capture 生效（其余 op 无 checks 结构）。
+    """
+    if op_id != "tg_stop_capture":
+        return
+    requested = {key[len("check_"):] for key in payload if key.startswith("check_")}
+    if not requested:
+        return  # 纯观测调用，无断言
+    checks = data.get("checks")
+    echoed = {
+        str(item.get("name"))
+        for item in (checks or [])
+        if isinstance(item, dict)
+    }
+    missing = sorted(requested - echoed)
+    if missing:
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "trex-api did not evaluate the requested capture check(s); "
+            "the deployed service likely predates them.",
+            {
+                "op_id": op_id,
+                "missing_checks": missing,
+                "echoed_checks": sorted(echoed),
+                "hint": "在 TG 主机升级/重启 trex-api 后重试（旧版会静默忽略未知 check 字段，"
+                        "导致断言空过、用例假绿）",
+            },
+        )
 
 
 def _method_path(op_id: str) -> tuple[str, str]:

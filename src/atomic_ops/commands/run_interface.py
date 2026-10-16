@@ -90,6 +90,23 @@ def _add_interface_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--link-type", type=int, help="Interface linkType field. BVI bridge member ports require 1 (access); the device defaults to 2 (trunk) when omitted, which is rejected as a BVI member.")
     parser.add_argument("--pvid", type=int, default=1, help="Switch/Pair/Monitor mode PVID.")
     parser.add_argument("--allow-pass", help="Switch/Pair/Monitor mode allowPass field.")
+    # 免费 ARP 定时发送（接口级，val.enable_garp_timed_send / val.garp_send_interval）。
+    # 设备契约与设计取舍见 runner/interface.py::_apply_garp。
+    garp_timed_send_group = parser.add_mutually_exclusive_group()
+    garp_timed_send_group.add_argument(
+        "--enable-garp-timed-send", dest="garp_timed_send", action="store_true", default=None,
+        help="Enable periodic gratuitous-ARP sending (val.enable_garp_timed_send).",
+    )
+    garp_timed_send_group.add_argument(
+        "--disable-garp-timed-send", dest="garp_timed_send", action="store_false",
+        help="Disable periodic gratuitous-ARP sending.",
+    )
+    parser.add_argument(
+        "--garp-send-interval",
+        help="Gratuitous-ARP send interval in seconds (device range 1-3600). "
+             "Implies --enable-garp-timed-send unless explicitly disabled. "
+             "Out-of-range / non-numeric values are passed through for the DUT to reject.",
+    )
     parser.add_argument("--tunnel-type", choices=("4over6", "6over4", "gre"), help="IP tunnel variant (tunnel kind only). 4over6 maps to type 15, 6over4 to type 16, gre to type 11.")
     parser.add_argument("--src-addr", help="Tunnel source endpoint address (tunnel kind only).")
     parser.add_argument("--dst-addr", help="Tunnel destination endpoint address (tunnel kind only).")
@@ -379,6 +396,8 @@ def _run_interface(args: argparse.Namespace, op_id: str) -> int:
                     ip6_racfg_suppress=getattr(args, "ip6_racfg_suppress"),
                     ipv4_gateway=getattr(args, "ipv4_gateway", None),
                     ipv4_reverse_path=bool(getattr(args, "ipv4_reverse_path", False)),
+                    garp_timed_send=getattr(args, "garp_timed_send", None),
+                    garp_send_interval=getattr(args, "garp_send_interval", None),
                 )
             payload = validate_interface_payload(payload, op_id=op_id)
 

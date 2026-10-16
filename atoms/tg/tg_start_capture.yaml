@@ -1,0 +1,79 @@
+schema_version: "1.1"
+op_id: tg_start_capture
+device_type: tg
+description: Start packet capture on a TRex port (rx by default, optionally tx); pair with tg_stop_capture.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_start_capture
+parameters:
+  user_id:
+    type: string
+    required: false
+    description: >-
+      TRex multi-user owner id. Defaults to "default" (legacy force mode).
+      Set to dev<ip-suffix>-<seq> (e.g. dev171-1) and pair with tg_acquire_ports
+      so capture reuses the acquired client without re-acquiring.
+  ports:
+    type: list
+    required: true
+    description: TRex port IDs occupied by this traffic instance.
+  rxport:
+    type: string
+    required: true
+    description: TRex port ID that receives traffic; the default capture port.
+  txport:
+    type: string
+    required: false
+    description: TRex port ID that transmits traffic. Required when capture_port=tx.
+  capture_port:
+    type: string
+    required: false
+    description: >-
+      Which port to capture: "rx" (default) or "tx". Must match between
+      tg_start_capture and tg_stop_capture (used to locate the capture session).
+inputs:
+  user_id: default
+  ports: ["2_3", "2_4"]
+  rxport: "2_4"
+  capture_port: rx
+side_effect: observation
+returns:
+  status: success
+  data:
+    user_id: default
+    capture_port: "2_4"
+    capture_id: 4
+    status: started
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - INVALID_PARAM
+  - INTERNAL_ERROR
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+verification:
+  kind: capacity_domain
+  rules:
+    - name: capture_session_started
+      input_ref: "<capture-start-ref>"
+      expected_result: trex-api returns a capture session id for the requested port and direction.
+  summary_ref: "<capture-start-summary-ref>"
+preconditions:
+  - The TRex ports are acquired (tg_acquire_ports) or force mode is acceptable.
+  - The requested rxport belongs to ports.
+postconditions:
+  - A capture session is open on the TRex side until tg_stop_capture (or port release) closes it.
+tags:
+  - tg
+  - trex
+  - capture
+  - packet
+  - arp
+  - observation
+aliases:
+  - start-capture
+  - tg-capture-start
+since_version: "1.10.0"

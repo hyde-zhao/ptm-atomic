@@ -78,6 +78,20 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                             add_args=_add_verify_loss_args,
                         ),
                         CommandSpec(
+                            name="start-capture",
+                            help="Start packet capture on a TRex port.",
+                            description="Start rx (default) or tx packet capture on a TRex port; pair with stop-capture.",
+                            handler=_run_start_capture,
+                            add_args=_add_start_capture_args,
+                        ),
+                        CommandSpec(
+                            name="stop-capture",
+                            help="Stop packet capture and return parsed packets.",
+                            description="Stop capture, return parsed packets (incl. ARP fields) and evaluate check_* assertions.",
+                            handler=_run_stop_capture,
+                            add_args=_add_stop_capture_args,
+                        ),
+                        CommandSpec(
                             name="release-ports",
                             help="Release TRex ports previously acquired by a user.",
                             description="Release TRex ports held by a user_id (all or a subset).",
@@ -300,6 +314,62 @@ def _add_verify_loss_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_capture_common_args(parser: argparse.ArgumentParser) -> None:
+    """start/stop capture 共用的定位参数（与已有 start/stop stream 同形）。"""
+    _add_user_id_arg(parser)
+    parser.add_argument("--ports", required=True, help="Comma-separated TRex port IDs occupied by this operation.")
+    parser.add_argument("--rxport", required=True, help="TRex port ID that receives traffic (default capture port).")
+    parser.add_argument("--txport", help="TRex port ID that transmits traffic (required when capturing tx).")
+    parser.add_argument(
+        "--capture-port",
+        choices=("rx", "tx"),
+        help="Which port to capture: rx (default) or tx. Must match between start and stop.",
+    )
+
+
+def _add_start_capture_args(parser: argparse.ArgumentParser) -> None:
+    _add_capture_common_args(parser)
+    _add_payload_args(parser)
+
+
+def _add_stop_capture_args(parser: argparse.ArgumentParser) -> None:
+    _add_capture_common_args(parser)
+    # check_* 传哪个验哪个；不传的项不参与判定（观测模式）。
+    # ⚠️ check 不通过时服务端返回失败 envelope（STATE_MISMATCH），断言才能驱动用例 PASS/FAIL。
+    parser.add_argument("--check-vlan", type=int, help="Every captured packet must carry this VLAN tag.")
+    no_vlan = parser.add_mutually_exclusive_group()
+    no_vlan.add_argument("--check-no-vlan", dest="check_no_vlan", action="store_true", default=None,
+                         help="Every captured packet must be untagged.")
+    no_vlan.add_argument("--check-vlan-present", dest="check_no_vlan", action="store_false",
+                         help="Captured packets must carry a VLAN tag (inverse of --check-no-vlan).")
+    fragment = parser.add_mutually_exclusive_group()
+    fragment.add_argument("--check-fragment", dest="check_fragment", action="store_true", default=None,
+                          help="Fragmented packets must be present.")
+    fragment.add_argument("--check-no-fragment", dest="check_fragment", action="store_false",
+                          help="Fragmented packets must be absent.")
+    parser.add_argument("--check-l4-protocol", choices=("tcp", "udp"), help="L4 protocol must be tcp or udp.")
+    parser.add_argument("--check-ip-version", type=int, choices=(4, 6), help="IP version must be 4 or 6.")
+    parser.add_argument("--check-min-packets", type=int, help="At least this many packets must be captured.")
+    parser.add_argument("--check-arp-opcode", type=int, choices=(1, 2),
+                        help="Every ARP packet must have this opcode (1=request, 2=reply) and at least one must exist.")
+    parser.add_argument("--check-arp-sender-ips",
+                        help="Comma-separated ARP sender IPs; each must appear at least once in the capture "
+                             "(asserts 'all interface addresses are sent' / Bug-226456 missing-IP regression).")
+    parser.add_argument("--check-eth-dst",
+                        help="At least one captured packet must have this destination MAC (case-insensitive). "
+                             "Used for static-ARP DMAC-rewrite assertions; requires the capture port to be "
+                             "acquired (promiscuous) or the frame to be broadcast.")
+    _add_payload_args(parser)
+
+
+def _run_start_capture(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_start_capture")
+
+
+def _run_stop_capture(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_stop_capture")
+
+
 def _add_verify_ownership_args(parser: argparse.ArgumentParser) -> None:
     _add_payload_args(parser)
 
@@ -491,6 +561,28 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
         return params
     if op_id == "tg_verify_ownership":
         return {}
+    if op_id in {"tg_start_capture", "tg_stop_capture"}:
+        params: dict[str, Any] = {
+            "user_id": getattr(args, "user_id", "default"),
+            "ports": _parse_ports(getattr(args, "ports", "")),
+            "rxport": getattr(args, "rxport", None),
+        }
+        for key in ("txport", "capture_port"):
+            value = getattr(args, key, None)
+            if value is not None:
+                params[key] = value
+        if op_id == "tg_stop_capture":
+            # check_* 传哪个验哪个；None（未传）不进 payload，服务端不参与判定
+            for key in ("check_vlan", "check_no_vlan", "check_fragment", "check_l4_protocol",
+                        "check_ip_version", "check_min_packets", "check_arp_opcode",
+                        "check_eth_dst", "check_arp_sender_ips"):
+                value = getattr(args, key, None)
+                if value is not None:
+                    # check_arp_sender_ips 是列表语义，CLI 收逗号串 -> 拆成 list
+                    if key == "check_arp_sender_ips" and isinstance(value, str):
+                        value = [item.strip() for item in value.split(",") if item.strip()]
+                    params[key] = value
+        return params
     if op_id == "tg_query_port_status":
         params: dict[str, Any] = {"user_id": getattr(args, "user_id", "default")}
         ports_str = getattr(args, "ports", None)
