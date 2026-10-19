@@ -2731,7 +2731,7 @@ operations:
           applist: []
           userlist: []
           app_tag_name: []
-          sec_obj_data: []
+          sec_obj_data: "{{ params.sec_obj_data }}"
     response:
       success_status:
         - 200
@@ -2743,6 +2743,14 @@ operations:
       runner_required: true
       notes:
         - "policy_type selects the request path: ipv4 uses /api/v1/ip4policy/fwaclconf and ipv6 uses /api/v1/ip6policy/fwaclconf; the val body is identical for both families."
+        - >-
+          sec_obj_data is the device security-profile reference list. An IPS
+          entry uses {profile_id, profile_name, model_name=ips}; the captured
+          request applies profile 1003 with profile_name 所有1. When
+          params.sec_obj_data is omitted, send an empty list, which is the
+          previous fixed template value. params.ips_enabled/
+          ips_profile_id/ips_profile_name are runner conveniences that build
+          the same single-entry list.
         - The device does not return the new policy id on create; resolve it with a fw_verify_acl_policy query filtered by policy_name.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
@@ -2792,7 +2800,7 @@ operations:
           applist: []
           userlist: []
           app_tag_name: []
-          sec_obj_data: []
+          sec_obj_data: "{{ params.sec_obj_data }}"
     response:
       success_status:
         - 200
@@ -2804,6 +2812,14 @@ operations:
       runner_required: true
       notes:
         - "policy_type selects the request path: ipv4 uses /api/v1/ip4policy/fwaclconf and ipv6 uses /api/v1/ip6policy/fwaclconf; the val body is identical for both families."
+        - >-
+          PUT replaces the complete val object. sec_obj_data is the device
+          security-profile reference list; an IPS entry uses {profile_id,
+          profile_name, model_name=ips}. When params.sec_obj_data is omitted,
+          send an empty list, which is the previous fixed template value.
+          params.ips_enabled/ips_profile_id/ips_profile_name are runner
+          conveniences that build the same single-entry list. An update that
+          must keep an existing IPS reference has to resend it explicitly.
         - The top-level id must be resolved by a fw_verify_acl_policy query before update; the device does not look up policies by name on PUT.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
@@ -7366,4 +7382,307 @@ operations:
         - "This endpoint is shared with the IPv4 family and reaches the same storage, so an IPv4 binding address is a valid id here too."
         - "It is extremely permissive: a repeat delete, an address that never existed and even a DELETE carrying no id at all each answer 200 with a success body. A success therefore does not establish that a binding was removed, and no resource-not-found judgement is possible on this endpoint. Confirm the effect with fw_verify_dhcpv6_static_ip."
         - The id must be non-empty; the runner refuses an empty one before the request leaves.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ips_rule:
+    atom_ref: atoms/fw/fw_verify_ips_rule.yaml
+    intent: Build an IPS rule list, filter, keyword-search, or selected-id query request.
+    request:
+      method: GET
+      path: /api/v1/appsec/ips/rules
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        key: "{{ params.key }}"
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        config_source: "{{ params.config_source }}"
+        id: "{{ params.ids }}"
+        level: "{{ params.level }}"
+        direct: "{{ params.direct }}"
+        os: "{{ params.os }}"
+        classtype: "{{ params.classtype }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <ips-rule-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET carries a JSON body in the captured Web UI traffic; unlike other paginated GETs in this profile, key/page/size and the filters are sent in the request body rather than the query string.
+        - "Exactly one mode is used: a non-empty ids list sends only id, while the list mode omits id and sends key, page, size, config_source when provided, and any selected filters."
+        - page, size, key and config_source are sent as strings in the captured requests.
+        - level, direct, os and classtype accept a scalar or a list; the captured single-filter requests send a scalar string.
+        - The list response carries count, page, size, vals and account counters; each vals entry carries rule attributes including isCustom, priority, direct, osType and classtype.
+  fw_config_ips_rule:
+    atom_ref: atoms/fw/fw_config_ips_rule.yaml
+    intent: Build a custom IPS rule create request.
+    request:
+      method: POST
+      path: /api/v1/appsec/ips/rules
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          isProfenal: "{{ params.isProfenal }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-rule-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - desc carries the raw Snort-style rule body and must be non-empty.
+        - "isProfenal=true selects the protection-rule form; the captured device accepts an empty name in that form and derives the displayed name from the rule text. For isProfenal=false, name must be non-empty."
+        - 'The success response is {"vals": [{"Id": <numeric-id>, "Name": <name>}]}.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_ips_rule:
+    atom_ref: atoms/fw/fw_update_ips_rule.yaml
+    intent: Build a custom IPS rule update request by id.
+    request:
+      method: PUT
+      path: /api/v1/appsec/ips/rules
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          isProfenal: "{{ params.isProfenal }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-rule-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The top-level id is the numeric rule id returned by create or listed by fw_verify_ips_rule.
+        - The val body replaces the whole rule; name, desc and isProfenal must all be resent.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_ips_rule:
+    atom_ref: atoms/fw/fw_delete_ips_rule.yaml
+    intent: Build a single IPS rule delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/appsec/ips/rules
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-rule-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "DELETE carries the id in a JSON request body, unlike the query-string delete style used by several other NGFW families."
+        - 'The captured success response is {"msg": "success"}.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_ips_rule:
+    atom_ref: atoms/fw/fw_delete_batch_ips_rule.yaml
+    intent: Build a batch custom IPS rule delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/appsec/ips/rules
+            body:
+              id:
+                - "{{ params.ids }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-rule-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The batch body contains only DELETE /api/v1/appsec/ips/rules items.
+        - The captured Web UI request emits one item per id, each with a single-element body.id list; the runner follows that shape.
+        - 'The success response is {"BatchResult": [{"msg": "success"}, ...]} with one entry per requested id.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ips_profile:
+    atom_ref: atoms/fw/fw_verify_ips_profile.yaml
+    intent: Build an IPS protection-profile list query request.
+    request:
+      method: GET
+      path: /api/v1/appsec/ips/profiles
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        key: "{{ params.key }}"
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        config_source: "{{ params.config_source }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <ips-profile-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET carries a JSON body in the captured Web UI traffic; key, page, size and the optional config_source are sent in the request body.
+        - page, size, key and config_source are sent as strings in the captured requests.
+        - The response carries count, page, size and vals. Custom profiles include filters, ruleCount, actionWrapper, whiteList, customAddRuleList and desc; the device exposes no separate profile-detail endpoint.
+  fw_config_ips_profile:
+    atom_ref: atoms/fw/fw_config_ips_profile.yaml
+    intent: Build an IPS protection-profile create request.
+    request:
+      method: POST
+      path: /api/v1/appsec/ips/profiles
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          actionWrapper: "{{ params.actionWrapper }}"
+          filters: "{{ params.filters }}"
+          whiteList: "{{ params.whiteList }}"
+          customAddRuleList: "{{ params.customAddRuleList }}"
+          desc: "{{ params.desc }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-profile-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - name is required.
+        - "actionWrapper is a five-entry priority-to-action list. filters entries use prioritys, Directs, OsTypes, classtype, protocols or builtintype together with action and capture_pkt. whiteList entries carry ruleId. customAddRuleList entries carry id, action and optional capture_pkt."
+        - 'The success response is {"vals": [{"Id": <numeric-id>, "Name": <name>}]}.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_ips_profile:
+    atom_ref: atoms/fw/fw_update_ips_profile.yaml
+    intent: Build an IPS protection-profile update request by id.
+    request:
+      method: PUT
+      path: /api/v1/appsec/ips/profiles
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          name: "{{ params.name }}"
+          actionWrapper: "{{ params.actionWrapper }}"
+          filters: "{{ params.filters }}"
+          whiteList: "{{ params.whiteList }}"
+          customAddRuleList: "{{ params.customAddRuleList }}"
+          desc: "{{ params.desc }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-profile-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The top-level id is the numeric profile id returned by create or listed by fw_verify_ips_profile.
+        - "PUT replaces the complete val object: fields omitted from val (actionWrapper, filters, whiteList, customAddRuleList, desc) are cleared on the device."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_ips_profile:
+    atom_ref: atoms/fw/fw_delete_ips_profile.yaml
+    intent: Build a single IPS protection-profile delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/appsec/ips/profiles
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-profile-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "DELETE carries the id in a JSON request body, unlike the query-string delete style used by several other NGFW families."
+        - 'The captured success response is {"msg": "success"}.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_ips_profile:
+    atom_ref: atoms/fw/fw_delete_batch_ips_profile.yaml
+    intent: Build a batch IPS protection-profile delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/appsec/ips/profiles
+            body:
+              id:
+                - "{{ params.ids }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-profile-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The batch body contains only DELETE /api/v1/appsec/ips/profiles items.
+        - The captured Web UI request emits one item per id, each with a single-element body.id list; the runner follows that shape.
+        - 'The success response is {"BatchResult": [{"msg": "success"}, ...]} with one entry per requested id.'
         - ptm-atomic run can execute this request only when --execute is explicit.

@@ -13,6 +13,7 @@
 | v0.7 | 2026-09-14 | meta-dev | Align schema with implemented runner behaviour: `request.content_type` admits `multipart/form-data` (file-upload operations), `request.query_params` models paginated GETs, and `shell.privilege_level` admits `privileged`/`root` for appliance SSH targets. |
 | v0.8 | 2026-10-13 | meta-dev | Add the IPv4 DHCP operation family and document `POST /api/v1/batchv2`, the first batch endpoint outside `/api/v1/batch`. |
 | v0.9 | 2026-10-16 | meta-dev | Add the IPv6 DHCP operation family, document the nested `{"error": {...}}` envelope it answers, and correct v0.8's claim that `/api/v1/dhcpstaticip` is reachable only through batch delete. |
+| v1.0 | 2026-10-19 | meta-dev | Add the IPS rule and protection-profile family, document its JSON-body GET/DELETE shape and per-id batch delete items, and document `sec_obj_data` IPS references in the `fwaclconf` control-policy operations. |
 
 ## Purpose
 
@@ -262,6 +263,27 @@ All operations carry an optional `user_id` field (default `"default"` = legacy f
 
 The runner reads the trex-api base URL from `--base-url` (for example `http://10.0.0.1:8000`) and does not consume the NGFW session file. On a failed envelope the runner maps `error_type` to a stable CLI error code: `INVALID_PARAM` / `RESOURCE_NOT_FOUND` / `STATE_MISMATCH` -> `RUNNER_VALIDATION_FAILED`, `RESOURCE_CONFLICT` -> `RUNNER_CONFIG_REJECTED`, `INTERNAL_ERROR` -> `RUNNER_RESPONSE_INVALID`, `DEVICE_UNREACHABLE` / `TIMEOUT` -> `RUNNER_DEVICE_UNREACHABLE`.
 
+## IPS Profile
+
+The ten IPS operations map to two resources plus the shared batch endpoint. Unlike most NGFW GET and DELETE operations in this repository, the captured traffic sends a JSON request body for both methods, so the adapter `payload_template` describes the body and no `query_params` are used.
+
+| Operation | Method | Path | Payload |
+|---|---|---|---|
+| `fw_verify_ips_rule` | `GET` | `/api/v1/appsec/ips/rules` | selected-id body `{"id": [...]}` or list body `{key, page, size, config_source?, level?, direct?, os?, classtype?}` |
+| `fw_config_ips_rule` | `POST` | `/api/v1/appsec/ips/rules` | `{"val": {name, desc, isProfenal}}` |
+| `fw_update_ips_rule` | `PUT` | `/api/v1/appsec/ips/rules` | `{"id": "<numeric-id>", "val": {name, desc, isProfenal}}` |
+| `fw_delete_ips_rule` | `DELETE` | `/api/v1/appsec/ips/rules` | `{"id": "<numeric-id>"}` |
+| `fw_delete_batch_ips_rule` | `POST` | `/api/v1/batch` | one DELETE item per id with `resource: /api/v1/appsec/ips/rules` |
+| `fw_verify_ips_profile` | `GET` | `/api/v1/appsec/ips/profiles` | `{key, page, size, config_source?}` |
+| `fw_config_ips_profile` | `POST` | `/api/v1/appsec/ips/profiles` | `{"val": {name, actionWrapper, filters, whiteList, customAddRuleList, desc}}` |
+| `fw_update_ips_profile` | `PUT` | `/api/v1/appsec/ips/profiles` | `{"id": "<numeric-id>", "val": {...}}` |
+| `fw_delete_ips_profile` | `DELETE` | `/api/v1/appsec/ips/profiles` | `{"id": "<numeric-id>"}` |
+| `fw_delete_batch_ips_profile` | `POST` | `/api/v1/batch` | one DELETE item per id with `resource: /api/v1/appsec/ips/profiles` |
+
+`page`, `size`, `key` and `config_source` are sent as strings in the captured requests. Single-value rule filters are sent as scalar strings and multi-value filters as string lists. Create responses return `{"vals": [{"Id": <numeric-id>, "Name": <name>}]}`; delete responses return `{"msg": "success"}`; batch responses return `{"BatchResult": [{"msg": "success"}, ...]}` with one entry per requested id.
+
+The control-policy create/update payloads also carry `sec_obj_data`, the device security-profile reference list. An IPS entry uses `{profile_id, profile_name, model_name: "ips"}`. The runner accepts the raw list through `--sec-obj-data-json`/`--sec-obj-data-file`, or builds the same entry from `--ips-profile-id`/`--ips-profile-name`. Omitting all of them sends an empty list, which is the previous fixed template value.
+
 ## Validation
 
 Run the adapter profile check together with the normal repository checks:
@@ -273,6 +295,8 @@ uv run ptm-atomic adapter fw_config_ospfv2_global
 uv run ptm-atomic adapter fw_delete_ospfv2_network
 uv run ptm-atomic adapter fw_config_ospfv3_global
 uv run ptm-atomic adapter fw_config_bfd_global
+uv run ptm-atomic adapter fw_verify_ips_rule
+uv run ptm-atomic adapter fw_config_ips_profile
 uv run ptm-atomic adapter tg_config_interface
 uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/security_gate_check.py

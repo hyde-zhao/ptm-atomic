@@ -47,6 +47,7 @@
 | 容量配置 | `ngfw_capacity_config` package 包含接口、对象、ACL 策略、策略路由、OSPFv2、OSPFv3、BFD、静态路由、NAT、带宽、黑白名单、SSL VPN、动态路由等配置 op。 |
 | 容量验证 | `ngfw_verification` package 包含对应容量域验证 op 和 OSPFv2、OSPFv3、BFD 查询，不包含安装健康检查 `fw_verify_ngfw_health`。 |
 | 多设备批量配置 | `ngfw_batch_config` package 包含 10 个批量配置 op；批量合同见 `docs/batch-configuration-contract.md`。 |
+| IPS 规则与防护模板 | `ngfw_capacity_config`、`ngfw_verification` 和 `security` package 收录 10 个 IPS op：规则/模板查询、新增、修改、删除与批量删除；`run ips rule ...` / `run ips profile ...` 提供 dry-run 与 `--execute` 路径；`fw_config_acl_policy` / `fw_update_acl_policy` 通过 `sec_obj_data` 或 `ips_enabled` 便捷字段引用 IPS 防护模板。 |
 | Adapter profile | `adapters/ngfw/default.yaml` 为地址对象、策略路由、OSPFv2、OSPFv3 和 BFD runner 提供公开 API shape 映射；合同见 `docs/API-ADAPTER-SPEC.md`。 |
 | CLI | 当前 CLI 提供 `sync`、`list`、`show`、`adapter`、`run`、`packages`、`validate`；除 `run` 白名单外，其余命令只读。 |
 | 安全门禁 | `scripts/security_gate_check.py` 执行敏感赋值模式检测，并检查高风险 atom 的 gate 合同完整性。 |
@@ -161,6 +162,13 @@ ptm-atomic run --base-url https://<device-management-ip> ospf config global --en
 # OSPFv3 + BFD
 ptm-atomic run --base-url https://<device-management-ip> ospfv3 config global --enable --router-id <DUT_IP>
 ptm-atomic run --base-url https://<device-management-ip> ospfv3 bfd verify-session --page 1 --size 40
+
+# IPS 规则与防护模板
+ptm-atomic run --base-url https://<device-management-ip> ips rule verify --page 1 --size 10 --level 2
+ptm-atomic run --base-url https://<device-management-ip> ips rule config --name test1 --desc 'alert tcp any any -> any any ( msg:"test"; rev:100; )'
+ptm-atomic run --base-url https://<device-management-ip> ips profile verify --page 1 --size 10
+ptm-atomic run --base-url https://<device-management-ip> ips profile config --val-json '{"name":"p1","actionWrapper":[],"filters":[],"whiteList":[],"customAddRuleList":[],"desc":""}'
+ptm-atomic run --base-url https://<device-management-ip> acl-policy config --name p1 --ips-profile-id 1003 --ips-profile-name '所有1'
 ```
 
 旧格式 `ptm-atomic run <op_id>` 仍然兼容，但会显示 deprecation warning。迁移指引：`ptm-atomic run --help` 查看所有可用操作族。
@@ -182,7 +190,7 @@ ptm-atomic run --base-url https://<device-management-ip> ospfv3 bfd verify-sessi
 | `ptm-atomic list` | 列出本地缓存中的 atom 摘要 | 读取本地缓存。 |
 | `ptm-atomic show <op_id>` | 输出单个 atom 的 YAML 或 JSON | 读取本地缓存。 |
 | `ptm-atomic adapter <op_id>` | 输出单个 atom 引用的 adapter profile operation | 读取本地缓存中的 atom 与 `adapters/`。 |
-| `ptm-atomic run <family> <action> [target]` | 按操作族执行 runner op，默认 dry-run | 共享参数在 `run` 层级；支持 `auth`、`object`、`policy-route`、`interface`、`ospf`、`ospfv3` 六个操作族。真实请求必须显式 `--execute`。旧格式 `run <op_id>` 仍兼容。 |
+| `ptm-atomic run <family> <action> [target]` | 按操作族执行 runner op，默认 dry-run | 共享参数在 `run` 层级；操作族包括 `auth`、`object`、`acl-policy`、`ips`、`ospf`、`ospfv3` 等。真实请求必须显式 `--execute`。旧格式 `run <op_id>` 仍兼容。 |
 | `ptm-atomic packages` | 列出 package 清单 | 读取本地缓存。 |
 | `ptm-atomic validate <test_case.yaml>` | 校验测试用例中的 `op_id` 引用 | 读取本地缓存和指定 YAML。 |
 | `ptm-atomic validate --package <package_id>` | 校验 package 清单中的 `op_id` 引用 | 读取本地缓存。 |
@@ -429,19 +437,20 @@ ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-i
 | Package | 当前 op_id 数 | 代表性 op_id |
 |---|---:|---|
 | `networking` | 1 | `fw_verify_acl_rule` |
-| `security` | 1 | `fw_verify_acl_rule` |
-| `ngfw_installation` | 5 | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
-| `ngfw_capacity_config` | 33 | `fw_config_interface`、`fw_update_interface`、`fw_delete_interface`、`fw_config_policy_route`、`fw_config_ospfv2_global` |
-| `ngfw_verification` | 25 | `fw_verify_interface`、`fw_verify_policy_route`、`fw_verify_ospfv2_neighbor`、`fw_verify_ospfv3_neighbor`、`fw_verify_bfd_session` |
-| `ngfw_batch_config` | 9 | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_static_route`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
+| `security` | 11 | `fw_verify_acl_rule`、`fw_verify_ips_rule`、`fw_config_ips_profile`、`fw_delete_batch_ips_rule` |
+| `ngfw_installation` | 7 | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
+| `ngfw_capacity_config` | 182 | `fw_config_interface`、`fw_update_interface`、`fw_delete_interface`、`fw_config_policy_route`、`fw_config_ips_rule` |
+| `ngfw_verification` | 60 | `fw_verify_interface`、`fw_verify_policy_route`、`fw_verify_ips_rule`、`fw_verify_ips_profile` |
+| `ngfw_batch_config` | 13 | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_static_route`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
+| `traffic` | 15 | `tg_start_traffic_stream`、`tg_capture_traffic_result`、`tg_verify_traffic_loss` |
 
 `package_id` 必须与 `packages/<package_id>.yaml` 文件名一致。package 是 `list`、`validate --package` 等命令使用的过滤视图，不复制 atom 文件，不安装 atom，不执行 atom，不分发 atom，也不表示可执行计划。
 
 当前 package 完整性事实：
 
-- 共有 6 个 package manifest。
-- 共有 69 条 package `operations` 条目。
-- 共有 68 个唯一 `op_id`；`fw_verify_acl_rule` 同时出现在 `networking` 和 `security` 旧基线视图中。
+- 共有 7 个 package manifest。
+- 共有 289 条 package `operations` 条目。
+- 共有 276 个唯一 `op_id`；`fw_verify_acl_rule` 同时出现在 `networking` 和 `security` 旧基线视图中。
 - 所有 package `op_id` 均能解析到 `atoms/fw/*.yaml`。
 
 ## 7. Schema v1.1 摘要

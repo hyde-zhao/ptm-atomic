@@ -229,6 +229,18 @@ DHCPV6_OPS = (
     "fw_verify_dhcpv6_static_ip",
     "fw_delete_dhcpv6_static_ip",
 )
+IPS_OPS = (
+    "fw_config_ips_rule",
+    "fw_update_ips_rule",
+    "fw_verify_ips_rule",
+    "fw_delete_ips_rule",
+    "fw_delete_batch_ips_rule",
+    "fw_config_ips_profile",
+    "fw_update_ips_profile",
+    "fw_verify_ips_profile",
+    "fw_delete_ips_profile",
+    "fw_delete_batch_ips_profile",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
@@ -267,6 +279,7 @@ SUPPORTED_OPS = (
     *CRL_OPS,
     *DHCP_OPS,
     *DHCPV6_OPS,
+    *IPS_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -463,6 +476,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_keyword as run_keyword
     from atomic_ops.commands import run_dhcp as run_dhcp
     from atomic_ops.commands import run_dhcpv6 as run_dhcpv6
+    from atomic_ops.commands import run_ips as run_ips
 
     return (
         CommandGroup(
@@ -642,6 +656,15 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             help="SSH/Telnet shell verification operations.",
             description="Read-only device shell operations executed over SSH/Telnet transports.",
             children=run_cli.build_subtree(),
+        ),
+        CommandGroup(
+            name="ips",
+            help="IPS rule and protection-profile operations.",
+            description=(
+                "IPS rule list/filter/selected-id queries plus rule and protection-profile "
+                "create, update, delete and batch-delete operations."
+            ),
+            children=run_ips.build_subtree(),
         ),
     )
 

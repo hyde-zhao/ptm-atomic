@@ -1,0 +1,88 @@
+schema_version: "1.1"
+op_id: fw_verify_ips_profile
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ips_profile
+description: Query IPS protection profiles through /api/v1/appsec/ips/profiles.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: false
+    description: >-
+      Page number for the profile list query. The captured device request
+      sends page as a JSON string ("1"); the runner performs the same
+      conversion.
+  size:
+    type: int
+    required: false
+    description: Page size for the profile list query, sent as a JSON string in the captured request.
+  key:
+    type: string
+    required: false
+    description: Keyword search value for the profile list query; an empty string means no keyword filter.
+  config_source:
+    type: string
+    required: false
+    description: >-
+      Optional config_source value. The captured policy-editor preload request
+      sends "0"; omit it for the ordinary profile-list page.
+inputs:
+  session_ref: "<session-ref>"
+  page: 1
+  size: 10
+  key: ""
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<ips-profile-state-ref>"
+    full_config_ref: "<ips-profile-full-config-ref>"
+    vals_ref: "<ips-profile-vals-ref>"
+    profile_ids: "<ips-profile-id-list>"
+    count: 0
+    page: 1
+    size: 10
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: ips_profile_query_returns_profile_list
+      input_ref: "<ips-profile-query-result-ref>"
+      expected_result: >-
+        The device returns count, page, size and a vals list. Each entry
+        carries id, name, filters, ruleCount, actionWrapper and desc; custom
+        profiles also carry whiteList and customAddRuleList.
+  summary_ref: "<ips-profile-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - IPS profile query results and diagnostic references are available to the caller.
+  - The device exposes no separate profile-detail endpoint; the list entry is the detail view.
+  - The returned profile_ids list lets callers fill sec_obj_data.profile_id for fw_config_acl_policy and fw_update_acl_policy.
+tags:
+  - firewall
+  - ips
+  - profile
+  - verification
+aliases:
+  - ips-profile
+  - ips-protection-profile
+  - intrusion-prevention-profile
+  - ips-template
+since_version: "1.16.0"

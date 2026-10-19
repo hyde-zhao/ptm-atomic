@@ -1,0 +1,150 @@
+schema_version: "1.1"
+op_id: fw_config_ips_profile
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_ips_profile
+description: Create an IPS protection profile through /api/v1/appsec/ips/profiles.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ips_profile for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      IPS protection-profile create object. name is required. actionWrapper is
+      a five-entry priority-to-action list. filters selects rules by
+      prioritys, Directs, OsTypes, classtype, protocols or builtintype with a
+      per-filter action and capture_pkt flag. whiteList carries ruleId entries
+      that must be excluded. customAddRuleList carries explicit rule ids with
+      action and optional capture_pkt. desc is optional.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: ips_profile
+  params:
+    name: test1
+    actionWrapper:
+      - priority: 1
+        action: 2
+      - priority: 2
+        action: 2
+      - priority: 3
+        action: 2
+      - priority: 4
+        action: 1
+      - priority: 5
+        action: 1
+    filters:
+      - prioritys:
+          - 2
+          - 3
+        Directs:
+          - 1
+          - 2
+        OsTypes:
+          - 1
+          - 2
+        classtype:
+          - 3
+          - 4
+        action: 0
+        capture_pkt: true
+    whiteList:
+      - ruleId: 5450
+    customAddRuleList:
+      - id: 1600
+        action: 1
+    desc: "123123"
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    ips_profile_id: "<ips-profile-id>"
+    ips_profile_name: "<ips-profile-name>"
+    created: true
+    config_result:
+      status: succeeded
+      config_domain: ips_profile
+      applied_ref: "<ips-profile-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: inverse_op
+  op_id: fw_delete_ips_profile
+  snapshot_required: false
+  required_inputs:
+    - ips_profile_id
+  id_source: response
+  id_field: ips_profile_id
+  notes: >-
+    Delete only when the create result reports created=true. The create
+    response carries the new profile id in vals[0].Id; the runner exposes it as
+    ips_profile_id. Pre-existing profiles must not be deleted by default.
+pre_snapshot:
+  op_id: fw_verify_ips_profile
+  capture_fields:
+    - profile_ids
+post_verify:
+  op_id: fw_verify_ips_profile
+  expected_state: present
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - security_domain
+gate:
+  required: true
+  reason: IPS protection profiles select rule actions and change prevention behaviour and require review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk configuration contract is used.
+  - Rule ids referenced by whiteList and customAddRuleList exist on the device.
+postconditions:
+  - The device returns vals[0].Id and vals[0].Name for the created profile; the runner exposes the id as ips_profile_id.
+  - A follow-up fw_verify_ips_profile query can confirm the new profile.
+tags:
+  - firewall
+  - ips
+  - profile
+  - configuration
+aliases:
+  - ips-profile
+  - ips-protection-profile
+  - intrusion-prevention-profile
+  - ips-template
+since_version: "1.16.0"
