@@ -1,0 +1,75 @@
+schema_version: "1.1"
+op_id: fw_verify_log_backup_list
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_log_backup_list
+description: Query the log backup file list through GET /api/v1/logsetting/logbackcsv.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  page:
+    type: int
+    required: false
+    description: Page number for the backup file list; defaults to 1.
+  size:
+    type: int
+    required: false
+    description: Page size for the backup file list; defaults to 10.
+  keywords:
+    type: string
+    required: false
+    description: Optional keyword filter for the backup file list.
+inputs:
+  session_ref: "<session-ref>"
+  page: 1
+  size: 10
+  keywords: ""
+side_effect: observation
+returns:
+  status: success
+  data:
+    count: 0
+    backup_files:
+      - name: "<backup-file-name>"
+        mtime: "<backup-file-mtime>"
+        logtype: ipslog
+    raw_response_ref: "<log-backup-list-query-result-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: log_backup_list_returns_count_and_files
+      input_ref: "<log-backup-list-query-result-ref>"
+      expected_result: >-
+        The device returns count and vals; each vals entry carries name,
+        mtime and logtype. The runner exposes count, a backup_files summary
+        and the raw response.
+  summary_ref: "<log-backup-list-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Backup file entries and the raw response are available to the caller.
+tags:
+  - firewall
+  - log
+  - backup
+  - verification
+aliases:
+  - log-backup-list
+  - backup-list
+  - logbackcsv
+since_version: "1.18.0"

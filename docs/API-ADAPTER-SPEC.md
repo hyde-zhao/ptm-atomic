@@ -16,6 +16,7 @@
 | v1.0 | 2026-10-19 | meta-dev | Add the IPS rule and protection-profile family, document its JSON-body GET/DELETE shape and per-id batch delete items, and document `sec_obj_data` IPS references in the `fwaclconf` control-policy operations. |
 | v1.1 | 2026-10-19 | meta-dev | Add IPS security-log query (`/api/v1/monitor/seclog`), evidence metadata (`/api/v1/seclog/evidence`), pcap download (`/api/v1/downloadfile`), and license queries (`/api/v1/licensedev`, `/api/v1/license`); record `config_source` semantics and the `whiteList` exception model. |
 | v1.2 | 2026-10-19 | meta-dev | Add the global log-cache merge setting (`PUT /api/v1/logsetting/logcacheset`), noting that it has no GET readback, that only `id=1` is supported and id is not gid, and that `timeSet` is an integer whose unit is device-defined. |
+| v1.3 | 2026-10-19 | meta-dev | Complete IPS profile `actionWrapper`/`filters`/`capture_pkt`/source-classification modelling and add IPS log export, clear, time setting, cache read, backup list, and three-step download-task operations. |
 
 ## Purpose
 
@@ -296,10 +297,23 @@ The IPS security-log and related operations use query strings rather than JSON b
 | `fw_verify_license_dev` | `GET` | `/api/v1/licensedev` | none |
 | `fw_verify_license` | `GET` | `/api/v1/license` | none |
 | `fw_config_log_cache_set` | `PUT` | `/api/v1/logsetting/logcacheset` | body `{"id": 1, "val": {"enable": true, "timeSet": 60}}` |
+| `fw_export_ips_log` | `GET` | `/api/v1/export` | `id=logexport`, `logtype=ipslog`, `type=csv`, `timetype`, plus `starttime`/`endtime` for `custom` |
+| `fw_clear_ips_log` | `DELETE` | `/api/v1/deletelog` | `logtype=ipslog` |
+| `fw_config_log_time_set` | `PUT` | `/api/v1/logsetting/logtimesetting` | body `{"id": "0", "val": {"timeSet": 180}}` |
+| `fw_verify_log_time_set` | `GET` | `/api/v1/logsetting/logtimesetting` | none |
+| `fw_verify_log_cache_set` | `GET` | `/api/v1/logsetting/logcacheset` | none |
+| `fw_verify_log_backup_list` | `GET` | `/api/v1/logsetting/logbackcsv` | `page`, `size`, `keywords` |
+| `fw_create_log_download_task` | `POST` | `/api/v1/downloadfilehandle` | `{"val":{"dataId":["..."],"moduletype":"influxTask","filetype":"csv"}}` |
+| `fw_verify_log_download_task` | `GET` | `/api/v1/downloadfilehandle` | `id=<taskid>` |
+| `fw_download_log_file` | `GET` | `/api/v1/downloadfile` | `id=<filename>` (URL-encoded) |
 
 `gid` defaults to 1, and the user-confirmed scope implements only `gid=1` (IPS); other security-log types are not enumerated and will be added by later features. `timetype` accepts `24h`, `all`, `1h`, `7d`, `1m`, `custom`. The top-level `count` drives pagination. The entry field set is modelled from the evidence meta (`app_protocol`, `dst_ip`, `dst_port`, `src_ip`, `src_port`, `protocol`, `rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,sid}`, `timestamp_us`, `pcap_filename`, `data_filename`, `highlights`, ...); the runner returns the raw JSON unchanged, so if an entry differs from that set the raw JSON remains authoritative. Identical attacks within the query window are merged by the device and their attack count is accumulated; no separate IPS noise-reduction configuration operation exists. Evidence `vals.meta.pcap_filename` feeds `fw_download_seclog_pcap`. License `module[]` entries carry `license_left`, `count`, `end`, `begin`, `enabled` and `name`; the IPS module is the entry named `入侵防御`.
 
 `fw_config_log_cache_set` is a global log setting used by the IPS log flow to configure the merge window. It supports `PUT` only and has no GET readback, so success is the only direct signal; verify indirectly through the accumulated attack count in the `gid=1` security-log query. `id` supports only 1, and id is not gid; the setting applies to log merging for all log types. `timeSet` is modelled as an integer whose unit is device-defined (sample 60) and is not asserted as seconds or minutes.
+
+IPS profile payloads are modelled from the captured structures. `actionWrapper` entries use `priority` 1..5 with `action` 0/1/2. `filters` entries use `protocols`, `classtype`, `builtintype` (`dmz`/`radom`), `prioritys`, `Directs`, `OsTypes`, optional `action` and `capture_pkt`; `[{}]` means all rules. `customAddRuleList` entries carry a rule `id`, `action` 0/1/2 and optional `capture_pkt` (`true` captures packets for that rule, `false` does not); per-rule and per-filter actions override the actionWrapper level action. `whiteList` remains the exception-rule list. `fw_verify_ips_profile` classifies each entry as predefined when `config_source=18` or when `id<1000`, and as custom when `id>=1000` (the captured create response assigned id 1000 to a user-created profile); versions without `config_source` fall back to the id rule.
+
+Log management uses `GET /api/v1/export` for CSV export (the runner writes the response bytes to `output_path`), `DELETE /api/v1/deletelog` for irreversible clearing, `GET/PUT /api/v1/logsetting/logtimesetting` for backup/retention time (unit device-defined, sample 180), `GET /api/v1/logsetting/logcacheset` for the readback of the cache setting, and `GET /api/v1/logsetting/logbackcsv` for backup files (`count` plus `vals[name,mtime,logtype]`). The three-step download flow uses `POST /api/v1/downloadfilehandle` to create a task (`vals[0].downloadtaskid`), `GET /api/v1/downloadfilehandle?id=<taskid>` until `vals[0].filename` is ready, then `GET /api/v1/downloadfile?id=<filename>` for the bytes.
 
 The control-policy create/update payloads also carry `sec_obj_data`, the device security-profile reference list. An IPS entry uses `{profile_id, profile_name, model_name: "ips"}`. The runner accepts the raw list through `--sec-obj-data-json`/`--sec-obj-data-file`, or builds the same entry from `--ips-profile-id`/`--ips-profile-name`. Omitting all of them sends an empty list, which is the previous fixed template value.
 

@@ -45,6 +45,22 @@ from atomic_ops.runner.ips import (
     validate_ips_payload,
 )
 from atomic_ops.runner.license import execute_license
+from atomic_ops.runner.log_ops import (
+    build_clear_ips_log_query,
+    build_ips_log_export_query,
+    build_log_backup_list_query,
+    build_log_download_task_payload,
+    build_log_time_set_payload,
+    execute_clear_ips_log,
+    execute_download_log_file,
+    execute_ips_log_export,
+    execute_log_backup_list,
+    execute_log_cache_verify,
+    execute_log_download_task,
+    execute_log_download_task_verify,
+    execute_log_time_set,
+    execute_log_time_verify,
+)
 from atomic_ops.runner.session import write_session_file
 
 BASE_URL = "https://192.0.2.1"
@@ -219,6 +235,133 @@ class IpsProfilePayloadTests(unittest.TestCase):
         payload = build_ips_profile_batch_delete_payload(entry_ids=["1000"])
         with self.assertRaises(RunnerError):
             validate_ips_payload(payload, op_id="fw_delete_batch_ips_rule")
+
+
+class IpsProfileModelingTests(unittest.TestCase):
+    def test_capture_pkt_true_and_false_are_preserved(self) -> None:
+        payload = build_ips_profile_payload(
+            name="p1",
+            custom_add_rule_list=[
+                {"id": 1600, "action": 1, "capture_pkt": True},
+                {"id": 3783, "action": 1, "capture_pkt": False},
+                {"id": 5450, "action": 0},
+            ],
+        )
+        rules = payload["val"]["customAddRuleList"]
+        self.assertTrue(rules[0]["capture_pkt"])
+        self.assertFalse(rules[1]["capture_pkt"])
+        self.assertNotIn("capture_pkt", rules[2])
+
+    def test_filters_variants_are_preserved(self) -> None:
+        filters = [
+            {"protocols": ["file"]},
+            {"classtype": [4]},
+            {"builtintype": "dmz"},
+            {"builtintype": "radom"},
+            {},
+        ]
+        payload = build_ips_profile_payload(name="p1", filters=filters)
+        self.assertEqual(payload["val"]["filters"], filters)
+
+    def test_action_wrapper_models_priority_and_action_values(self) -> None:
+        wrapper = [
+            {"priority": 1, "action": 0},
+            {"priority": 2, "action": 1},
+            {"priority": 3, "action": 2},
+            {"priority": 4, "action": 2},
+            {"priority": 5, "action": 1},
+        ]
+        payload = build_ips_profile_payload(name="p1", action_wrapper=wrapper)
+        self.assertEqual(payload["val"]["actionWrapper"], wrapper)
+
+    def test_invalid_action_wrapper_priority_or_action_is_rejected(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_ips_profile_payload(
+                name="p1", action_wrapper=[{"priority": 6, "action": 1}]
+            )
+        with self.assertRaises(RunnerError):
+            build_ips_profile_payload(
+                name="p1", action_wrapper=[{"priority": 1, "action": 3}]
+            )
+        with self.assertRaises(RunnerError):
+            build_ips_profile_payload(
+                name="p1",
+                action_wrapper=[
+                    {"priority": 1, "action": 1},
+                    {"priority": 1, "action": 2},
+                ],
+            )
+
+    def test_invalid_capture_pkt_type_is_rejected(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_ips_profile_payload(
+                name="p1",
+                custom_add_rule_list=[
+                    {"id": 1600, "action": 1, "capture_pkt": "yes"}
+                ],
+            )
+
+    def test_config_profile_summary_reports_capture_pkt_rule_ids(self) -> None:
+        payload = build_ips_profile_payload(
+            name="p1",
+            action_wrapper=[{"priority": 1, "action": 1}],
+            filters=[{"protocols": ["file"]}],
+            custom_add_rule_list=[
+                {"id": 1600, "action": 1, "capture_pkt": True},
+                {"id": 3783, "action": 1, "capture_pkt": False},
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.ips.request_json",
+                return_value=(200, {"vals": [{"Id": 1000, "Name": "p1"}]}, "{}"),
+            ):
+                result = execute_ips(
+                    op_id="fw_config_ips_profile",
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=payload,
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["ips_profile_id"], 1000)
+        self.assertEqual(result["requested_filter_count"], 1)
+        self.assertEqual(result["capture_pkt_enabled_rule_ids"], [1600])
+        self.assertEqual(result["capture_pkt_disabled_rule_ids"], [3783])
+
+    def test_verify_profile_classifies_sources_by_id_and_config_source(self) -> None:
+        response = {
+            "count": 4,
+            "vals": [
+                {"id": 1, "name": "所有规则"},
+                {"id": 6, "name": "dmz防护配置", "config_source": 18},
+                {"id": 1000, "name": "custom-1000"},
+                {"id": 1001, "name": "custom-1001", "config_source": 0},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.ips.request_json", return_value=(200, response, "{}")
+            ):
+                result = execute_ips(
+                    op_id="fw_verify_ips_profile",
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload={"page": "1", "size": "10"},
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["predefined_profile_ids"], [1, 6])
+        self.assertEqual(result["custom_profile_ids"], [1000, 1001])
+        sources = {item["id"]: item["source"] for item in result["profile_sources"]}
+        self.assertEqual(sources[1], "predefined")
+        self.assertEqual(sources[6], "predefined")
+        self.assertEqual(sources[1000], "custom")
+        self.assertEqual(sources[1001], "custom")
 
 
 class AclPolicyIpsTests(unittest.TestCase):
@@ -426,6 +569,119 @@ class IpsCliDryRunTests(_CliHarness):
         self.assertEqual(request["url"], f"{BASE_URL}/api/v1/logsetting/logcacheset")
         self.assertEqual(
             request["payload"], {"id": 1, "val": {"enable": True, "timeSet": 60}}
+        )
+
+    def test_log_export_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            ["ips", "log", "export", "--output-path", "/tmp/ipslog.csv"]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/export?", url)
+        self.assertIn("id=logexport", url)
+        self.assertIn("logtype=ipslog", url)
+        self.assertIn("type=csv", url)
+        self.assertIn("timetype=24h", url)
+
+    def test_log_clear_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(["ips", "log", "clear"])
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "DELETE")
+        self.assertEqual(
+            request["url"], f"{BASE_URL}/api/v1/deletelog?logtype=ipslog"
+        )
+
+    def test_log_time_set_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            ["ips", "log", "time-set", "--id", "0", "--time-set", "180"]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "PUT")
+        self.assertEqual(request["url"], f"{BASE_URL}/api/v1/logsetting/logtimesetting")
+        self.assertEqual(request["payload"], {"id": "0", "val": {"timeSet": 180}})
+
+    def test_log_time_verify_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(["ips", "log", "time-verify"])
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        self.assertEqual(
+            payload["data"]["request"]["url"],
+            f"{BASE_URL}/api/v1/logsetting/logtimesetting",
+        )
+
+    def test_log_cache_verify_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(["ips", "log", "cache-verify"])
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        self.assertEqual(
+            payload["data"]["request"]["url"],
+            f"{BASE_URL}/api/v1/logsetting/logcacheset",
+        )
+
+    def test_log_backup_list_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            ["ips", "log", "backup-list", "--page", "2", "--size", "20", "--keywords", "ips"]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        url = payload["data"]["request"]["url"]
+        self.assertIn("/api/v1/logsetting/logbackcsv?", url)
+        self.assertIn("page=2", url)
+        self.assertIn("size=20", url)
+
+    def test_log_download_task_create_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            ["ips", "log", "download-task-create", "--data-id", "data-1"]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        request = payload["data"]["request"]
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], f"{BASE_URL}/api/v1/downloadfilehandle")
+        self.assertEqual(
+            request["payload"],
+            {
+                "val": {
+                    "dataId": ["data-1"],
+                    "moduletype": "influxTask",
+                    "filetype": "csv",
+                }
+            },
+        )
+
+    def test_log_download_task_verify_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            ["ips", "log", "download-task-verify", "--task-id", "77"]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        self.assertEqual(
+            payload["data"]["request"]["url"],
+            f"{BASE_URL}/api/v1/downloadfilehandle?id=77",
+        )
+
+    def test_log_download_file_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            [
+                "ips",
+                "log",
+                "download-file",
+                "--file-id",
+                "ips_export.csv",
+                "--output-path",
+                "/tmp/ips_export.csv",
+            ]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        self.assertEqual(
+            payload["data"]["request"]["url"],
+            f"{BASE_URL}/api/v1/downloadfile?id=ips_export.csv",
         )
 
     def test_license_dev_dry_run(self) -> None:
@@ -781,6 +1037,221 @@ class IpsDeleteIdempotencyTests(unittest.TestCase):
         details = context.exception.details
         self.assertEqual(details["error_type"], "RESOURCE_NOT_FOUND")
         self.assertTrue(details["idempotent"])
+
+
+class LogManagementTests(unittest.TestCase):
+    def test_export_query_defaults_and_custom_window(self) -> None:
+        query = build_ips_log_export_query()
+        self.assertEqual(
+            query,
+            {
+                "id": "logexport",
+                "logtype": "ipslog",
+                "type": "csv",
+                "timetype": "24h",
+            },
+        )
+        custom = build_ips_log_export_query(
+            timetype="custom", starttime=1000, endtime=2000
+        )
+        self.assertEqual(custom["starttime"], 1000)
+        self.assertEqual(custom["endtime"], 2000)
+        with self.assertRaises(RunnerError):
+            build_ips_log_export_query(logtype="avlog")
+        with self.assertRaises(RunnerError):
+            build_ips_log_export_query(export_type="json")
+        with self.assertRaises(RunnerError):
+            build_ips_log_export_query(timetype="custom")
+
+    def test_export_execute_writes_csv_bytes(self) -> None:
+        content = b"time,src,dst\n1,192.0.2.1,192.0.2.2\n"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            output_path = Path(temp_dir) / "ipslog.csv"
+            with patch(
+                "atomic_ops.runner.log_ops.request_bytes", return_value=(200, content)
+            ):
+                result = execute_ips_log_export(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    query=build_ips_log_export_query(),
+                    output_path=str(output_path),
+                    verify_tls=False,
+                    timeout=10,
+                )
+            self.assertEqual(output_path.read_bytes(), content)
+        self.assertEqual(result["download"]["file_size"], len(content))
+        self.assertEqual(
+            result["download"]["sha256"],
+            "03a7b6d06ef4f66658f2379a36d063e7f95deaba3f65dce61b13f80b5c60173e",
+        )
+
+    def test_clear_execute_uses_delete_and_query(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.log_ops.request_json",
+                return_value=(200, {"msg": "success"}, "{}"),
+            ) as request:
+                result = execute_clear_ips_log(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    query=build_clear_ips_log_query(),
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(request.call_args[0][0], "DELETE")
+        self.assertTrue(result["cleared"])
+        self.assertEqual(result["logtype"], "ipslog")
+
+    def test_time_set_payload_and_execute(self) -> None:
+        payload = build_log_time_set_payload()
+        self.assertEqual(payload, {"id": "0", "val": {"timeSet": 180}})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.log_ops.request_json",
+                return_value=(200, {"msg": "success"}, "{}"),
+            ) as request:
+                result = execute_log_time_set(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=payload,
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(request.call_args[0][0], "PUT")
+        self.assertEqual(result["requested_time_set"], 180)
+
+    def test_time_verify_extracts_val_time_set(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.log_ops.request_json",
+                return_value=(200, {"id": "0", "val": {"timeSet": 180}}, "{}"),
+            ):
+                result = execute_log_time_verify(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["time_set"], 180)
+
+    def test_cache_verify_extracts_enable_and_time_set(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.log_ops.request_json",
+                return_value=(200, {"id": 1, "val": {"enable": True, "timeSet": 60}}, "{}"),
+            ):
+                result = execute_log_cache_verify(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertTrue(result["enabled"])
+        self.assertEqual(result["time_set"], 60)
+
+    def test_backup_list_query_and_extraction(self) -> None:
+        query = build_log_backup_list_query(page=2, size=20, keywords="ips")
+        self.assertEqual(query, {"page": 2, "size": 20, "keywords": "ips"})
+        response = {
+            "count": 1,
+            "vals": [
+                {"name": "ips_20261019.csv", "mtime": "2026-10-19 12:00:00", "logtype": "ipslog"}
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.log_ops.request_json", return_value=(200, response, "{}")
+            ):
+                result = execute_log_backup_list(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    query=query,
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["backup_files"][0]["name"], "ips_20261019.csv")
+        self.assertEqual(result["backup_files"][0]["logtype"], "ipslog")
+
+    def test_download_task_create_payload_and_extraction(self) -> None:
+        payload = build_log_download_task_payload(data_ids=["data-1", "data-2"])
+        self.assertEqual(
+            payload,
+            {
+                "val": {
+                    "dataId": ["data-1", "data-2"],
+                    "moduletype": "influxTask",
+                    "filetype": "csv",
+                }
+            },
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.log_ops.request_json",
+                return_value=(200, {"vals": [{"downloadtaskid": 77}]}, "{}"),
+            ) as request:
+                result = execute_log_download_task(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=payload,
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(request.call_args[0][0], "POST")
+        self.assertEqual(result["task_id"], 77)
+
+    def test_download_task_verify_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.log_ops.request_json",
+                return_value=(200, {"vals": [{"filename": "ips_export.csv"}]}, "{}"),
+            ):
+                result = execute_log_download_task_verify(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    task_id="77",
+                    verify_tls=False,
+                    timeout=10,
+                )
+        self.assertEqual(result["task_id"], "77")
+        self.assertEqual(result["filename"], "ips_export.csv")
+        self.assertTrue(result["ready"])
+
+    def test_download_log_file_writes_bytes(self) -> None:
+        content = b"time,src,dst\n"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            output_path = Path(temp_dir) / "ips_export.csv"
+            with patch(
+                "atomic_ops.runner.log_ops.request_bytes", return_value=(200, content)
+            ):
+                result = execute_download_log_file(
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    file_id="ips_export.csv",
+                    output_path=str(output_path),
+                    verify_tls=False,
+                    timeout=10,
+                )
+            self.assertEqual(output_path.read_bytes(), content)
+        self.assertEqual(result["download"]["file_size"], len(content))
 
 
 class LogCacheSettingTests(unittest.TestCase):

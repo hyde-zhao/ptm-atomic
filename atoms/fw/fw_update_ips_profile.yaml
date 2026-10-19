@@ -23,10 +23,16 @@ parameters:
       IPS protection-profile update object with a top-level id and a full val
       body. The val body replaces name, actionWrapper, filters, whiteList,
       customAddRuleList and desc wholesale; fields omitted from val are
-      cleared. whiteList is the IPS exception-rule list (entries carry
+      cleared. actionWrapper entries use priority 1..5 and action 0/1/2.
+      filters supports prioritys, Directs, OsTypes, classtype, protocols and
+      builtintype (including [{}] for all rules), with optional action and
+      capture_pkt. customAddRuleList entries carry a rule id, action 0/1/2
+      and optional capture_pkt (true captures packets for that rule, false
+      does not). whiteList is the IPS exception-rule list (entries carry
       ruleId), so an update that must keep exceptions has to resend them.
-      The id is the numeric profile id returned on create or listed by
-      fw_verify_ips_profile.
+      Per-rule and per-filter actions override the actionWrapper level action
+      for matched rules as captured from the Web UI. The id is the numeric
+      profile id returned on create or listed by fw_verify_ips_profile.
   idempotency_key:
     type: string
     required: true
@@ -69,6 +75,10 @@ returns:
   status: success
   data:
     ips_profile_id: "<ips-profile-id>"
+    requested_action_wrapper: "<requested-action-wrapper>"
+    requested_filter_count: 0
+    capture_pkt_enabled_rule_ids: "<capture-pkt-enabled-rule-id-list>"
+    capture_pkt_disabled_rule_ids: "<capture-pkt-disabled-rule-id-list>"
     pre_snapshot_ref: "<ips-profile-pre-snapshot-ref>"
     config_result:
       status: succeeded

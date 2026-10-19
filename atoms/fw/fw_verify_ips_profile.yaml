@@ -29,9 +29,12 @@ parameters:
     description: >-
       Optional config_source filter. 0 means no filtering (the captured profile
       list and policy-editor preload requests send "0"); 18 selects
-      firewall-predefined entries. There is no isCustom request filter. In
-      responses, config_source=18 marks firewall-predefined entries and a
-      missing config_source marks custom entries.
+      firewall-predefined entries. There is no isCustom request filter.
+      Source discrimination in responses: id<1000 is predefined and id>=1000
+      is custom (the captured create response assigned id=1000 to a
+      user-created profile); config_source=18 is also treated as predefined
+      for compatibility, and versions without config_source fall back to the
+      id rule.
 inputs:
   session_ref: "<session-ref>"
   page: 1
@@ -46,6 +49,9 @@ returns:
     full_config_ref: "<ips-profile-full-config-ref>"
     vals_ref: "<ips-profile-vals-ref>"
     profile_ids: "<ips-profile-id-list>"
+    profile_sources: "<ips-profile-source-list>"
+    predefined_profile_ids: "<predefined-profile-id-list>"
+    custom_profile_ids: "<custom-profile-id-list>"
     count: 0
     page: 1
     size: 10
@@ -71,15 +77,17 @@ verification:
       expected_result: >-
         The device returns count, page, size and a vals list. Each entry
         carries id, name, filters, ruleCount, actionWrapper and desc; custom
-        profiles also carry whiteList and customAddRuleList. A response entry
-        with config_source=18 is firewall-predefined; an entry without
-        config_source is custom. There is no isCustom request filter.
+        profiles also carry whiteList and customAddRuleList. Source
+        discrimination uses id<1000 as predefined and id>=1000 as custom,
+        with config_source=18 also treated as predefined for compatibility;
+        versions without config_source fall back to the id rule.
   summary_ref: "<ips-profile-verification-summary-ref>"
 preconditions:
   - External orchestration holds a valid session_ref or runner session file.
 postconditions:
   - IPS profile query results and diagnostic references are available to the caller.
   - The device exposes no separate profile-detail endpoint; the list entry is the detail view.
+  - profile_sources classifies each entry as predefined or custom; config_source=18 is treated as predefined, otherwise id<1000 is predefined and id>=1000 is custom.
   - The returned profile_ids list lets callers fill sec_obj_data.profile_id for fw_config_acl_policy and fw_update_acl_policy.
 tags:
   - firewall

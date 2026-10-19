@@ -244,6 +244,15 @@ IPS_OPS = (
     "fw_verify_seclog_evidence",
     "fw_download_seclog_pcap",
     "fw_config_log_cache_set",
+    "fw_export_ips_log",
+    "fw_clear_ips_log",
+    "fw_config_log_time_set",
+    "fw_verify_log_time_set",
+    "fw_verify_log_cache_set",
+    "fw_verify_log_backup_list",
+    "fw_create_log_download_task",
+    "fw_verify_log_download_task",
+    "fw_download_log_file",
 )
 LICENSE_OPS = (
     "fw_verify_license_dev",

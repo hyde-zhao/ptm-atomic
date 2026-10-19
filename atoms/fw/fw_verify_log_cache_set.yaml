@@ -1,0 +1,59 @@
+schema_version: "1.1"
+op_id: fw_verify_log_cache_set
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_log_cache_set
+description: Read the global log-cache merge setting through GET /api/v1/logsetting/logcacheset.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+inputs:
+  session_ref: "<session-ref>"
+side_effect: observation
+returns:
+  status: success
+  data:
+    enabled: true
+    time_set: 60
+    raw_response_ref: "<log-cache-setting-query-result-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: log_cache_setting_query_returns_enable_and_time_set
+      input_ref: "<log-cache-setting-query-result-ref>"
+      expected_result: >-
+        The device returns the global log-cache enable flag and timeSet; the
+        runner extracts them from the top level or val object and keeps the
+        raw response. id is fixed to 1 and is not gid; the setting applies to
+        log merging for all log types. The timeSet unit is device-defined.
+  summary_ref: "<log-cache-setting-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - The current log-cache enable flag, merge window and raw response are available to the caller.
+tags:
+  - firewall
+  - log
+  - setting
+  - verification
+aliases:
+  - log-cache
+  - log-merge
+  - logcacheset
+  - log-cache-setting
+since_version: "1.18.0"

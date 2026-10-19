@@ -153,6 +153,69 @@ def build_subtree() -> tuple[CommandGroup, CommandGroup, CommandGroup]:
                     handler=_run_log_cache_set,
                     add_args=_add_log_cache_args,
                 ),
+                CommandSpec(
+                    name="export",
+                    help="Export IPS logs as CSV.",
+                    description="Export IPS logs through GET /api/v1/export?id=logexport&logtype=ipslog&type=csv...",
+                    handler=_run_log_export,
+                    add_args=_add_log_export_args,
+                ),
+                CommandSpec(
+                    name="clear",
+                    help="Clear IPS security logs.",
+                    description="Clear IPS logs through DELETE /api/v1/deletelog?logtype=ipslog.",
+                    handler=_run_log_clear,
+                    add_args=_add_log_clear_args,
+                ),
+                CommandSpec(
+                    name="time-set",
+                    help="Configure the log backup/retention time.",
+                    description="Configure the log time setting through PUT /api/v1/logsetting/logtimesetting.",
+                    handler=_run_log_time_set,
+                    add_args=_add_log_time_set_args,
+                ),
+                CommandSpec(
+                    name="time-verify",
+                    help="Read the log backup/retention time.",
+                    description="Read the log time setting through GET /api/v1/logsetting/logtimesetting.",
+                    handler=_run_log_time_verify,
+                    add_args=_add_no_args,
+                ),
+                CommandSpec(
+                    name="cache-verify",
+                    help="Read the global log-cache setting.",
+                    description="Read the log-cache setting through GET /api/v1/logsetting/logcacheset.",
+                    handler=_run_log_cache_verify,
+                    add_args=_add_no_args,
+                ),
+                CommandSpec(
+                    name="backup-list",
+                    help="List log backup files.",
+                    description="List backup files through GET /api/v1/logsetting/logbackcsv.",
+                    handler=_run_log_backup_list,
+                    add_args=_add_log_backup_list_args,
+                ),
+                CommandSpec(
+                    name="download-task-create",
+                    help="Create a log export download task.",
+                    description="Create a download task through POST /api/v1/downloadfilehandle.",
+                    handler=_run_log_download_task_create,
+                    add_args=_add_log_download_task_create_args,
+                ),
+                CommandSpec(
+                    name="download-task-verify",
+                    help="Query a log export download task.",
+                    description="Query a download task through GET /api/v1/downloadfilehandle?id=<taskid>.",
+                    handler=_run_log_download_task_verify,
+                    add_args=_add_log_download_task_verify_args,
+                ),
+                CommandSpec(
+                    name="download-file",
+                    help="Download an exported log file.",
+                    description="Download an exported log file through GET /api/v1/downloadfile?id=<filename>.",
+                    handler=_run_log_download_file,
+                    add_args=_add_log_download_file_args,
+                ),
             ),
         ),
     )
@@ -341,6 +404,68 @@ def _add_log_cache_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--payload-json", help="Complete JSON request payload.")
 
 
+def _add_no_args(parser: argparse.ArgumentParser) -> None:
+    return None
+
+
+def _add_log_export_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--logtype", default="ipslog", help="Log type; only ipslog is implemented.")
+    parser.add_argument("--type", dest="export_type", default="csv", help="Export format; only csv is implemented.")
+    parser.add_argument(
+        "--timetype",
+        choices=("24h", "all", "1h", "7d", "1m", "custom"),
+        default="24h",
+        help="Time window preset; custom requires --starttime and --endtime.",
+    )
+    parser.add_argument("--starttime", type=int, help="Unix-second start timestamp (required for custom).")
+    parser.add_argument("--endtime", type=int, help="Unix-second end timestamp (required for custom).")
+    parser.add_argument("--output-path", required=True, help="Local path where the exported response bytes are written.")
+
+
+def _add_log_clear_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--logtype", default="ipslog", help="Log type; only ipslog is implemented.")
+
+
+def _add_log_time_set_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", default="0", help="Log time-setting id (captured value: 0).")
+    parser.add_argument(
+        "--time-set",
+        type=int,
+        default=180,
+        help="Backup/retention interval as an integer; the unit is device-defined (sample 180).",
+    )
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_log_backup_list_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
+    parser.add_argument("--size", type=int, default=10, help="Paginated query page size.")
+    parser.add_argument("--keywords", default="", help="Optional keyword filter.")
+
+
+def _add_log_download_task_create_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--data-id",
+        action="append",
+        required=True,
+        help="Exported data id to include in the download task. Repeat for multiple ids.",
+    )
+    parser.add_argument("--moduletype", default="influxTask", help="Task module type (captured value: influxTask).")
+    parser.add_argument("--filetype", default="csv", help="Download file type (captured value: csv).")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_log_download_task_verify_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--task-id", required=True, help="Download task id from download-task-create.")
+
+
+def _add_log_download_file_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--file-id", required=True, help="Ready filename from download-task-verify.")
+    parser.add_argument("--output-path", required=True, help="Local path where the downloaded log file is written.")
+
+
 # ── 处理器 ────────────────────────────────────────────────
 
 
@@ -404,6 +529,42 @@ def _run_log_cache_set(args: argparse.Namespace) -> int:
     return _run_ips_log(args, "fw_config_log_cache_set")
 
 
+def _run_log_export(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_export_ips_log")
+
+
+def _run_log_clear(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_clear_ips_log")
+
+
+def _run_log_time_set(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_config_log_time_set")
+
+
+def _run_log_time_verify(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_verify_log_time_set")
+
+
+def _run_log_cache_verify(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_verify_log_cache_set")
+
+
+def _run_log_backup_list(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_verify_log_backup_list")
+
+
+def _run_log_download_task_create(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_create_log_download_task")
+
+
+def _run_log_download_task_verify(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_verify_log_download_task")
+
+
+def _run_log_download_file(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_download_log_file")
+
+
 def _run_ips_log(args: argparse.Namespace, op_id: str) -> int:
     """IPS 日志/取证/pcap 下载的公共执行路径。"""
     from atomic_ops.runner.ips import (
@@ -418,6 +579,31 @@ def _run_ips_log(args: argparse.Namespace, op_id: str) -> int:
         execute_ips_log,
         execute_ips_pcap_download,
         execute_log_cache,
+    )
+    from atomic_ops.runner.log_ops import (
+        build_clear_ips_log_dry_run,
+        build_clear_ips_log_query,
+        build_download_log_file_dry_run,
+        build_ips_log_export_dry_run,
+        build_ips_log_export_query,
+        build_log_backup_list_dry_run,
+        build_log_backup_list_query,
+        build_log_cache_verify_dry_run,
+        build_log_download_task_dry_run,
+        build_log_download_task_payload,
+        build_log_download_task_verify_dry_run,
+        build_log_time_set_dry_run,
+        build_log_time_set_payload,
+        build_log_time_verify_dry_run,
+        execute_clear_ips_log,
+        execute_download_log_file,
+        execute_ips_log_export,
+        execute_log_backup_list,
+        execute_log_cache_verify,
+        execute_log_download_task,
+        execute_log_download_task_verify,
+        execute_log_time_set,
+        execute_log_time_verify,
     )
 
     ctx = resolve_run_context(args)
@@ -477,7 +663,110 @@ def _run_ips_log(args: argparse.Namespace, op_id: str) -> int:
                 if ctx.get("execute")
                 else build_log_cache_dry_run(**kwargs)
             )
-        else:
+        elif op_id == "fw_export_ips_log":
+            query = build_ips_log_export_query(
+                logtype=getattr(args, "logtype", "ipslog"),
+                export_type=getattr(args, "export_type", "csv"),
+                timetype=getattr(args, "timetype", "24h"),
+                starttime=getattr(args, "starttime", None),
+                endtime=getattr(args, "endtime", None),
+            )
+            kwargs = {
+                **base_kwargs,
+                "query": query,
+                "output_path": getattr(args, "output_path", ""),
+            }
+            result = (
+                execute_ips_log_export(**kwargs)
+                if ctx.get("execute")
+                else build_ips_log_export_dry_run(**kwargs)
+            )
+        elif op_id == "fw_clear_ips_log":
+            query = build_clear_ips_log_query(logtype=getattr(args, "logtype", "ipslog"))
+            kwargs = {**base_kwargs, "query": query}
+            result = (
+                execute_clear_ips_log(**kwargs)
+                if ctx.get("execute")
+                else build_clear_ips_log_dry_run(**kwargs)
+            )
+        elif op_id == "fw_config_log_time_set":
+            from atomic_ops.runner._payload import load_json_payload
+
+            raw_payload = load_json_payload(
+                payload_file=getattr(args, "payload_file", None),
+                payload_json=getattr(args, "payload_json", None),
+            )
+            payload = raw_payload if raw_payload is not None else build_log_time_set_payload(
+                id=getattr(args, "id", "0"),
+                time_set=getattr(args, "time_set", 180),
+            )
+            kwargs = {**base_kwargs, "payload": payload}
+            result = (
+                execute_log_time_set(**kwargs)
+                if ctx.get("execute")
+                else build_log_time_set_dry_run(**kwargs)
+            )
+        elif op_id == "fw_verify_log_time_set":
+            result = (
+                execute_log_time_verify(**base_kwargs)
+                if ctx.get("execute")
+                else build_log_time_verify_dry_run(**base_kwargs)
+            )
+        elif op_id == "fw_verify_log_cache_set":
+            result = (
+                execute_log_cache_verify(**base_kwargs)
+                if ctx.get("execute")
+                else build_log_cache_verify_dry_run(**base_kwargs)
+            )
+        elif op_id == "fw_verify_log_backup_list":
+            query = build_log_backup_list_query(
+                page=getattr(args, "page", 1),
+                size=getattr(args, "size", 10),
+                keywords=getattr(args, "keywords", "") or "",
+            )
+            kwargs = {**base_kwargs, "query": query}
+            result = (
+                execute_log_backup_list(**kwargs)
+                if ctx.get("execute")
+                else build_log_backup_list_dry_run(**kwargs)
+            )
+        elif op_id == "fw_create_log_download_task":
+            from atomic_ops.runner._payload import load_json_payload
+
+            raw_payload = load_json_payload(
+                payload_file=getattr(args, "payload_file", None),
+                payload_json=getattr(args, "payload_json", None),
+            )
+            payload = raw_payload if raw_payload is not None else build_log_download_task_payload(
+                data_ids=_arg_list(args, "data_id"),
+                moduletype=getattr(args, "moduletype", "influxTask"),
+                filetype=getattr(args, "filetype", "csv"),
+            )
+            kwargs = {**base_kwargs, "payload": payload}
+            result = (
+                execute_log_download_task(**kwargs)
+                if ctx.get("execute")
+                else build_log_download_task_dry_run(**kwargs)
+            )
+        elif op_id == "fw_verify_log_download_task":
+            kwargs = {**base_kwargs, "task_id": getattr(args, "task_id", "")}
+            result = (
+                execute_log_download_task_verify(**kwargs)
+                if ctx.get("execute")
+                else build_log_download_task_verify_dry_run(**kwargs)
+            )
+        elif op_id == "fw_download_log_file":
+            kwargs = {
+                **base_kwargs,
+                "file_id": getattr(args, "file_id", ""),
+                "output_path": getattr(args, "output_path", ""),
+            }
+            result = (
+                execute_download_log_file(**kwargs)
+                if ctx.get("execute")
+                else build_download_log_file_dry_run(**kwargs)
+            )
+        elif op_id == "fw_download_seclog_pcap":
             kwargs = {
                 **base_kwargs,
                 "pcap_filename": getattr(args, "pcap_filename", ""),
@@ -487,6 +776,12 @@ def _run_ips_log(args: argparse.Namespace, op_id: str) -> int:
                 execute_ips_pcap_download(**kwargs)
                 if ctx.get("execute")
                 else build_ips_pcap_download_dry_run(**kwargs)
+            )
+        else:
+            raise RunnerError(
+                "RUNNER_UNSUPPORTED_OP",
+                "Runner does not support this log operation.",
+                {"op_id": op_id},
             )
         _write_output(_to_run_envelope(result), output_format)
         return 0
@@ -607,6 +902,9 @@ def _build_payload(args: argparse.Namespace, op_id: str, load_json_payload: Any)
 
     if op_id in {"fw_config_ips_profile", "fw_update_ips_profile"}:
         if raw_payload is not None:
+            val = raw_payload.get("val")
+            if isinstance(val, dict):
+                _validate_profile_val(val)
             return raw_payload
         val_payload = load_json_payload(
             payload_file=getattr(args, "val_file", None),
@@ -688,10 +986,6 @@ def _load_json_list(args: argparse.Namespace, attribute: str, field: str) -> lis
 
 
 def _validate_profile_val(val_payload: dict[str, Any]) -> None:
-    name = val_payload.get("name")
-    if not isinstance(name, str) or not name.strip():
-        raise RunnerError(
-            "RUNNER_VALIDATION_FAILED",
-            "IPS profile val.name is required.",
-            {"field": "val.name"},
-        )
+    from atomic_ops.runner.ips import validate_ips_profile_val
+
+    validate_ips_profile_val(val_payload)

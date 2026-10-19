@@ -7564,6 +7564,7 @@ operations:
         - page, size, key and config_source are sent as strings in the captured requests.
         - "config_source semantics: 0 means no filtering (captured list/preload requests); 18 selects firewall-predefined entries. In responses, config_source=18 marks firewall-predefined entries and a missing config_source marks custom entries. There is no isCustom request filter."
         - The response carries count, page, size and vals. Custom profiles include filters, ruleCount, actionWrapper, whiteList, customAddRuleList and desc; the device exposes no separate profile-detail endpoint.
+        - "Source discrimination in responses: id<1000 is predefined and id>=1000 is custom (the captured create response assigned id=1000 to a user-created profile); config_source=18 is also treated as predefined for compatibility, and versions without config_source fall back to the id rule."
   fw_config_ips_profile:
     atom_ref: atoms/fw/fw_config_ips_profile.yaml
     intent: Build an IPS protection-profile create request.
@@ -7594,7 +7595,7 @@ operations:
       runner_required: true
       notes:
         - name is required.
-        - "actionWrapper is a five-entry priority-to-action list. filters entries use prioritys, Directs, OsTypes, classtype, protocols or builtintype together with action and capture_pkt. whiteList is the IPS exception-rule list: each entry carries ruleId. customAddRuleList entries carry id, action and optional capture_pkt."
+        - "actionWrapper maps protection levels to actions: each entry uses priority 1..5 and action 0/1/2. filters entries use prioritys, Directs, OsTypes, classtype, protocols or builtintype together with optional action and capture_pkt; captured examples include [{\"protocols\":[\"file\"]}], [{\"classtype\":[4]}], [{\"builtintype\":\"dmz\"}], [{\"builtintype\":\"radom\"}] and [{}] for all rules. whiteList is the IPS exception-rule list: each entry carries ruleId. customAddRuleList entries carry id, action 0/1/2 and optional capture_pkt (true captures packets for that rule, false does not). Per-rule and per-filter actions override the actionWrapper level action for matched rules as captured from the Web UI."
         - 'The success response is {"vals": [{"Id": <numeric-id>, "Name": <name>}]}.'
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_ips_profile:
@@ -7628,7 +7629,7 @@ operations:
       runner_required: true
       notes:
         - The top-level id is the numeric profile id returned by create or listed by fw_verify_ips_profile.
-        - "PUT replaces the complete val object: fields omitted from val (actionWrapper, filters, whiteList, customAddRuleList, desc) are cleared on the device. whiteList is the IPS exception-rule list, so an update that must keep exceptions has to resend them."
+        - "PUT replaces the complete val object: fields omitted from val (actionWrapper, filters, whiteList, customAddRuleList, desc) are cleared on the device. whiteList is the IPS exception-rule list, so an update that must keep exceptions has to resend them. actionWrapper entries use priority 1..5 and action 0/1/2; filters and customAddRuleList carry optional capture_pkt, where true captures packets for the matched/listed rule and false does not."
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_ips_profile:
     atom_ref: atoms/fw/fw_delete_ips_profile.yaml
@@ -7849,3 +7850,240 @@ operations:
         - "timeSet is the merge window modelled as an integer; its unit is device-defined (sample 60) and is not asserted as seconds or minutes."
         - "Verify indirectly through /api/v1/monitor/seclog: identical attacks within the configured window are merged and the attack count accumulates in the gid=1 log query."
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_export_ips_log:
+    atom_ref: atoms/fw/fw_export_ips_log.yaml
+    intent: Build an IPS log CSV export request with a time window.
+    request:
+      method: GET
+      path: /api/v1/export
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: logexport
+        logtype: "{{ params.logtype }}"
+        type: "{{ params.export_type }}"
+        timetype: "{{ params.timetype }}"
+        starttime: "{{ params.starttime }}"
+        endtime: "{{ params.endtime }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ips-log-export-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The documented query is id=logexport&logtype=ipslog&type=csv&timetype=24h; the user-confirmed scope implements only logtype=ipslog and type=csv."
+        - timetype accepts 24h, all, 1h, 7d, 1m or custom; custom requires starttime and endtime.
+        - The endpoint returns the export payload directly. The runner writes the response bytes to output_path and reports file_size/sha256 without parsing; if the device returns JSON, the same bytes are written and the raw response is exposed.
+  fw_clear_ips_log:
+    atom_ref: atoms/fw/fw_clear_ips_log.yaml
+    intent: Build an IPS log clear request.
+    request:
+      method: DELETE
+      path: /api/v1/deletelog
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        logtype: "{{ params.logtype }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-log-clear-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The documented query is logtype=ipslog; the user-confirmed scope implements only ipslog."
+        - Clearing logs is irreversible in this repository; recovery depends on device-side backups.
+        - DELETE uses query-string values and sends no JSON body.
+  fw_config_log_time_set:
+    atom_ref: atoms/fw/fw_config_log_time_set.yaml
+    intent: Build a log backup/retention time-setting request.
+    request:
+      method: PUT
+      path: /api/v1/logsetting/logtimesetting
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          timeSet: "{{ params.timeSet }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <log-time-setting-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The captured body is {\"id\":\"0\",\"val\":{\"timeSet\":180}}."
+        - timeSet is modelled as an integer; its unit is device-defined and is not asserted as seconds or minutes.
+        - The previous value can be read through fw_verify_log_time_set and restored by re-PUT.
+  fw_verify_log_time_set:
+    atom_ref: atoms/fw/fw_verify_log_time_set.yaml
+    intent: Build a log backup/retention time-setting query request.
+    request:
+      method: GET
+      path: /api/v1/logsetting/logtimesetting
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-time-setting-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner extracts timeSet from the top level or val object and keeps the raw response.
+        - The timeSet unit is device-defined and is not asserted as seconds or minutes.
+        - GET sends no JSON body.
+  fw_verify_log_cache_set:
+    atom_ref: atoms/fw/fw_verify_log_cache_set.yaml
+    intent: Build a global log-cache setting query request.
+    request:
+      method: GET
+      path: /api/v1/logsetting/logcacheset
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-cache-setting-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner extracts the enable flag and timeSet from the top level or val object and keeps the raw response.
+        - id is fixed to 1 and is not gid; the setting applies to log merging for all log types.
+        - GET sends no JSON body.
+  fw_verify_log_backup_list:
+    atom_ref: atoms/fw/fw_verify_log_backup_list.yaml
+    intent: Build a log backup file list query request.
+    request:
+      method: GET
+      path: /api/v1/logsetting/logbackcsv
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        keywords: "{{ params.keywords }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-backup-list-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The device returns count and vals; each vals entry carries name, mtime and logtype.
+        - The runner exposes count, a backup_files summary and the raw response.
+        - GET uses query-string values and sends no JSON body.
+  fw_create_log_download_task:
+    atom_ref: atoms/fw/fw_create_log_download_task.yaml
+    intent: Build a log export download-task creation request.
+    request:
+      method: POST
+      path: /api/v1/downloadfilehandle
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          dataId: "{{ params.data_ids }}"
+          moduletype: "{{ params.moduletype }}"
+          filetype: "{{ params.filetype }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <log-download-task-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The captured body shape is {\"val\":{\"dataId\":[\"...\"],\"moduletype\":\"influxTask\",\"filetype\":\"csv\"}}."
+        - The runner reads the task id from vals[0].downloadtaskid or the equivalent taskid/id field and exposes it as task_id.
+        - The raw response is retained.
+  fw_verify_log_download_task:
+    atom_ref: atoms/fw/fw_verify_log_download_task.yaml
+    intent: Build a log download-task query request.
+    request:
+      method: GET
+      path: /api/v1/downloadfilehandle
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "{{ params.task_id }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-download-task-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The device returns vals[0].filename when the task is ready; the runner exposes task_id, filename, ready and the raw response.
+        - Callers repeat this query until ready=true, then pass filename to fw_download_log_file.
+        - GET uses a query-string id and sends no JSON body.
+  fw_download_log_file:
+    atom_ref: atoms/fw/fw_download_log_file.yaml
+    intent: Build an exported log file download request.
+    request:
+      method: GET
+      path: /api/v1/downloadfile
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "{{ params.file_id }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-file-download-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The id is the ready filename returned by fw_verify_log_download_task and is URL-encoded before the request.
+        - The runner writes the response bytes to output_path and reports file_size/sha256 without parsing the contents.
+        - GET uses a query-string id and sends no JSON body.

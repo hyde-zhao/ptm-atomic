@@ -20,13 +20,20 @@ parameters:
     type: json
     required: true
     description: >-
-      IPS protection-profile create object. name is required. actionWrapper is
-      a five-entry priority-to-action list. filters selects rules by
-      prioritys, Directs, OsTypes, classtype, protocols or builtintype with a
-      per-filter action and capture_pkt flag. whiteList is the IPS
-      exception-rule list: each entry carries ruleId and excludes that rule
-      from the profile. customAddRuleList carries explicit rule ids with
-      action and optional capture_pkt. desc is optional.
+      IPS protection-profile create object. name is required. actionWrapper
+      maps protection levels to actions: each entry has priority 1..5 and
+      action 0/1/2. filters selects rules by prioritys, Directs, OsTypes,
+      classtype, protocols or builtintype (captured examples include
+      [{"protocols":["file"]}], [{"classtype":[4]}],
+      [{"builtintype":"dmz"}], [{"builtintype":"radom"}] and [{}] for all
+      rules); each entry may carry action 0/1/2 and capture_pkt. whiteList is
+      the IPS exception-rule list: each entry carries ruleId and excludes that
+      rule from the profile. customAddRuleList carries explicit rule ids with
+      action 0/1/2 and optional capture_pkt: true enables packet capture for
+      that rule and false disables it, e.g.
+      {"id":1600,"action":1,"capture_pkt":true}. Per-rule and per-filter
+      actions override the actionWrapper level action for the matched rules
+      as captured from the Web UI. desc is optional.
   idempotency_key:
     type: string
     required: true
@@ -77,6 +84,10 @@ returns:
     ips_profile_id: "<ips-profile-id>"
     ips_profile_name: "<ips-profile-name>"
     created: true
+    requested_action_wrapper: "<requested-action-wrapper>"
+    requested_filter_count: 0
+    capture_pkt_enabled_rule_ids: "<capture-pkt-enabled-rule-id-list>"
+    capture_pkt_disabled_rule_ids: "<capture-pkt-disabled-rule-id-list>"
     config_result:
       status: succeeded
       config_domain: ips_profile

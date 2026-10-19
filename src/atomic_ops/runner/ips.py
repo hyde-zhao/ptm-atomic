@@ -409,7 +409,7 @@ def _ips_profile_val(
             "IPS profile name is required.",
             {"field": "name"},
         )
-    return {
+    val = {
         "name": name,
         "actionWrapper": _ensure_list("actionWrapper", action_wrapper),
         "filters": _ensure_list("filters", filters),
@@ -417,6 +417,188 @@ def _ips_profile_val(
         "customAddRuleList": _ensure_list("customAddRuleList", custom_add_rule_list),
         "desc": "" if desc is None else str(desc),
     }
+    return validate_ips_profile_val(val)
+
+
+def validate_ips_profile_val(val: dict[str, Any]) -> dict[str, Any]:
+    """校验 IPS 防护模板 val 的已知嵌套字段（未知字段原样保留）。
+
+    覆盖抓包中的结构：
+    - actionWrapper: priority 1..5、action 0/1/2，同一 priority 不重复；
+    - filters: protocols/classtype/prioritys/Directs/OsTypes/builtintype 等
+      过滤条件，可选 action 0/1/2 与 capture_pkt 布尔值；
+    - whiteList: 例外规则列表，每条必须带 ruleId；
+    - customAddRuleList: 规则条目必须带 id，可选 action 0/1/2 与
+      capture_pkt 布尔值。
+    """
+    if not isinstance(val, dict):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "IPS profile val must be an object.",
+            {"field": "val", "received_type": type(val).__name__},
+        )
+    name = val.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "IPS profile val.name is required.",
+            {"field": "val.name"},
+        )
+    _validate_action_wrapper(val.get("actionWrapper"))
+    _validate_profile_filters(val.get("filters"))
+    _validate_white_list(val.get("whiteList"))
+    _validate_custom_add_rule_list(val.get("customAddRuleList"))
+    return val
+
+
+def _validate_action_wrapper(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "actionWrapper must be a list.",
+            {"field": "actionWrapper", "received_type": type(value).__name__},
+        )
+    seen_priorities: set[int] = set()
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each actionWrapper entry must be an object.",
+                {"field": "actionWrapper", "index": index},
+            )
+        priority = _optional_int_field("actionWrapper.priority", entry.get("priority"))
+        if priority is None or priority not in {1, 2, 3, 4, 5}:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "actionWrapper.priority must be an integer from 1 to 5.",
+                {"field": "actionWrapper.priority", "index": index, "value": entry.get("priority")},
+            )
+        if priority in seen_priorities:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "actionWrapper priorities must be unique.",
+                {"field": "actionWrapper.priority", "index": index, "value": priority},
+            )
+        seen_priorities.add(priority)
+        action = _optional_int_field("actionWrapper.action", entry.get("action"))
+        if action is None or action not in {0, 1, 2}:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "actionWrapper.action must be 0, 1 or 2.",
+                {"field": "actionWrapper.action", "index": index, "value": entry.get("action")},
+            )
+
+
+def _validate_profile_filters(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "filters must be a list.",
+            {"field": "filters", "received_type": type(value).__name__},
+        )
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each filters entry must be an object.",
+                {"field": "filters", "index": index},
+            )
+        _validate_optional_action("filters.action", entry.get("action"), index)
+        _validate_optional_bool("filters.capture_pkt", entry.get("capture_pkt"), index)
+        for key in ("prioritys", "Directs", "OsTypes", "classtype", "protocols"):
+            if key in entry and not isinstance(entry[key], list):
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    f"filters.{key} must be a list.",
+                    {"field": f"filters.{key}", "index": index},
+                )
+        if "builtintype" in entry and not isinstance(entry["builtintype"], str):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "filters.builtintype must be a string.",
+                {"field": "filters.builtintype", "index": index},
+            )
+
+
+def _validate_white_list(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "whiteList must be a list.",
+            {"field": "whiteList", "received_type": type(value).__name__},
+        )
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict) or entry.get("ruleId") is None:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each whiteList entry must be an object carrying ruleId.",
+                {"field": "whiteList", "index": index},
+            )
+
+
+def _validate_custom_add_rule_list(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "customAddRuleList must be a list.",
+            {"field": "customAddRuleList", "received_type": type(value).__name__},
+        )
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each customAddRuleList entry must be an object.",
+                {"field": "customAddRuleList", "index": index},
+            )
+        rule_id = _optional_int_field("customAddRuleList.id", entry.get("id"))
+        if rule_id is None:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each customAddRuleList entry requires a numeric id.",
+                {"field": "customAddRuleList.id", "index": index, "value": entry.get("id")},
+            )
+        _validate_optional_action("customAddRuleList.action", entry.get("action"), index)
+        _validate_optional_bool("customAddRuleList.capture_pkt", entry.get("capture_pkt"), index)
+
+
+def _validate_optional_action(field: str, value: Any, index: int) -> None:
+    if value is None:
+        return
+    action = _optional_int_field(field, value)
+    if action not in {0, 1, 2}:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"{field} must be 0, 1 or 2.",
+            {"field": field, "index": index, "value": value},
+        )
+
+
+def _validate_optional_bool(field: str, value: Any, index: int) -> None:
+    if value is None:
+        return
+    if not isinstance(value, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"{field} must be a boolean.",
+            {"field": field, "index": index, "value": value},
+        )
+
+
+def _optional_int_field(field: str, value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _ensure_list(field: str, value: list[Any] | None) -> list[Any]:
@@ -542,20 +724,52 @@ def _extract_ips_summary(
         }
     if op_id == "fw_verify_ips_profile":
         vals = response_payload.get("vals")
-        profile_ids = (
-            [item.get("id") for item in vals if isinstance(item, dict) and item.get("id") is not None]
-            if isinstance(vals, list)
-            else []
-        )
+        profile_ids: list[Any] = []
+        profile_sources: list[dict[str, Any]] = []
+        predefined_profile_ids: list[Any] = []
+        custom_profile_ids: list[Any] = []
+        if isinstance(vals, list):
+            for item in vals:
+                if not isinstance(item, dict):
+                    continue
+                profile_id = item.get("id")
+                if profile_id is not None:
+                    profile_ids.append(profile_id)
+                source = _classify_profile_source(item)
+                profile_sources.append(
+                    {
+                        "id": profile_id,
+                        "name": item.get("name"),
+                        "source": source,
+                    }
+                )
+                if source == "predefined":
+                    predefined_profile_ids.append(profile_id)
+                elif source == "custom":
+                    custom_profile_ids.append(profile_id)
         return {
             "profile_ids": profile_ids,
+            "profile_sources": profile_sources,
+            "predefined_profile_ids": predefined_profile_ids,
+            "custom_profile_ids": custom_profile_ids,
             "count": response_payload.get("count"),
             "page": response_payload.get("page"),
             "size": response_payload.get("size"),
         }
-    if op_id in {"fw_config_ips_rule", "fw_config_ips_profile"}:
-        id_key = "ips_rule_id" if op_id == "fw_config_ips_rule" else "ips_profile_id"
-        name_key = "ips_rule_name" if op_id == "fw_config_ips_rule" else "ips_profile_name"
+    if op_id == "fw_config_ips_profile":
+        id_key = "ips_profile_id"
+        name_key = "ips_profile_name"
+        vals = response_payload.get("vals")
+        first = vals[0] if isinstance(vals, list) and vals and isinstance(vals[0], dict) else {}
+        return {
+            id_key: first.get("Id"),
+            name_key: first.get("Name"),
+            "created": True,
+            **_requested_profile_summary(payload),
+        }
+    if op_id == "fw_config_ips_rule":
+        id_key = "ips_rule_id"
+        name_key = "ips_rule_name"
         vals = response_payload.get("vals")
         first = vals[0] if isinstance(vals, list) and vals and isinstance(vals[0], dict) else {}
         return {
@@ -565,9 +779,64 @@ def _extract_ips_summary(
         }
     if op_id in {"fw_update_ips_rule", "fw_delete_ips_rule"}:
         return {"ips_rule_id": payload.get("id")}
-    if op_id in {"fw_update_ips_profile", "fw_delete_ips_profile"}:
+    if op_id == "fw_update_ips_profile":
+        return {
+            "ips_profile_id": payload.get("id"),
+            **_requested_profile_summary(payload),
+        }
+    if op_id == "fw_delete_ips_profile":
         return {"ips_profile_id": payload.get("id")}
     return {}
+
+
+def _classify_profile_source(item: dict[str, Any]) -> str:
+    """按用户确认的规则判别预定义/自定义来源。
+
+    - config_source=18 为预定义（兼容部分版本的字段语义）；
+    - 其余情况按 id：id<1000 预定义，id>=1000 自定义
+      （抓包中用户新建模板得到 id=1000，故 1000 归入自定义）；
+    - id 缺失或非数字时返回 unknown，不猜测。
+    """
+    if item.get("config_source") in (18, "18"):
+        return "predefined"
+    profile_id = item.get("id")
+    if isinstance(profile_id, bool):
+        return "unknown"
+    try:
+        numeric_id = int(profile_id)
+    except (TypeError, ValueError):
+        return "unknown"
+    return "predefined" if numeric_id < 1000 else "custom"
+
+
+def _requested_profile_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    """从请求 val 中提取 capture_pkt/actionWrapper/filters 摘要。
+
+    这些值来自请求侧，供调用方确认 capture_pkt 开关与模板结构；设备
+    回读仍以 fw_verify_ips_profile 为准。
+    """
+    val = payload.get("val") if isinstance(payload, dict) else None
+    if not isinstance(val, dict):
+        return {}
+    custom_rules = val.get("customAddRuleList")
+    enabled_ids: list[Any] = []
+    disabled_ids: list[Any] = []
+    if isinstance(custom_rules, list):
+        for entry in custom_rules:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("capture_pkt") is True:
+                enabled_ids.append(entry.get("id"))
+            elif entry.get("capture_pkt") is False:
+                disabled_ids.append(entry.get("id"))
+    action_wrapper = val.get("actionWrapper")
+    filters = val.get("filters")
+    return {
+        "requested_action_wrapper": action_wrapper if isinstance(action_wrapper, list) else [],
+        "requested_filter_count": len(filters) if isinstance(filters, list) else 0,
+        "capture_pkt_enabled_rule_ids": enabled_ids,
+        "capture_pkt_disabled_rule_ids": disabled_ids,
+    }
 
 
 def _batch_delete_requested_count(payload: dict[str, Any] | None) -> int:
