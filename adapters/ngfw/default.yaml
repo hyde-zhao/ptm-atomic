@@ -7415,6 +7415,7 @@ operations:
         - GET carries a JSON body in the captured Web UI traffic; unlike other paginated GETs in this profile, key/page/size and the filters are sent in the request body rather than the query string.
         - "Exactly one mode is used: a non-empty ids list sends only id, while the list mode omits id and sends key, page, size, config_source when provided, and any selected filters."
         - page, size, key and config_source are sent as strings in the captured requests.
+        - "config_source semantics: 0 means no filtering (captured list/selection requests); 18 selects firewall-predefined rules. In responses, config_source=18 marks firewall-predefined rules and a missing config_source marks custom rules. There is no isCustom request filter."
         - level, direct, os and classtype accept a scalar or a list; the captured single-filter requests send a scalar string.
         - The list response carries count, page, size, vals and account counters; each vals entry carries rule attributes including isCustom, priority, direct, osType and classtype.
   fw_config_ips_rule:
@@ -7561,6 +7562,7 @@ operations:
       notes:
         - GET carries a JSON body in the captured Web UI traffic; key, page, size and the optional config_source are sent in the request body.
         - page, size, key and config_source are sent as strings in the captured requests.
+        - "config_source semantics: 0 means no filtering (captured list/preload requests); 18 selects firewall-predefined entries. In responses, config_source=18 marks firewall-predefined entries and a missing config_source marks custom entries. There is no isCustom request filter."
         - The response carries count, page, size and vals. Custom profiles include filters, ruleCount, actionWrapper, whiteList, customAddRuleList and desc; the device exposes no separate profile-detail endpoint.
   fw_config_ips_profile:
     atom_ref: atoms/fw/fw_config_ips_profile.yaml
@@ -7592,7 +7594,7 @@ operations:
       runner_required: true
       notes:
         - name is required.
-        - "actionWrapper is a five-entry priority-to-action list. filters entries use prioritys, Directs, OsTypes, classtype, protocols or builtintype together with action and capture_pkt. whiteList entries carry ruleId. customAddRuleList entries carry id, action and optional capture_pkt."
+        - "actionWrapper is a five-entry priority-to-action list. filters entries use prioritys, Directs, OsTypes, classtype, protocols or builtintype together with action and capture_pkt. whiteList is the IPS exception-rule list: each entry carries ruleId. customAddRuleList entries carry id, action and optional capture_pkt."
         - 'The success response is {"vals": [{"Id": <numeric-id>, "Name": <name>}]}.'
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_update_ips_profile:
@@ -7626,7 +7628,7 @@ operations:
       runner_required: true
       notes:
         - The top-level id is the numeric profile id returned by create or listed by fw_verify_ips_profile.
-        - "PUT replaces the complete val object: fields omitted from val (actionWrapper, filters, whiteList, customAddRuleList, desc) are cleared on the device."
+        - "PUT replaces the complete val object: fields omitted from val (actionWrapper, filters, whiteList, customAddRuleList, desc) are cleared on the device. whiteList is the IPS exception-rule list, so an update that must keep exceptions has to resend them."
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_ips_profile:
     atom_ref: atoms/fw/fw_delete_ips_profile.yaml
@@ -7685,4 +7687,165 @@ operations:
         - The batch body contains only DELETE /api/v1/appsec/ips/profiles items.
         - The captured Web UI request emits one item per id, each with a single-element body.id list; the runner follows that shape.
         - 'The success response is {"BatchResult": [{"msg": "success"}, ...]} with one entry per requested id.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_capture_ips_log:
+    atom_ref: atoms/fw/fw_capture_ips_log.yaml
+    intent: Build an IPS security-log query request with gid, time window, and pagination.
+    request:
+      method: GET
+      path: /api/v1/monitor/seclog
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        gid: "{{ params.gid }}"
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        timetype: "{{ params.timetype }}"
+        starttime: "{{ params.starttime }}"
+        endtime: "{{ params.endtime }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ips-seclog-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "gid selects the security-log module: 1=IPS, 903=antivirus, 902=content filtering, 913=application filtering, 906=file filtering, 904=URL filtering, 905=Web protection, 908=packet-capture decryption, 909=weak-credential check. This operation is intended for gid=1."
+        - "timetype accepts 24h, all, 1h, 7d, 1m or custom; custom requires starttime and endtime as Unix-second values."
+        - GET uses query-string values and sends no JSON body.
+        - "The log-entry response schema is not documented in ips-api.md; the runner returns the device JSON as-is and exposes only count/size and the derived page count."
+        - "Log merging is device behaviour: identical attacks within the query window are merged and the attack count is accumulated in the log query. No separate IPS noise-reduction configuration operation exists."
+  fw_verify_seclog_evidence:
+    atom_ref: atoms/fw/fw_verify_seclog_evidence.yaml
+    intent: Build an IPS packet-capture evidence metadata query by meta_file.
+    request:
+      method: GET
+      path: /api/v1/seclog/evidence
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        meta_file: "{{ params.meta_file }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <seclog-evidence-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - meta_file is taken from an IPS security-log entry; the runner does not construct it.
+        - "vals.meta carries app_protocol, data_filename, data_size, dst_ip, dst_port, highlights, pcap_filename, pcap_size, protocol, rule, src_ip, src_port, timestamp_us and version; vals.meta_file and vals.packet_data (base64) are also returned."
+        - The runner exposes meta, pcap_filename and packet-data presence/size, and keeps the raw JSON including packet_data in the response.
+        - meta.pcap_filename feeds fw_download_seclog_pcap as its pcap_filename input.
+  fw_download_seclog_pcap:
+    atom_ref: atoms/fw/fw_download_seclog_pcap.yaml
+    intent: Download an IPS security-log pcap file by its logpcap id.
+    request:
+      method: GET
+      path: /api/v1/downloadfile
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "logpcap/{{ params.pcap_filename }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <seclog-pcap-download-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The query id is logpcap/<pcap_filename> and is URL-encoded before the request, so the slash becomes %2F."
+        - The response body is binary pcap content; the runner writes it to output_path and never parses it as JSON.
+        - pcap_filename comes from the evidence meta.pcap_filename or the IPS log entry.
+  fw_verify_license_dev:
+    atom_ref: atoms/fw/fw_verify_license_dev.yaml
+    intent: Build a device license identity query request.
+    request:
+      method: GET
+      path: /api/v1/licensedev
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <license-dev-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The device returns devType, devSn, devAuthType, userAuthType, cpuNum, memSize and DeviceTypeName.
+        - The runner returns the raw JSON and exposes the same values under snake_case keys.
+        - GET sends no JSON body.
+  fw_verify_license:
+    atom_ref: atoms/fw/fw_verify_license.yaml
+    intent: Build a device license info and module query request.
+    request:
+      method: GET
+      path: /api/v1/license
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <license-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "info carries license_auth_count, license_auth_type, service_code, user_name, license_left, end, start, language, product_ver, product_name, license_id, device_sn and license_type."
+        - "module entries carry license_left, count, end, begin, enabled and name. The IPS module is the entry whose name is 入侵防御."
+        - The runner returns the raw JSON and exposes license_info, modules and the IPS module entry.
+        - GET sends no JSON body.
+  fw_config_log_cache_set:
+    atom_ref: atoms/fw/fw_config_log_cache_set.yaml
+    intent: Configure global log-cache merging through PUT /api/v1/logsetting/logcacheset.
+    request:
+      method: PUT
+      path: /api/v1/logsetting/logcacheset
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          enable: "{{ params.enable }}"
+          timeSet: "{{ params.timeSet }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <log-cache-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The endpoint supports PUT only and exposes no GET readback; the runner reports acceptance, not an observed post-state.
+        - "id defaults to 1. Its exact semantics (suspected log type or gid) is pending confirmation, as is the relationship with security-log gid=1."
+        - "timeSet is the merge window modelled as an integer; its unit is pending confirmation."
+        - "Verify indirectly through /api/v1/monitor/seclog: identical attacks within the configured window are merged and the attack count accumulates in the gid=1 log query."
         - ptm-atomic run can execute this request only when --execute is explicit.

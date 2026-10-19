@@ -33,8 +33,11 @@ parameters:
     type: string
     required: false
     description: >-
-      Optional config_source value. The captured profile rule-selection request
-      sends "0"; omit it for the ordinary rule-list page.
+      Optional config_source filter. 0 means no filtering (the captured rule
+      list and profile rule-selection requests send "0"); 18 selects
+      firewall-predefined rules. There is no isCustom request filter. In
+      responses, config_source=18 marks firewall-predefined rules and a
+      missing config_source marks custom rules.
   level:
     type: json
     required: false
@@ -65,6 +68,7 @@ inputs:
   page: 1
   size: 10
   key: ""
+  config_source: "0"
   level:
     - "2"
     - "3"
@@ -110,7 +114,10 @@ verification:
         The selected-id query returns vals only; the list query returns count,
         page, size, vals, and account counters. Each list entry carries id,
         name, priority, direct, osType, isCustom, cveId, server, protocol,
-        classtype, cnnvdId and action when the device provides them.
+        classtype, cnnvdId and action when the device provides them. A
+        response entry with config_source=18 is a firewall-predefined rule;
+        an entry without config_source is custom. There is no isCustom
+        request filter.
   summary_ref: "<ips-rule-verification-summary-ref>"
 preconditions:
   - External orchestration holds a valid session_ref or runner session file.

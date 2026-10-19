@@ -1,0 +1,101 @@
+schema_version: "1.1"
+op_id: fw_capture_ips_log
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_capture_ips_log
+description: Query IPS security logs through /api/v1/monitor/seclog with gid, time window, and pagination.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  gid:
+    type: int
+    required: true
+    description: >-
+      Security-log module id. 1=IPS, 903=antivirus, 902=content filtering,
+      913=application filtering, 906=file filtering, 904=URL filtering,
+      905=Web protection, 908=packet-capture decryption, 909=weak password.
+      This operation is intended for gid=1 (IPS).
+  page:
+    type: int
+    required: false
+    description: Page number for the security-log query; defaults to 1.
+  size:
+    type: int
+    required: false
+    description: Page size for the security-log query; defaults to 10.
+  timetype:
+    type: string
+    required: false
+    description: >-
+      Time window preset; one of 24h, all, 1h, 7d, 1m, or custom. Defaults
+      to 24h in the runner.
+  starttime:
+    type: int
+    required: false
+    description: Unix-second start timestamp; required when timetype is custom.
+  endtime:
+    type: int
+    required: false
+    description: Unix-second end timestamp; required when timetype is custom.
+inputs:
+  session_ref: "<session-ref>"
+  gid: 1
+  page: 1
+  size: 10
+  timetype: 24h
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_log_ref: "<ips-seclog-ref>"
+    vals_ref: "<ips-seclog-vals-ref>"
+    raw_response_ref: "<ips-seclog-raw-response-ref>"
+    count: 0
+    page: 1
+    size: 10
+    page_count: 0
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: seclog_query_returns_count_and_page_shape
+      input_ref: "<ips-seclog-query-result-ref>"
+      expected_result: >-
+        The device returns a JSON object; when count and size are present the
+        runner computes page_count = ceil(count/size). Log-entry field names
+        are not modeled yet and the raw JSON is returned as-is.
+  summary_ref: "<ips-seclog-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - When timetype is custom, both starttime and endtime must be provided as Unix-second timestamps.
+  - gid must be one of the documented security-log module ids; this operation expects gid=1 for IPS.
+postconditions:
+  - Security-log entries are returned as the device JSON without field remapping; count, page, size and page_count are exposed for pagination.
+  - 'Same-attack log merging is a device behaviour: identical attacks within the query window are merged and the attack count is accumulated in the log query. No separate IPS noise-reduction configuration operation exists in this repository.'
+  - The per-entry response schema is not documented in ips-api.md and remains pending confirmation; callers must not assume a fixed field set.
+tags:
+  - firewall
+  - ips
+  - log
+  - monitor
+  - verification
+aliases:
+  - ips-log
+  - seclog
+  - security-log
+  - ips-alert
+since_version: "1.17.0"

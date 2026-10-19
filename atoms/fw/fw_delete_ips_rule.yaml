@@ -80,6 +80,7 @@ error_types:
   - GATE_MISSING
   - CONFIG_REJECTED
   - DEVICE_UNREACHABLE
+  - RESOURCE_NOT_FOUND
   - UNKNOWN_ERROR
 risk:
   level: high
@@ -101,6 +102,7 @@ preconditions:
   - The rule is not referenced by a protection profile, or the caller accepts removing that coverage.
 postconditions:
   - 'The device answers {"msg": "success"} for a successful delete.'
+  - 'A repeat delete answers 400 eConfigWrite with errMsg "删除规则失败(C)"; the runner maps that code-and-message pair to RESOURCE_NOT_FOUND with idempotent=true, meaning the goal state is already reached.'
   - A follow-up fw_verify_ips_rule selected-id query confirms the rule is absent.
 tags:
   - firewall

@@ -3,7 +3,7 @@
 package_id: ngfw_capacity_config
 display_name: NGFW Capacity Configuration
 description: Capacity configuration contract operations for NGFW domains.
-version: "1.6.0"
+version: "1.7.0"
 operations:
   - fw_config_interface
   - fw_update_interface
@@ -187,3 +187,4 @@ operations:
   - fw_update_ips_profile
   - fw_delete_ips_profile
   - fw_delete_batch_ips_profile
+  - fw_config_log_cache_set

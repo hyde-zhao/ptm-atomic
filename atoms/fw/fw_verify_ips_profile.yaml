@@ -27,13 +27,17 @@ parameters:
     type: string
     required: false
     description: >-
-      Optional config_source value. The captured policy-editor preload request
-      sends "0"; omit it for the ordinary profile-list page.
+      Optional config_source filter. 0 means no filtering (the captured profile
+      list and policy-editor preload requests send "0"); 18 selects
+      firewall-predefined entries. There is no isCustom request filter. In
+      responses, config_source=18 marks firewall-predefined entries and a
+      missing config_source marks custom entries.
 inputs:
   session_ref: "<session-ref>"
   page: 1
   size: 10
   key: ""
+  config_source: "0"
 side_effect: observation
 returns:
   status: success
@@ -67,7 +71,9 @@ verification:
       expected_result: >-
         The device returns count, page, size and a vals list. Each entry
         carries id, name, filters, ruleCount, actionWrapper and desc; custom
-        profiles also carry whiteList and customAddRuleList.
+        profiles also carry whiteList and customAddRuleList. A response entry
+        with config_source=18 is firewall-predefined; an entry without
+        config_source is custom. There is no isCustom request filter.
   summary_ref: "<ips-profile-verification-summary-ref>"
 preconditions:
   - External orchestration holds a valid session_ref or runner session file.
@@ -85,4 +91,5 @@ aliases:
   - ips-protection-profile
   - intrusion-prevention-profile
   - ips-template
+  - ips-exception
 since_version: "1.16.0"

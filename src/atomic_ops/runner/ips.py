@@ -18,12 +18,18 @@ item，每个 item 的 ``body.id`` 是单元素列表。该 helper 同时保证
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlencode
 
 from atomic_ops.runner.batch import build_batch_delete_payload, summarize_batch_result
-from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
-from atomic_ops.runner.http import request_json
+from atomic_ops.runner.errors import (
+    RunnerError,
+    raise_if_device_session_rejected,
+    raise_if_resource_not_found,
+)
+from atomic_ops.runner.http import request_bytes, request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.session import read_session_file
 
@@ -34,6 +40,24 @@ GET_SUCCESS_STATUS = {200}
 RULES_RESOURCE = "/api/v1/appsec/ips/rules"
 PROFILES_RESOURCE = "/api/v1/appsec/ips/profiles"
 BATCH_PATH = "/api/v1/batch"
+SECLOG_PATH = "/api/v1/monitor/seclog"
+SECLOG_EVIDENCE_PATH = "/api/v1/seclog/evidence"
+DOWNLOAD_FILE_PATH = "/api/v1/downloadfile"
+LOG_CACHE_PATH = "/api/v1/logsetting/logcacheset"
+
+# security-log 模块 id（用户 2026-10-19 提供的权威口径）
+SECLOG_GIDS: dict[int, str] = {
+    1: "ips",
+    903: "antivirus",
+    902: "content_filter",
+    913: "app_filter",
+    906: "file_filter",
+    904: "url_filter",
+    905: "web_protection",
+    908: "packet_capture_decryption",
+    909: "weak_credential",
+}
+SECLOG_TIMETYPES = ("24h", "all", "1h", "7d", "1m", "custom")
 
 IPS_ENDPOINTS: dict[str, tuple[str, str]] = {
     "fw_config_ips_rule": ("POST", RULES_RESOURCE),
@@ -309,6 +333,9 @@ def execute_ips(
     success_status = GET_SUCCESS_STATUS if method == "GET" else SUCCESS_STATUS
     if status_code not in success_status:
         raise_if_device_session_rejected(status_code, response_payload, op_id=op_id)
+        # 重复删除（eConfigWrite + 专属文案）按「目标状态已达成」归一，
+        # 权威门是 errors.py 的 IDEMPOTENT_ERROR_TYPES 登记表。
+        raise_if_resource_not_found(status_code, response_payload, op_id=op_id)
         raise RunnerError(
             "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
             "IPS device request did not return a success status.",
@@ -584,3 +611,538 @@ def _method_path(op_id: str) -> tuple[str, str]:
             "Runner does not support this IPS operation.",
             {"op_id": op_id},
         ) from exc
+
+
+# ── IPS 日志 / 取证 / pcap 下载 ───────────────────────────
+
+
+def build_ips_log_query(
+    *,
+    gid: int | str,
+    page: int | str = 1,
+    size: int | str = 10,
+    timetype: str = "24h",
+    starttime: int | str | None = None,
+    endtime: int | str | None = None,
+) -> dict[str, Any]:
+    """构造 /api/v1/monitor/seclog 的查询参数。
+
+    gid 使用用户提供的权威映射；timetype=custom 时必须同时给出
+    starttime/endtime（epoch 秒）。非 custom 窗口忽略时间戳。
+    """
+    normalized_gid = _validate_seclog_gid(gid)
+    normalized_page = int(_normalize_positive_int("page", page))
+    normalized_size = int(_normalize_positive_int("size", size))
+    if timetype not in SECLOG_TIMETYPES:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Security-log timetype is unsupported.",
+            {"field": "timetype", "value": timetype, "allowed": list(SECLOG_TIMETYPES)},
+        )
+    query: dict[str, Any] = {
+        "gid": normalized_gid,
+        "page": normalized_page,
+        "size": normalized_size,
+        "timetype": timetype,
+    }
+    if timetype == "custom":
+        if starttime is None or endtime is None:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Custom timetype requires both starttime and endtime.",
+                {"fields": ["starttime", "endtime"]},
+            )
+        query["starttime"] = _validate_non_negative_epoch("starttime", starttime)
+        query["endtime"] = _validate_non_negative_epoch("endtime", endtime)
+    return query
+
+
+def build_ips_log_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    query: dict[str, Any],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    return {
+        "op_id": "fw_capture_ips_log",
+        "status": "dry_run",
+        "execute_required": True,
+        "request": {
+            "method": "GET",
+            "url": f"{normalize_base_url(base_url)}{SECLOG_PATH}?{urlencode(query)}",
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "content_type": "application/json",
+            "payload": None,
+        },
+        "session_file": str(session_file),
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
+def execute_ips_log(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    query: dict[str, Any],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
+    headers = _session_headers(session_payload, auth_header)
+    status_code, response_payload, _text = request_json(
+        "GET",
+        f"{normalize_base_url(base_url)}{SECLOG_PATH}?{urlencode(query)}",
+        headers=headers,
+        json_payload=None,
+        timeout=timeout,
+        verify_tls=verify_tls,
+    )
+    if status_code not in GET_SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response_payload, op_id="fw_capture_ips_log")
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "Security-log device request did not return a success status.",
+            {
+                "op_id": "fw_capture_ips_log",
+                "status_code": status_code,
+                "err_code": response_payload.get("errCode"),
+                "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
+                "response_keys": sorted(response_payload.keys()),
+            },
+        )
+    size = int(query.get("size", 10))
+    count = response_payload.get("count")
+    response_size = response_payload.get("size", size)
+    try:
+        page_size = int(response_size)
+    except (TypeError, ValueError):
+        page_size = size
+    return {
+        "op_id": "fw_capture_ips_log",
+        "status": "success",
+        "status_code": status_code,
+        "request": {
+            "method": "GET",
+            "path": SECLOG_PATH,
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "query": dict(query),
+        },
+        "response": response_payload,
+        "count": count,
+        "page": response_payload.get("page", query.get("page")),
+        "size": response_size,
+        "page_count": _page_count(count, page_size),
+    }
+
+
+def build_ips_evidence_query(*, meta_file: str) -> dict[str, str]:
+    if not isinstance(meta_file, str) or not meta_file.strip():
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "meta_file is required for security-log evidence.",
+            {"field": "meta_file"},
+        )
+    return {"meta_file": meta_file.strip()}
+
+
+def build_ips_evidence_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    query: dict[str, str],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    return {
+        "op_id": "fw_verify_seclog_evidence",
+        "status": "dry_run",
+        "execute_required": True,
+        "request": {
+            "method": "GET",
+            "url": f"{normalize_base_url(base_url)}{SECLOG_EVIDENCE_PATH}?{urlencode(query)}",
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "content_type": "application/json",
+            "payload": None,
+        },
+        "session_file": str(session_file),
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
+def execute_ips_evidence(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    query: dict[str, str],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
+    headers = _session_headers(session_payload, auth_header)
+    status_code, response_payload, _text = request_json(
+        "GET",
+        f"{normalize_base_url(base_url)}{SECLOG_EVIDENCE_PATH}?{urlencode(query)}",
+        headers=headers,
+        json_payload=None,
+        timeout=timeout,
+        verify_tls=verify_tls,
+    )
+    if status_code not in GET_SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response_payload, op_id="fw_verify_seclog_evidence")
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "Security-log evidence device request did not return a success status.",
+            {
+                "op_id": "fw_verify_seclog_evidence",
+                "status_code": status_code,
+                "err_code": response_payload.get("errCode"),
+                "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
+                "response_keys": sorted(response_payload.keys()),
+            },
+        )
+    vals = response_payload.get("vals")
+    meta = vals.get("meta") if isinstance(vals, dict) else None
+    packet_data = vals.get("packet_data") if isinstance(vals, dict) else None
+    meta_file = vals.get("meta_file") if isinstance(vals, dict) else None
+    pcap_filename = meta.get("pcap_filename") if isinstance(meta, dict) else None
+    return {
+        "op_id": "fw_verify_seclog_evidence",
+        "status": "success",
+        "status_code": status_code,
+        "request": {
+            "method": "GET",
+            "path": SECLOG_EVIDENCE_PATH,
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "query": dict(query),
+        },
+        "response": response_payload,
+        "meta_file": meta_file or query.get("meta_file"),
+        "meta": meta if isinstance(meta, dict) else {},
+        "pcap_filename": pcap_filename,
+        "packet_data_present": isinstance(packet_data, str) and bool(packet_data),
+        "packet_data_size": len(packet_data) if isinstance(packet_data, str) else 0,
+    }
+
+
+def build_ips_pcap_download_id(*, pcap_filename: str) -> str:
+    """由文件名构造 downloadfile 的 id：裸文件名补 logpcap/ 前缀。"""
+    if not isinstance(pcap_filename, str) or not pcap_filename.strip():
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "pcap_filename is required for security-log pcap download.",
+            {"field": "pcap_filename"},
+        )
+    text = pcap_filename.strip()
+    if text.startswith("logpcap/"):
+        return text
+    return f"logpcap/{text}"
+
+
+def build_ips_pcap_download_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    pcap_filename: str,
+    output_path: str,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    pcap_id = build_ips_pcap_download_id(pcap_filename=pcap_filename)
+    return {
+        "op_id": "fw_download_seclog_pcap",
+        "status": "dry_run",
+        "execute_required": True,
+        "request": {
+            "method": "GET",
+            "url": f"{normalize_base_url(base_url)}{DOWNLOAD_FILE_PATH}?id={quote(pcap_id, safe='')}",
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "content_type": "application/json",
+            "payload": None,
+        },
+        "download": {
+            "pcap_id": pcap_id,
+            "pcap_filename": pcap_filename,
+            "output_path": output_path,
+        },
+        "session_file": str(session_file),
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
+def execute_ips_pcap_download(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    pcap_filename: str,
+    output_path: str,
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    if not isinstance(output_path, str) or not output_path.strip():
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "output_path is required for security-log pcap download.",
+            {"field": "output_path"},
+        )
+    pcap_id = build_ips_pcap_download_id(pcap_filename=pcap_filename)
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
+    headers = _session_headers(session_payload, auth_header)
+    url = f"{normalize_base_url(base_url)}{DOWNLOAD_FILE_PATH}?id={quote(pcap_id, safe='')}"
+    status_code, content = request_bytes(
+        "GET", url, headers=headers, timeout=timeout, verify_tls=verify_tls,
+    )
+    if status_code != 200:
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "Security-log pcap download did not return a success status.",
+            {"op_id": "fw_download_seclog_pcap", "status_code": status_code},
+        )
+    if not content:
+        raise RunnerError(
+            "RUNNER_RESPONSE_INVALID",
+            "Security-log pcap download returned an empty body.",
+            {"op_id": "fw_download_seclog_pcap", "pcap_id": pcap_id},
+        )
+    target = Path(output_path)
+    target.write_bytes(content)
+    return {
+        "op_id": "fw_download_seclog_pcap",
+        "status": "success",
+        "status_code": status_code,
+        "request": {
+            "method": "GET",
+            "path": DOWNLOAD_FILE_PATH,
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "pcap_id": pcap_id,
+        },
+        "download": {
+            "pcap_id": pcap_id,
+            "pcap_filename": pcap_filename,
+            "output_path": str(target),
+            "file_size": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        },
+    }
+
+
+def _session_headers(session_payload: dict[str, Any], auth_header: str) -> dict[str, str]:
+    session_value = str(session_payload["session_value"])
+    header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
+    return {"Content-Type": "application/json", auth_header: header_value}
+
+
+def _validate_seclog_gid(gid: int | str) -> int:
+    if isinstance(gid, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Security-log gid must be a documented module id.",
+            {"field": "gid", "value": gid},
+        )
+    try:
+        parsed = int(gid)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Security-log gid must be an integer.",
+            {"field": "gid", "value": gid},
+        ) from exc
+    if parsed not in SECLOG_GIDS:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Security-log gid is not a documented module id.",
+            {"field": "gid", "value": gid, "allowed": sorted(SECLOG_GIDS)},
+        )
+    return parsed
+
+
+def _validate_non_negative_epoch(field: str, value: int | str) -> int:
+    if isinstance(value, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Security-log timestamp must be a non-negative integer.",
+            {"field": field, "value": value},
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Security-log timestamp must be a non-negative integer.",
+            {"field": field, "value": value},
+        ) from exc
+    if parsed < 0:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Security-log timestamp must be non-negative.",
+            {"field": field, "value": value},
+        )
+    return parsed
+
+
+def _page_count(count: Any, size: int) -> int | None:
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0 or size < 1:
+        return None
+    return (count + size - 1) // size
+
+
+# ── 全局日志归并设置（IPS 日志场景）──────────────────────
+
+
+def build_log_cache_payload(
+    *,
+    id: int | str = 1,
+    enable: bool = True,
+    time_set: int | str = 60,
+) -> dict[str, Any]:
+    """构造 PUT /api/v1/logsetting/logcacheset 的请求体。
+
+    id 的语义（疑似日志类型/gid）与 timeSet 的单位均待用户确认；此处只做
+    整数/布尔形状校验，不臆造语义。
+    """
+    if not isinstance(enable, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Log-cache enable must be a boolean.",
+            {"field": "enable", "value": enable},
+        )
+    return {
+        "id": _normalize_positive_config_id("id", id),
+        "val": {
+            "enable": enable,
+            "timeSet": _normalize_non_negative_config_int("timeSet", time_set),
+        },
+    }
+
+
+def build_log_cache_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    payload: dict[str, Any],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    return {
+        "op_id": "fw_config_log_cache_set",
+        "status": "dry_run",
+        "execute_required": True,
+        "request": {
+            "method": "PUT",
+            "url": f"{normalize_base_url(base_url)}{LOG_CACHE_PATH}",
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+            "content_type": "application/json",
+            "payload": payload,
+        },
+        "session_file": str(session_file),
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
+def execute_log_cache(
+    *,
+    base_url: str,
+    session_file: Path,
+    auth_header: str,
+    payload: dict[str, Any],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    session_payload = read_session_file(session_file, expect_base_url=base_url)
+    headers = _session_headers(session_payload, auth_header)
+    status_code, response_payload, _text = request_json(
+        "PUT",
+        f"{normalize_base_url(base_url)}{LOG_CACHE_PATH}",
+        headers=headers,
+        json_payload=payload,
+        timeout=timeout,
+        verify_tls=verify_tls,
+    )
+    if status_code not in SUCCESS_STATUS:
+        raise_if_device_session_rejected(status_code, response_payload, op_id="fw_config_log_cache_set")
+        raise RunnerError(
+            "RUNNER_CONFIG_REJECTED",
+            "Log-cache setting request did not return a success status.",
+            {
+                "op_id": "fw_config_log_cache_set",
+                "status_code": status_code,
+                "err_code": response_payload.get("errCode"),
+                "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
+                "response_keys": sorted(response_payload.keys()),
+            },
+        )
+    val = payload.get("val") if isinstance(payload.get("val"), dict) else {}
+    return {
+        "op_id": "fw_config_log_cache_set",
+        "status": "success",
+        "status_code": status_code,
+        "request": {
+            "method": "PUT",
+            "path": LOG_CACHE_PATH,
+            "auth": {"name": auth_header, "value": "<session-ref>"},
+        },
+        "response": response_payload,
+        "log_cache_id": payload.get("id"),
+        "requested_enable": val.get("enable"),
+        "requested_time_set": val.get("timeSet"),
+    }
+
+
+def _normalize_positive_config_id(field: str, value: int | str) -> int:
+    if isinstance(value, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Log-cache id must be a positive integer.",
+            {"field": field, "value": value},
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Log-cache id must be a positive integer.",
+            {"field": field, "value": value},
+        ) from exc
+    if parsed < 1:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Log-cache id must be positive.",
+            {"field": field, "value": value},
+        )
+    return parsed
+
+
+def _normalize_non_negative_config_int(field: str, value: int | str) -> int:
+    if isinstance(value, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Log-cache timeSet must be a non-negative integer.",
+            {"field": field, "value": value},
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Log-cache timeSet must be a non-negative integer.",
+            {"field": field, "value": value},
+        ) from exc
+    if parsed < 0:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Log-cache timeSet must be non-negative.",
+            {"field": field, "value": value},
+        )
+    return parsed

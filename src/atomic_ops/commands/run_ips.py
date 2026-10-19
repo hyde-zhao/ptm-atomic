@@ -25,7 +25,7 @@ from atomic_ops.runner.errors import RunnerError
 from atomic_ops.runner.session import resolve_session_file
 
 
-def build_subtree() -> tuple[CommandGroup, CommandGroup]:
+def build_subtree() -> tuple[CommandGroup, CommandGroup, CommandGroup]:
     return (
         CommandGroup(
             name="rule",
@@ -111,6 +111,47 @@ def build_subtree() -> tuple[CommandGroup, CommandGroup]:
                     description="Batch-delete IPS protection profiles through POST /api/v1/batch.",
                     handler=_run_profile_delete_batch,
                     add_args=_add_delete_batch_args,
+                ),
+            ),
+        ),
+        CommandGroup(
+            name="log",
+            help="IPS security-log query, evidence, and pcap operations.",
+            description=(
+                "Query /api/v1/monitor/seclog, read packet-capture evidence metadata from "
+                "/api/v1/seclog/evidence, and download the pcap from /api/v1/downloadfile."
+            ),
+            children=(
+                CommandSpec(
+                    name="capture",
+                    help="Query IPS security logs.",
+                    description="Query security logs through GET /api/v1/monitor/seclog.",
+                    handler=_run_log_capture,
+                    add_args=_add_log_capture_args,
+                ),
+                CommandSpec(
+                    name="evidence",
+                    help="Query packet-capture evidence metadata.",
+                    description="Query evidence metadata through GET /api/v1/seclog/evidence?meta_file=...",
+                    handler=_run_log_evidence,
+                    add_args=_add_log_evidence_args,
+                ),
+                CommandSpec(
+                    name="download-pcap",
+                    help="Download a security-log pcap file.",
+                    description="Download a pcap through GET /api/v1/downloadfile?id=logpcap/...",
+                    handler=_run_log_download_pcap,
+                    add_args=_add_log_download_pcap_args,
+                ),
+                CommandSpec(
+                    name="cache-set",
+                    help="Configure global log-cache merging.",
+                    description=(
+                        "Configure global log-cache merging through PUT /api/v1/logsetting/logcacheset. "
+                        "The endpoint is global and is used by the IPS log flow; no GET readback exists."
+                    ),
+                    handler=_run_log_cache_set,
+                    add_args=_add_log_cache_args,
                 ),
             ),
         ),
@@ -238,6 +279,70 @@ def _add_delete_batch_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_log_capture_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--gid",
+        type=int,
+        required=True,
+        help="Security-log module id: 1=IPS, 903=antivirus, 902=content filter, 913=app filter, "
+        "906=file filter, 904=URL filter, 905=Web protection, 908=packet-capture decryption, "
+        "909=weak-credential check.",
+    )
+    parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
+    parser.add_argument("--size", type=int, default=10, help="Paginated query page size.")
+    parser.add_argument(
+        "--timetype",
+        choices=("24h", "all", "1h", "7d", "1m", "custom"),
+        default="24h",
+        help="Time window preset; custom requires --starttime and --endtime.",
+    )
+    parser.add_argument("--starttime", type=int, help="Unix-second start timestamp (required for custom).")
+    parser.add_argument("--endtime", type=int, help="Unix-second end timestamp (required for custom).")
+
+
+def _add_log_evidence_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--meta-file",
+        required=True,
+        help="Evidence metadata file name from an IPS log entry, e.g. ips_20261019_120000.meta.json.",
+    )
+
+
+def _add_log_download_pcap_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--pcap-filename",
+        required=True,
+        help="Pcap file name from the log entry or evidence meta.pcap_filename, e.g. ips_20261019_120000.pcap.",
+    )
+    parser.add_argument("--output-path", required=True, help="Local path where the downloaded pcap is written.")
+
+
+def _add_log_cache_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", type=int, default=1, help="Log-cache id (default 1; exact semantics pending).")
+    enable_group = parser.add_mutually_exclusive_group()
+    enable_group.add_argument(
+        "--enable",
+        dest="log_cache_enable",
+        action="store_true",
+        default=True,
+        help="Enable log-cache merging (default).",
+    )
+    enable_group.add_argument(
+        "--disable",
+        dest="log_cache_enable",
+        action="store_false",
+        help="Disable log-cache merging.",
+    )
+    parser.add_argument(
+        "--time-set",
+        type=int,
+        default=60,
+        help="Merge window as an integer (unit pending confirmation; default 60).",
+    )
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
 # ── 处理器 ────────────────────────────────────────────────
 
 
@@ -283,6 +388,115 @@ def _run_profile_delete(args: argparse.Namespace) -> int:
 def _run_profile_delete_batch(args: argparse.Namespace) -> int:
     _require_arg(args, "id")
     return _run_ips(args, "fw_delete_batch_ips_profile")
+
+
+def _run_log_capture(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_capture_ips_log")
+
+
+def _run_log_evidence(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_verify_seclog_evidence")
+
+
+def _run_log_download_pcap(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_download_seclog_pcap")
+
+
+def _run_log_cache_set(args: argparse.Namespace) -> int:
+    return _run_ips_log(args, "fw_config_log_cache_set")
+
+
+def _run_ips_log(args: argparse.Namespace, op_id: str) -> int:
+    """IPS 日志/取证/pcap 下载的公共执行路径。"""
+    from atomic_ops.runner.ips import (
+        build_ips_evidence_dry_run,
+        build_ips_evidence_query,
+        build_ips_log_dry_run,
+        build_ips_log_query,
+        build_ips_pcap_download_dry_run,
+        build_log_cache_dry_run,
+        build_log_cache_payload,
+        execute_ips_evidence,
+        execute_ips_log,
+        execute_ips_pcap_download,
+        execute_log_cache,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        if not ctx.get("verify_tls"):
+            write_warning(
+                {"warning_code": "TLS_VERIFY_DISABLED", "message": "Device TLS verification is disabled."},
+                output_format,
+            )
+        session_file = resolve_session_file(ctx.get("session_file"))
+        base_kwargs: dict[str, Any] = {
+            "base_url": ctx["base_url"],
+            "session_file": session_file,
+            "auth_header": ctx.get("auth_header", "Authorization"),
+            "verify_tls": bool(ctx.get("verify_tls")),
+            "timeout": float(ctx.get("timeout", 10.0)),
+        }
+        if op_id == "fw_capture_ips_log":
+            query = build_ips_log_query(
+                gid=getattr(args, "gid"),
+                page=getattr(args, "page", 1),
+                size=getattr(args, "size", 10),
+                timetype=getattr(args, "timetype", "24h"),
+                starttime=getattr(args, "starttime", None),
+                endtime=getattr(args, "endtime", None),
+            )
+            kwargs = {**base_kwargs, "query": query}
+            result = (
+                execute_ips_log(**kwargs)
+                if ctx.get("execute")
+                else build_ips_log_dry_run(**kwargs)
+            )
+        elif op_id == "fw_verify_seclog_evidence":
+            query = build_ips_evidence_query(meta_file=getattr(args, "meta_file", ""))
+            kwargs = {**base_kwargs, "query": query}
+            result = (
+                execute_ips_evidence(**kwargs)
+                if ctx.get("execute")
+                else build_ips_evidence_dry_run(**kwargs)
+            )
+        elif op_id == "fw_config_log_cache_set":
+            from atomic_ops.runner._payload import load_json_payload
+
+            raw_payload = load_json_payload(
+                payload_file=getattr(args, "payload_file", None),
+                payload_json=getattr(args, "payload_json", None),
+            )
+            payload = raw_payload if raw_payload is not None else build_log_cache_payload(
+                id=getattr(args, "id", 1),
+                enable=bool(getattr(args, "log_cache_enable", True)),
+                time_set=getattr(args, "time_set", 60),
+            )
+            kwargs = {**base_kwargs, "payload": payload}
+            result = (
+                execute_log_cache(**kwargs)
+                if ctx.get("execute")
+                else build_log_cache_dry_run(**kwargs)
+            )
+        else:
+            kwargs = {
+                **base_kwargs,
+                "pcap_filename": getattr(args, "pcap_filename", ""),
+                "output_path": getattr(args, "output_path", ""),
+            }
+            result = (
+                execute_ips_pcap_download(**kwargs)
+                if ctx.get("execute")
+                else build_ips_pcap_download_dry_run(**kwargs)
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
 
 
 # ── 公共执行路径 ──────────────────────────────────────────

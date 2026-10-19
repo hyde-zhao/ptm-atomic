@@ -240,6 +240,14 @@ IPS_OPS = (
     "fw_verify_ips_profile",
     "fw_delete_ips_profile",
     "fw_delete_batch_ips_profile",
+    "fw_capture_ips_log",
+    "fw_verify_seclog_evidence",
+    "fw_download_seclog_pcap",
+    "fw_config_log_cache_set",
+)
+LICENSE_OPS = (
+    "fw_verify_license_dev",
+    "fw_verify_license",
 )
 SUPPORTED_OPS = (
     "fw_login_web_management",
@@ -280,6 +288,7 @@ SUPPORTED_OPS = (
     *DHCP_OPS,
     *DHCPV6_OPS,
     *IPS_OPS,
+    *LICENSE_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -477,6 +486,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_dhcp as run_dhcp
     from atomic_ops.commands import run_dhcpv6 as run_dhcpv6
     from atomic_ops.commands import run_ips as run_ips
+    from atomic_ops.commands import run_license as run_license
 
     return (
         CommandGroup(
@@ -666,6 +676,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             ),
             children=run_ips.build_subtree(),
         ),
+        *run_license.build_subtree(),
     )
 
 

@@ -23,8 +23,9 @@ parameters:
       IPS protection-profile create object. name is required. actionWrapper is
       a five-entry priority-to-action list. filters selects rules by
       prioritys, Directs, OsTypes, classtype, protocols or builtintype with a
-      per-filter action and capture_pkt flag. whiteList carries ruleId entries
-      that must be excluded. customAddRuleList carries explicit rule ids with
+      per-filter action and capture_pkt flag. whiteList is the IPS
+      exception-rule list: each entry carries ruleId and excludes that rule
+      from the profile. customAddRuleList carries explicit rule ids with
       action and optional capture_pkt. desc is optional.
   idempotency_key:
     type: string
@@ -147,4 +148,5 @@ aliases:
   - ips-protection-profile
   - intrusion-prevention-profile
   - ips-template
+  - ips-exception
 since_version: "1.16.0"

@@ -80,6 +80,7 @@ error_types:
   - GATE_MISSING
   - CONFIG_REJECTED
   - DEVICE_UNREACHABLE
+  - RESOURCE_NOT_FOUND
   - UNKNOWN_ERROR
 risk:
   level: high
@@ -101,6 +102,7 @@ preconditions:
   - No control policy references the profile through sec_obj_data, or the caller accepts removing that reference.
 postconditions:
   - 'The device answers {"msg": "success"} for a successful delete.'
+  - 'A repeat delete answers 400 eConfigWrite with errMsg "读取profile错误"; the runner maps that code-and-message pair to RESOURCE_NOT_FOUND with idempotent=true, meaning the goal state is already reached.'
   - A follow-up fw_verify_ips_profile query confirms the profile is absent.
 tags:
   - firewall

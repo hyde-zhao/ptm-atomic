@@ -1,0 +1,63 @@
+schema_version: "1.1"
+op_id: fw_verify_license_dev
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_license_dev
+description: Query device license identity through /api/v1/licensedev.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+inputs:
+  session_ref: "<session-ref>"
+side_effect: observation
+returns:
+  status: success
+  data:
+    dev_type: "<dev-type>"
+    dev_sn: "<dev-sn>"
+    dev_auth_type: "<dev-auth-type>"
+    user_auth_type: "<user-auth-type>"
+    cpu_num: 0
+    mem_size: 0
+    device_type_name: "<device-type-name>"
+    raw_response_ref: "<license-dev-raw-response-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: license_dev_returns_device_identity
+      input_ref: "<license-dev-query-result-ref>"
+      expected_result: >-
+        The device returns devType, devSn, devAuthType, userAuthType, cpuNum,
+        memSize and DeviceTypeName in the licensedev response. The runner
+        returns the raw JSON and exposes the same values under snake_case keys.
+  summary_ref: "<license-dev-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Device license identity is available to the caller; the raw response is retained.
+tags:
+  - firewall
+  - license
+  - device
+  - verification
+aliases:
+  - license
+  - license-device
+  - device-license
+  - dev-license
+since_version: "1.17.0"

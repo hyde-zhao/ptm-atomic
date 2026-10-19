@@ -1,0 +1,100 @@
+schema_version: "1.1"
+op_id: fw_verify_seclog_evidence
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_seclog_evidence
+description: Query IPS packet-capture evidence metadata through /api/v1/seclog/evidence.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  meta_file:
+    type: string
+    required: true
+    description: >-
+      Evidence metadata file name taken from an IPS security-log entry, for
+      example ips_20261019_120000.meta.json. The runner sends it as the
+      meta_file query value and never invents it.
+inputs:
+  session_ref: "<session-ref>"
+  meta_file: ips_20261019_120000.meta.json
+side_effect: observation
+returns:
+  status: success
+  data:
+    meta_file: "<seclog-meta-file>"
+    meta:
+      app_protocol: "<app-protocol>"
+      data_filename: "<data-filename>"
+      data_size: 0
+      dst_ip: "<dst-ip>"
+      dst_port: 0
+      highlights: "<highlight-list>"
+      pcap_filename: "<pcap-filename>"
+      pcap_size: 0
+      protocol: "<protocol>"
+      rule:
+        advice: "<rule-advice>"
+        affact: "<rule-affect>"
+        classtype: "<rule-classtype>"
+        cnnvd: "<rule-cnnvd>"
+        cve: "<rule-cve>"
+        desc: "<rule-desc>"
+        gid: 1
+        name: "<rule-name>"
+        rev: "<rule-rev>"
+        sid: "<rule-sid>"
+      src_ip: "<src-ip>"
+      src_port: 0
+      timestamp_us: 0
+      version: "<meta-version>"
+    pcap_filename: "<pcap-filename>"
+    packet_data_present: true
+    packet_data_size: 0
+    raw_response_ref: "<seclog-evidence-raw-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: seclog_evidence_returns_meta_and_packet_reference
+      input_ref: "<seclog-evidence-query-result-ref>"
+      expected_result: >-
+        vals.meta carries app_protocol, data_filename, data_size, dst_ip,
+        dst_port, highlights, pcap_filename, pcap_size, protocol, rule,
+        src_ip, src_port, timestamp_us and version; vals.meta_file and
+        vals.packet_data (base64) are also returned. The runner exposes
+        meta, pcap_filename and packet-data presence/size, and keeps the raw
+        JSON (including packet_data) in the response.
+  summary_ref: "<seclog-evidence-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - meta_file comes from an IPS log entry produced by fw_capture_ips_log; the runner does not construct it.
+postconditions:
+  - Evidence metadata and the raw packet data reference are available to the caller.
+  - meta.pcap_filename feeds fw_download_seclog_pcap as its pcap_filename input.
+tags:
+  - firewall
+  - ips
+  - log
+  - evidence
+  - pcap
+  - diagnostics
+aliases:
+  - seclog-evidence
+  - ips-packet-evidence
+  - packet-evidence
+  - ips-evidence
+since_version: "1.17.0"

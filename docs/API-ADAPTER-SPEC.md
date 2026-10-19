@@ -14,6 +14,8 @@
 | v0.8 | 2026-10-13 | meta-dev | Add the IPv4 DHCP operation family and document `POST /api/v1/batchv2`, the first batch endpoint outside `/api/v1/batch`. |
 | v0.9 | 2026-10-16 | meta-dev | Add the IPv6 DHCP operation family, document the nested `{"error": {...}}` envelope it answers, and correct v0.8's claim that `/api/v1/dhcpstaticip` is reachable only through batch delete. |
 | v1.0 | 2026-10-19 | meta-dev | Add the IPS rule and protection-profile family, document its JSON-body GET/DELETE shape and per-id batch delete items, and document `sec_obj_data` IPS references in the `fwaclconf` control-policy operations. |
+| v1.1 | 2026-10-19 | meta-dev | Add IPS security-log query (`/api/v1/monitor/seclog`), evidence metadata (`/api/v1/seclog/evidence`), pcap download (`/api/v1/downloadfile`), and license queries (`/api/v1/licensedev`, `/api/v1/license`); record `config_source` semantics and the `whiteList` exception model. |
+| v1.2 | 2026-10-19 | meta-dev | Add the global log-cache merge setting (`PUT /api/v1/logsetting/logcacheset`), noting that it has no GET readback and that its `id`/`timeSet` semantics are pending confirmation. |
 
 ## Purpose
 
@@ -280,7 +282,24 @@ The ten IPS operations map to two resources plus the shared batch endpoint. Unli
 | `fw_delete_ips_profile` | `DELETE` | `/api/v1/appsec/ips/profiles` | `{"id": "<numeric-id>"}` |
 | `fw_delete_batch_ips_profile` | `POST` | `/api/v1/batch` | one DELETE item per id with `resource: /api/v1/appsec/ips/profiles` |
 
-`page`, `size`, `key` and `config_source` are sent as strings in the captured requests. Single-value rule filters are sent as scalar strings and multi-value filters as string lists. Create responses return `{"vals": [{"Id": <numeric-id>, "Name": <name>}]}`; delete responses return `{"msg": "success"}`; batch responses return `{"BatchResult": [{"msg": "success"}, ...]}` with one entry per requested id.
+`page`, `size`, `key` and `config_source` are sent as strings in the captured requests. Single-value rule filters are sent as scalar strings and multi-value filters as string lists. `config_source=0` means no filtering (captured list/selection requests), while `config_source=18` selects firewall-predefined entries; in responses, `config_source=18` marks predefined entries and a missing `config_source` marks custom entries. There is no `isCustom` request filter. Create responses return `{"vals": [{"Id": <numeric-id>, "Name": <name>}]}`; delete responses return `{"msg": "success"}`; batch responses return `{"BatchResult": [{"msg": "success"}, ...]}` with one entry per requested id. A repeat single delete answers `400 eConfigWrite` with the op-specific message (`删除规则失败(C)` for rules, `读取profile错误` for profiles); the runner maps each pair to `RESOURCE_NOT_FOUND` with `idempotent=true`.
+
+The profile `whiteList` is the IPS exception-rule list: each entry carries `ruleId` and excludes that rule from the profile. It is part of the profile create/update `val`, so an update that must keep exceptions has to resend them.
+
+The IPS security-log and related operations use query strings rather than JSON bodies:
+
+| Operation | Method | Path | Query |
+|---|---|---|---|
+| `fw_capture_ips_log` | `GET` | `/api/v1/monitor/seclog` | `gid`, `page`, `size`, `timetype`, plus `starttime`/`endtime` for `custom` |
+| `fw_verify_seclog_evidence` | `GET` | `/api/v1/seclog/evidence` | `meta_file` |
+| `fw_download_seclog_pcap` | `GET` | `/api/v1/downloadfile` | `id=logpcap/<pcap_filename>` (URL-encoded) |
+| `fw_verify_license_dev` | `GET` | `/api/v1/licensedev` | none |
+| `fw_verify_license` | `GET` | `/api/v1/license` | none |
+| `fw_config_log_cache_set` | `PUT` | `/api/v1/logsetting/logcacheset` | body `{"id": 1, "val": {"enable": true, "timeSet": 60}}` |
+
+`gid` values are 1=IPS, 903=antivirus, 902=content filtering, 913=application filtering, 906=file filtering, 904=URL filtering, 905=Web protection, 908=packet-capture decryption, 909=weak-credential check. `timetype` accepts `24h`, `all`, `1h`, `7d`, `1m`, `custom`. The security-log entry schema is not documented in `ips-api.md`; the runner returns the device JSON as-is and exposes only `count`, `size` and the derived page count. Identical attacks within the query window are merged by the device and their attack count is accumulated; no separate IPS noise-reduction configuration operation exists. Evidence `vals.meta.pcap_filename` feeds `fw_download_seclog_pcap`. License `module[]` entries carry `license_left`, `count`, `end`, `begin`, `enabled` and `name`; the IPS module is the entry named `入侵防御`.
+
+`fw_config_log_cache_set` is a global log setting used by the IPS log flow to configure the merge window. It supports `PUT` only and has no GET readback, so success is the only direct signal; verify indirectly through the accumulated attack count in the `gid=1` security-log query. `id` defaults to 1 but its exact semantics (suspected log type/gid) and its relationship with `gid=1` are pending confirmation, as is the `timeSet` unit.
 
 The control-policy create/update payloads also carry `sec_obj_data`, the device security-profile reference list. An IPS entry uses `{profile_id, profile_name, model_name: "ips"}`. The runner accepts the raw list through `--sec-obj-data-json`/`--sec-obj-data-file`, or builds the same entry from `--ips-profile-id`/`--ips-profile-name`. Omitting all of them sends an empty list, which is the previous fixed template value.
 

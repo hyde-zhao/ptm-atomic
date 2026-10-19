@@ -23,8 +23,10 @@ parameters:
       IPS protection-profile update object with a top-level id and a full val
       body. The val body replaces name, actionWrapper, filters, whiteList,
       customAddRuleList and desc wholesale; fields omitted from val are
-      cleared. The id is the numeric profile id returned on create or listed
-      by fw_verify_ips_profile.
+      cleared. whiteList is the IPS exception-rule list (entries carry
+      ruleId), so an update that must keep exceptions has to resend them.
+      The id is the numeric profile id returned on create or listed by
+      fw_verify_ips_profile.
   idempotency_key:
     type: string
     required: true
@@ -139,4 +141,5 @@ aliases:
   - ips-protection-profile
   - intrusion-prevention-profile
   - ips-template
+  - ips-exception
 since_version: "1.16.0"
