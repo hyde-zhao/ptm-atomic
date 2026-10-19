@@ -7715,10 +7715,10 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - "gid selects the security-log module: 1=IPS, 903=antivirus, 902=content filtering, 913=application filtering, 906=file filtering, 904=URL filtering, 905=Web protection, 908=packet-capture decryption, 909=weak-credential check. This operation is intended for gid=1."
+        - "gid defaults to 1. The user-confirmed scope implements only gid=1 (IPS); other security-log types are not enumerated and will be added by later features. The runner rejects other values."
         - "timetype accepts 24h, all, 1h, 7d, 1m or custom; custom requires starttime and endtime as Unix-second values."
         - GET uses query-string values and sends no JSON body.
-        - "The log-entry response schema is not documented in ips-api.md; the runner returns the device JSON as-is and exposes only count/size and the derived page count."
+        - "The top-level count drives pagination. The entry field set is modelled from the evidence meta (app_protocol, dst_ip, dst_port, src_ip, src_port, protocol, rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,sid}, timestamp_us, pcap_filename, data_filename, highlights, ...). The runner returns the raw JSON unchanged; if an entry differs from that set, the raw JSON remains authoritative."
         - "Log merging is device behaviour: identical attacks within the query window are merged and the attack count is accumulated in the log query. No separate IPS noise-reduction configuration operation exists."
   fw_verify_seclog_evidence:
     atom_ref: atoms/fw/fw_verify_seclog_evidence.yaml
@@ -7845,7 +7845,7 @@ operations:
       runner_required: true
       notes:
         - The endpoint supports PUT only and exposes no GET readback; the runner reports acceptance, not an observed post-state.
-        - "id defaults to 1. Its exact semantics (suspected log type or gid) is pending confirmation, as is the relationship with security-log gid=1."
-        - "timeSet is the merge window modelled as an integer; its unit is pending confirmation."
+        - "id supports only 1. id is not gid; this global setting applies to log merging for all log types."
+        - "timeSet is the merge window modelled as an integer; its unit is device-defined (sample 60) and is not asserted as seconds or minutes."
         - "Verify indirectly through /api/v1/monitor/seclog: identical attacks within the configured window are merged and the attack count accumulates in the gid=1 log query."
         - ptm-atomic run can execute this request only when --execute is explicit.

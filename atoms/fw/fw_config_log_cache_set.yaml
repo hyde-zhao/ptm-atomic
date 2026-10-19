@@ -2,7 +2,7 @@ schema_version: "1.1"
 op_id: fw_config_log_cache_set
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_log_cache_set
-description: Configure global log-cache merging through /api/v1/logsetting/logcacheset.
+description: Configure global log-cache merging for all log types through /api/v1/logsetting/logcacheset.
 parameters:
   state_ref:
     type: string
@@ -20,10 +20,11 @@ parameters:
     type: json
     required: true
     description: >-
-      Log-cache setting body with id, enable and timeSet. id defaults to 1;
-      its exact semantics (suspected log type or gid) is pending confirmation.
-      enable toggles log-cache merging. timeSet is the merge window as an
-      integer; the unit is pending confirmation.
+      Log-cache setting body with id, enable and timeSet. The user-confirmed
+      scope supports only id=1; id is not gid and this configuration applies
+      to log merging for all log types. enable toggles log-cache merging.
+      timeSet is the merge window modelled as an integer; its unit is
+      device-defined (sample 60) and is not asserted as seconds or minutes.
   idempotency_key:
     type: string
     required: true
@@ -102,11 +103,11 @@ gate:
 preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk global setting is used.
-  - The relationship between id and the security-log gid=1 module is pending confirmation.
+  - id must be 1; id is not gid, and the setting applies to log merging for all log types.
 postconditions:
   - The device accepts the PUT; this endpoint has no observation channel, so success is the only direct signal.
   - "Verify indirectly through fw_capture_ips_log: identical attacks within the configured window are merged and the attack count accumulates in the gid=1 log query."
-  - The timeSet unit is pending confirmation and is modelled as an integer.
+  - timeSet is modelled as an integer; the unit is device-defined (sample 60) and is not asserted as seconds or minutes.
 tags:
   - firewall
   - ips

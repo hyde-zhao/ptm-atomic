@@ -376,7 +376,7 @@ class IpsCliDryRunTests(_CliHarness):
 
     def test_log_capture_dry_run_url(self) -> None:
         exit_code, payload, _stderr = self._cli(
-            ["ips", "log", "capture", "--gid", "1", "--page", "1", "--size", "10", "--timetype", "24h"]
+            ["ips", "log", "capture", "--page", "1", "--size", "10", "--timetype", "24h"]
         )
         self.assertEqual(exit_code, 0)
         assert payload is not None
@@ -494,10 +494,12 @@ class IpsExecuteTests(unittest.TestCase):
 
 
 class IpsLogTests(unittest.TestCase):
-    def test_gid_mapping_contains_documented_modules(self) -> None:
-        self.assertEqual(SECLOG_GIDS[1], "ips")
-        self.assertEqual(SECLOG_GIDS[903], "antivirus")
-        self.assertEqual(SECLOG_GIDS[909], "weak_credential")
+    def test_only_gid_1_is_registered_for_this_scope(self) -> None:
+        self.assertEqual(SECLOG_GIDS, {1: "ips"})
+
+    def test_log_query_defaults_gid_to_1(self) -> None:
+        query = build_ips_log_query()
+        self.assertEqual(query["gid"], 1)
 
     def test_log_query_defaults_and_types(self) -> None:
         query = build_ips_log_query(gid=1)
@@ -522,9 +524,10 @@ class IpsLogTests(unittest.TestCase):
         self.assertNotIn("starttime", query)
         self.assertNotIn("endtime", query)
 
-    def test_log_query_rejects_unknown_gid(self) -> None:
-        with self.assertRaises(RunnerError):
-            build_ips_log_query(gid=2)
+    def test_log_query_rejects_other_gids(self) -> None:
+        for unsupported in (2, 903, 909):
+            with self.assertRaises(RunnerError):
+                build_ips_log_query(gid=unsupported)
 
     def test_log_execute_exposes_count_and_page_count(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -788,6 +791,8 @@ class LogCacheSettingTests(unittest.TestCase):
     def test_payload_validation(self) -> None:
         with self.assertRaises(RunnerError):
             build_log_cache_payload(id=0)
+        with self.assertRaises(RunnerError):
+            build_log_cache_payload(id=2)
         with self.assertRaises(RunnerError):
             build_log_cache_payload(time_set=-1)
         with self.assertRaises(RunnerError):

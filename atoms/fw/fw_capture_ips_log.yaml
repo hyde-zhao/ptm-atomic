@@ -10,12 +10,11 @@ parameters:
     description: Non-sensitive session reference from an external orchestrator.
   gid:
     type: int
-    required: true
+    required: false
     description: >-
-      Security-log module id. 1=IPS, 903=antivirus, 902=content filtering,
-      913=application filtering, 906=file filtering, 904=URL filtering,
-      905=Web protection, 908=packet-capture decryption, 909=weak password.
-      This operation is intended for gid=1 (IPS).
+      Security-log module id. The user-confirmed scope implements only
+      gid=1 (IPS) and defaults to 1; other log types are not enumerated and
+      will be added by later features. The runner rejects other values.
   page:
     type: int
     required: false
@@ -75,18 +74,23 @@ verification:
     - name: seclog_query_returns_count_and_page_shape
       input_ref: "<ips-seclog-query-result-ref>"
       expected_result: >-
-        The device returns a JSON object; when count and size are present the
-        runner computes page_count = ceil(count/size). Log-entry field names
-        are not modeled yet and the raw JSON is returned as-is.
+        The device returns a JSON object whose top-level count drives
+        pagination; when count and size are present the runner computes
+        page_count = ceil(count/size). The entry field set is modelled from
+        the evidence meta (app_protocol, dst_ip, dst_port, src_ip, src_port,
+        protocol, rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,
+        sid}, timestamp_us, pcap_filename, data_filename, highlights, ...).
+        If an entry differs from that field set, the raw JSON remains
+        authoritative and is returned unchanged.
   summary_ref: "<ips-seclog-verification-summary-ref>"
 preconditions:
   - External orchestration holds a valid session_ref or runner session file.
   - When timetype is custom, both starttime and endtime must be provided as Unix-second timestamps.
-  - gid must be one of the documented security-log module ids; this operation expects gid=1 for IPS.
+  - gid defaults to 1 and only gid=1 (IPS) is implemented in this operation; other security-log types are out of scope for now.
 postconditions:
   - Security-log entries are returned as the device JSON without field remapping; count, page, size and page_count are exposed for pagination.
+  - 'The entry field set is modelled from the evidence meta (app_protocol, dst_ip, dst_port, src_ip, src_port, protocol, rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,sid}, timestamp_us, pcap_filename, data_filename, highlights, ...). If an entry differs from that set, the raw JSON remains authoritative.'
   - 'Same-attack log merging is a device behaviour: identical attacks within the query window are merged and the attack count is accumulated in the log query. No separate IPS noise-reduction configuration operation exists in this repository.'
-  - The per-entry response schema is not documented in ips-api.md and remains pending confirmation; callers must not assume a fixed field set.
 tags:
   - firewall
   - ips

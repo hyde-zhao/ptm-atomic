@@ -283,10 +283,8 @@ def _add_log_capture_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--gid",
         type=int,
-        required=True,
-        help="Security-log module id: 1=IPS, 903=antivirus, 902=content filter, 913=app filter, "
-        "906=file filter, 904=URL filter, 905=Web protection, 908=packet-capture decryption, "
-        "909=weak-credential check.",
+        default=1,
+        help="Security-log module id; only 1 (IPS) is implemented. Other log types will be added later.",
     )
     parser.add_argument("--page", type=int, default=1, help="Paginated query page.")
     parser.add_argument("--size", type=int, default=10, help="Paginated query page size.")
@@ -318,7 +316,7 @@ def _add_log_download_pcap_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_log_cache_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", type=int, default=1, help="Log-cache id (default 1; exact semantics pending).")
+    parser.add_argument("--id", type=int, default=1, help="Log-cache id; only 1 is supported and it is not gid.")
     enable_group = parser.add_mutually_exclusive_group()
     enable_group.add_argument(
         "--enable",
@@ -337,7 +335,7 @@ def _add_log_cache_args(parser: argparse.ArgumentParser) -> None:
         "--time-set",
         type=int,
         default=60,
-        help="Merge window as an integer (unit pending confirmation; default 60).",
+        help="Log merge window as an integer; the unit is device-defined (sample 60).",
     )
     parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
     parser.add_argument("--payload-json", help="Complete JSON request payload.")

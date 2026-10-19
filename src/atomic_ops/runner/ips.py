@@ -45,17 +45,10 @@ SECLOG_EVIDENCE_PATH = "/api/v1/seclog/evidence"
 DOWNLOAD_FILE_PATH = "/api/v1/downloadfile"
 LOG_CACHE_PATH = "/api/v1/logsetting/logcacheset"
 
-# security-log 模块 id（用户 2026-10-19 提供的权威口径）
+# security-log 模块 id：用户最终确认本次只实现 gid=1（入侵防御）。
+# 其他日志类型（防病毒/内容过滤/...）不建参数枚举，后续特性再扩展。
 SECLOG_GIDS: dict[int, str] = {
     1: "ips",
-    903: "antivirus",
-    902: "content_filter",
-    913: "app_filter",
-    906: "file_filter",
-    904: "url_filter",
-    905: "web_protection",
-    908: "packet_capture_decryption",
-    909: "weak_credential",
 }
 SECLOG_TIMETYPES = ("24h", "all", "1h", "7d", "1m", "custom")
 
@@ -618,7 +611,7 @@ def _method_path(op_id: str) -> tuple[str, str]:
 
 def build_ips_log_query(
     *,
-    gid: int | str,
+    gid: int | str = 1,
     page: int | str = 1,
     size: int | str = 10,
     timetype: str = "24h",
@@ -627,8 +620,9 @@ def build_ips_log_query(
 ) -> dict[str, Any]:
     """构造 /api/v1/monitor/seclog 的查询参数。
 
-    gid 使用用户提供的权威映射；timetype=custom 时必须同时给出
-    starttime/endtime（epoch 秒）。非 custom 窗口忽略时间戳。
+    用户最终确认：本次只支持 gid=1（入侵防御），其他日志类型不建枚举、
+    后续特性再扩展。timetype=custom 时必须同时给出 starttime/endtime
+    （epoch 秒）。非 custom 窗口忽略时间戳。
     """
     normalized_gid = _validate_seclog_gid(gid)
     normalized_page = int(_normalize_positive_int("page", page))
@@ -946,8 +940,8 @@ def _validate_seclog_gid(gid: int | str) -> int:
     if isinstance(gid, bool):
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
-            "Security-log gid must be a documented module id.",
-            {"field": "gid", "value": gid},
+            "Security-log gid must be 1 (IPS) for this operation.",
+            {"field": "gid", "value": gid, "allowed": [1]},
         )
     try:
         parsed = int(gid)
@@ -960,7 +954,7 @@ def _validate_seclog_gid(gid: int | str) -> int:
     if parsed not in SECLOG_GIDS:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
-            "Security-log gid is not a documented module id.",
+            "Only gid=1 (IPS) is implemented; other security-log types are out of scope for now.",
             {"field": "gid", "value": gid, "allowed": sorted(SECLOG_GIDS)},
         )
     return parsed
@@ -1007,8 +1001,9 @@ def build_log_cache_payload(
 ) -> dict[str, Any]:
     """构造 PUT /api/v1/logsetting/logcacheset 的请求体。
 
-    id 的语义（疑似日志类型/gid）与 timeSet 的单位均待用户确认；此处只做
-    整数/布尔形状校验，不臆造语义。
+    用户最终确认：id 只支持 1，且 id 不是 gid；该配置对所有类型日志的
+    归并生效。timeSet 为归并窗口，单位以设备为准（样例 60），此处只做
+    整数/布尔形状校验。
     """
     if not isinstance(enable, bool):
         raise RunnerError(
@@ -1017,7 +1012,7 @@ def build_log_cache_payload(
             {"field": "enable", "value": enable},
         )
     return {
-        "id": _normalize_positive_config_id("id", id),
+        "id": _validate_log_cache_id(id),
         "val": {
             "enable": enable,
             "timeSet": _normalize_non_negative_config_int("timeSet", time_set),
@@ -1100,28 +1095,28 @@ def execute_log_cache(
     }
 
 
-def _normalize_positive_config_id(field: str, value: int | str) -> int:
+def _validate_log_cache_id(value: int | str) -> int:
     if isinstance(value, bool):
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
-            "Log-cache id must be a positive integer.",
-            {"field": field, "value": value},
+            "Log-cache id must be 1; id is not gid.",
+            {"field": "id", "value": value, "allowed": [1]},
         )
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
-            "Log-cache id must be a positive integer.",
-            {"field": field, "value": value},
+            "Log-cache id must be an integer.",
+            {"field": "id", "value": value},
         ) from exc
-    if parsed < 1:
+    if parsed != 1:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
-            "Log-cache id must be positive.",
-            {"field": field, "value": value},
+            "Only id=1 is supported for the global log-cache setting; id is not gid.",
+            {"field": "id", "value": value, "allowed": [1]},
         )
-    return parsed
+    return 1
 
 
 def _normalize_non_negative_config_int(field: str, value: int | str) -> int:
