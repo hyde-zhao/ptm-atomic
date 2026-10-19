@@ -77,6 +77,16 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     route_enable_group.add_argument(
         "--disable", dest="enable", action="store_false", help="Disable the static route."
     )
+    # 2026-10-19 houjialin：完整 payload 直传通道（与 iplink config 同型）。结构化参数
+    # 无法表达内联 health_check（静态路由引用 IP-Link 的健康检查，17220/17233）——
+    # 用例经 payload_json 下发 {"val": {..., "health_check": {...}}}。payload 模式下
+    # payload 为完整请求体，结构化参数仅作 argparse 满足（不合并进 payload）。
+    parser.add_argument(
+        "--payload-json", help="Complete JSON request payload (e.g. inline health_check); overrides structured args."
+    )
+    parser.add_argument(
+        "--payload-file", help="Path to a complete JSON request payload; overrides structured args."
+    )
 
 
 def _add_config_args(parser: argparse.ArgumentParser) -> None:
@@ -143,17 +153,50 @@ def _run_static_route(args: argparse.Namespace, op_id: str) -> int:
         payload: dict[str, Any] | None
 
         if op_id in {"fw_config_static_route", "fw_update_static_route"}:
-            entry_id = int(getattr(args, "id", 0) or 0)
-            payload = build_static_route_payload(
-                dst_network=getattr(args, "dst_network"),
-                next_hop_addr=getattr(args, "next_hop_addr"),
-                enable=bool(getattr(args, "enable", True)),
-                preference=int(getattr(args, "preference", 1)),
-                weight=int(getattr(args, "weight", 0)),
-                outgoing_interface=getattr(args, "outgoing_interface", "") or "",
-                route_type=route_type,
-                entry_id=entry_id,
-            )
+            # 2026-10-19 houjialin：payload_json/payload_file 直传优先（完整请求体，
+            # 含结构化参数表达不了的内联 health_check）；两者互斥，JSON 解析失败报
+            # PARAM_INVALID。未提供时走结构化参数组装（原路径不变）。
+            payload_json_text = getattr(args, "payload_json", None)
+            payload_file = getattr(args, "payload_file", None)
+            if payload_json_text and payload_file:
+                return write_error(
+                    CliError(
+                        "PARAM_INVALID",
+                        "payload_json and payload_file are mutually exclusive.",
+                        {"op_id": op_id},
+                    ),
+                    output_format,
+                )
+            if payload_json_text or payload_file:
+                import json as _json
+
+                try:
+                    if payload_file:
+                        with open(payload_file, "r", encoding="utf-8") as fh:
+                            payload = _json.load(fh)
+                    else:
+                        payload = _json.loads(payload_json_text)
+                except (OSError, ValueError) as exc:
+                    return write_error(
+                        CliError(
+                            "PARAM_INVALID",
+                            f"Static-route payload is not valid JSON: {exc}",
+                            {"op_id": op_id},
+                        ),
+                        output_format,
+                    )
+            else:
+                entry_id = int(getattr(args, "id", 0) or 0)
+                payload = build_static_route_payload(
+                    dst_network=getattr(args, "dst_network"),
+                    next_hop_addr=getattr(args, "next_hop_addr"),
+                    enable=bool(getattr(args, "enable", True)),
+                    preference=int(getattr(args, "preference", 1)),
+                    weight=int(getattr(args, "weight", 0)),
+                    outgoing_interface=getattr(args, "outgoing_interface", "") or "",
+                    route_type=route_type,
+                    entry_id=entry_id,
+                )
         elif op_id == "fw_delete_static_route":
             payload = {"id": int(getattr(args, "id"))}
         else:
