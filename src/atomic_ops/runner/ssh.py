@@ -72,6 +72,49 @@ BRIDGE_DOMAIN_COLUMNS = (
 )
 _MAC_AGE_SET_FAILURE_RE = re.compile(r"(?i)expecting|error|invalid|unknown")
 
+# iplink / linkgroup 后端 etcd 校验（链路探测, houjialin 2026-10-19 上游化）
+# 全路径 etcdctl + HTTPS endpoint(23790) + 客户端证书；非交互 SSH 的 PATH 不含 /opt/dbappsecurity/bin
+_IPLINK_ETCD_PREFIX = (
+    "ETCDCTL_API=3 /opt/dbappsecurity/bin/etcdctl --endpoints=https://127.0.0.1:23790 "
+    "--cacert=/appdata/etc/etcdcerts/ca.pem --cert=/appdata/etc/etcdcerts/etcd-client.pem "
+    "--key=/appdata/etc/etcdcerts/etcd-client-key.pem get --print-value-only "
+)
+IPLINK_ETCD_COMMAND_TEMPLATE = _IPLINK_ETCD_PREFIX + "/vnf-agent/vpp1/config/vpp/iplink/v1/iplink/{{name}}"
+LINKGROUP_ETCD_COMMAND_TEMPLATE = _IPLINK_ETCD_PREFIX + "/vnf-agent/vpp1/config/vpp/iplink/v1/linkgroup/{{name}}"
+_IPLINK_STATUS_PREFIX = (
+    "ETCDCTL_API=3 /opt/dbappsecurity/bin/etcdctl --endpoints=https://127.0.0.1:23790 "
+    "--cacert=/appdata/etc/etcdcerts/ca.pem --cert=/appdata/etc/etcdcerts/etcd-client.pem "
+    "--key=/appdata/etc/etcdcerts/etcd-client-key.pem get "
+)
+IPLINK_STATUS_ETCD_TEMPLATE = _IPLINK_STATUS_PREFIX + "/vnf-agent/vpp1/config/vpp/iplink/v1/status/iplink/{name}/{state}"
+LINKGROUP_STATUS_ETCD_TEMPLATE = _IPLINK_STATUS_PREFIX + "/vnf-agent/vpp1/config/vpp/iplink/v1/status/linkgroup/{name}/{state}"
+ETCD_CONFIG_SUCCESS_PATTERN = r"\S+"
+
+
+def _validate_status_args(name: str, state: str) -> None:
+    """status key 路径的 name/state 直接拼接(不走 shlex.quote,引号会破坏 etcd key),须白名单校验。"""
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", name):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "name contains characters not allowed in etcd key path.",
+            {"name": name},
+        )
+    if state not in ("up", "down"):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "state must be 'up' or 'down'.",
+            {"state": state},
+        )
+
+
+def _render_status_command(name: str, state: str, *, linkgroup: bool = False) -> str:
+    """拼接 status key 查询命令(参数经白名单校验后直接拼,不 shell 转义)。"""
+    _validate_status_args(name, state)
+    if linkgroup:
+        return LINKGROUP_STATUS_ETCD_TEMPLATE.format(name=name, state=state)
+    return IPLINK_STATUS_ETCD_TEMPLATE.format(name=name, state=state)
+
+
 SSH_DEFAULT_PORT = 22
 TELNET_DEFAULT_PORT = 23
 
@@ -2265,3 +2308,270 @@ def _match_neighbor_expectations(
             continue
         return True
     return False
+
+
+def build_verify_iplink_etcd_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    name: str,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    resolved_username = username if username else _username_preview(session_file)
+    command = render_command(IPLINK_ETCD_COMMAND_TEMPLATE, {"name": name})
+    return {
+        "op_id": "fw_verify_iplink_etcd",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": resolved_username,
+            "success_pattern": ETCD_CONFIG_SUCCESS_PATTERN,
+        },
+        "name": name,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_iplink_etcd(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    credential_env: str,
+    name: str,
+    timeout: float,
+) -> dict[str, Any]:
+    command = render_command(IPLINK_ETCD_COMMAND_TEMPLATE, {"name": name})
+    return _execute_shell_op(
+        op_id="fw_verify_iplink_etcd",
+        transport=transport,
+        command=command,
+        success_pattern=ETCD_CONFIG_SUCCESS_PATTERN,
+        result_key="config_raw",
+        stdout_ref_label="<config-raw-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        username=username,
+        credential_env=credential_env,
+        timeout=timeout,
+    )
+
+
+# ── fw_verify_iplink_group_etcd ──────────────────────────
+
+
+def build_verify_iplink_group_etcd_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    name: str,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    resolved_username = username if username else _username_preview(session_file)
+    command = render_command(LINKGROUP_ETCD_COMMAND_TEMPLATE, {"name": name})
+    return {
+        "op_id": "fw_verify_iplink_group_etcd",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": resolved_username,
+            "success_pattern": ETCD_CONFIG_SUCCESS_PATTERN,
+        },
+        "name": name,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_iplink_group_etcd(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    credential_env: str,
+    name: str,
+    timeout: float,
+) -> dict[str, Any]:
+    command = render_command(LINKGROUP_ETCD_COMMAND_TEMPLATE, {"name": name})
+    return _execute_shell_op(
+        op_id="fw_verify_iplink_group_etcd",
+        transport=transport,
+        command=command,
+        success_pattern=ETCD_CONFIG_SUCCESS_PATTERN,
+        result_key="config_raw",
+        stdout_ref_label="<config-raw-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        username=username,
+        credential_env=credential_env,
+        timeout=timeout,
+    )
+
+
+# ── fw_verify_iplink_status_etcd ──────────────────────────
+
+
+def build_verify_iplink_status_etcd_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    name: str,
+    state: str,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    resolved_username = username if username else _username_preview(session_file)
+    command = _render_status_command(name, state)
+    return {
+        "op_id": "fw_verify_iplink_status_etcd",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": resolved_username,
+            "success_pattern": ETCD_CONFIG_SUCCESS_PATTERN,
+        },
+        "name": name,
+        "state": state,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_iplink_status_etcd(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    credential_env: str,
+    name: str,
+    state: str,
+    timeout: float,
+) -> dict[str, Any]:
+    command = _render_status_command(name, state)
+    return _execute_shell_op(
+        op_id="fw_verify_iplink_status_etcd",
+        transport=transport,
+        command=command,
+        success_pattern=ETCD_CONFIG_SUCCESS_PATTERN,
+        result_key="config_raw",
+        stdout_ref_label="<config-raw-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        username=username,
+        credential_env=credential_env,
+        timeout=timeout,
+    )
+
+
+# ── fw_verify_iplink_group_status_etcd ────────────────────
+
+
+def build_verify_iplink_group_status_etcd_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    name: str,
+    state: str,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    resolved_username = username if username else _username_preview(session_file)
+    command = _render_status_command(name, state, linkgroup=True)
+    return {
+        "op_id": "fw_verify_iplink_group_status_etcd",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": command,
+            "host": target_host,
+            "port": target_port,
+            "username": resolved_username,
+            "success_pattern": ETCD_CONFIG_SUCCESS_PATTERN,
+        },
+        "name": name,
+        "state": state,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_iplink_group_status_etcd(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    credential_env: str,
+    name: str,
+    state: str,
+    timeout: float,
+) -> dict[str, Any]:
+    command = _render_status_command(name, state, linkgroup=True)
+    return _execute_shell_op(
+        op_id="fw_verify_iplink_group_status_etcd",
+        transport=transport,
+        command=command,
+        success_pattern=ETCD_CONFIG_SUCCESS_PATTERN,
+        result_key="config_raw",
+        stdout_ref_label="<config-raw-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        username=username,
+        credential_env=credential_env,
+        timeout=timeout,
+    )
