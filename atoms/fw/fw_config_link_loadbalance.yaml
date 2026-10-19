@@ -1,0 +1,84 @@
+schema_version: "1.1"
+op_id: fw_config_link_loadbalance
+device_type: fw
+transport: http
+description: Create a link load-balance policy (链路负载分担) via /api/v1/loadbalancepolicy.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_link_loadbalance
+parameters:
+  name:
+    type: string
+    required: true
+    description: Policy name (1-31 chars, Chinese/English/digit/-/.).
+  enable:
+    type: boolean
+    required: false
+    description: Whether the policy is enabled. Defaults to true.
+  mode:
+    type: integer
+    required: true
+    description: Load-balance mode. 1=链路带宽, 2=链路权重, 4=链路主备备份.
+  interfaces:
+    type: array
+    required: true
+    description: Egress interfaces referenced by the policy, each an object with a name field.
+  session_hold:
+    type: boolean
+    required: false
+    description: Session hold flag.
+  overload_protection:
+    type: boolean
+    required: false
+    description: Overload protection flag.
+  payload_file:
+    type: string
+    required: false
+    description: Path to a complete JSON request payload.
+  payload_json:
+    type: string
+    required: false
+    description: Complete JSON request payload.
+inputs:
+  name: ""
+  enable: true
+  mode: 1
+  interfaces: []
+  session_hold: false
+  overload_protection: false
+  payload_file: ""
+  payload_json: ""
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    request: "<request-ref>"
+    response: "<response-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_CONFIG_REJECTED
+  - AUTH_FAILED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: policy_created
+      input_ref: "<response-ref>"
+      expected_result: The device returns success for the loadbalancepolicy create request.
+  summary_ref: "<link-loadbalance-summary-ref>"
+preconditions:
+  - Device REST API is reachable and authenticated.
+postconditions:
+  - Policy is persisted in device config.
+tags:
+  - firewall
+  - loadbalance
+  - link-loadbalance
+  - config
+aliases:
+  - link-loadbalance
+since_version: "1.4.0"

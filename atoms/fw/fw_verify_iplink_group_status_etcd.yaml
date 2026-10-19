@@ -1,0 +1,79 @@
+schema_version: "1.1"
+op_id: fw_verify_iplink_group_status_etcd
+device_type: fw
+transport: ssh
+description: Verify an iplink-group entry's status key (up/down) in etcd over SSH via etcdctl.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_iplink_group_status_etcd
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  username:
+    type: string
+    required: false
+    description: SSH/Telnet username; defaults to the session username (admin). Set to root for NGFW device SSH.
+  name:
+    type: string
+    required: true
+    description: Iplink-group name substituted into the etcd status key path /vnf-agent/vpp1/config/vpp/iplink/v1/status/iplink/<name>/<state>.
+  state:
+    type: string
+    required: true
+    description: Expected state to verify, "up" or "down". The atom checks the specific key .../status/iplink/<name>/<state> exists.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  username: ""
+  name: ""
+  state: ""
+side_effect: observation
+returns:
+  status: success
+  data:
+    config_raw: "<config-raw-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: capacity_domain
+  rules:
+    - name: status_key_exists
+      input_ref: "<config-raw-ref>"
+      expected_result: The etcd status key exists (non-empty output means the group is in the expected state).
+  summary_ref: "<iplink-group-status-etcd-summary-ref>"
+preconditions:
+  - Device management SSH or Telnet service is reachable.
+  - A valid credential is available via the runner credential env var.
+  - The etcdctl binary is available on the device PATH.
+postconditions:
+  - Query output is captured in diag_snapshot_ref; nothing is written to the repo.
+tags:
+  - firewall
+  - iplink
+  - linkgroup
+  - status
+  - etcd
+  - verification
+  - cli
+aliases:
+  - linkgroup-status-etcd
+since_version: "1.4.0"
