@@ -17,6 +17,7 @@
 | v1.1 | 2026-10-19 | meta-dev | Add IPS security-log query (`/api/v1/monitor/seclog`), evidence metadata (`/api/v1/seclog/evidence`), pcap download (`/api/v1/downloadfile`), and license queries (`/api/v1/licensedev`, `/api/v1/license`); record `config_source` semantics and the `whiteList` exception model. |
 | v1.2 | 2026-10-19 | meta-dev | Add the global log-cache merge setting (`PUT /api/v1/logsetting/logcacheset`), noting that it has no GET readback, that only `id=1` is supported and id is not gid, and that `timeSet` is an integer whose unit is device-defined. |
 | v1.3 | 2026-10-19 | meta-dev | Complete IPS profile `actionWrapper`/`filters`/`capture_pkt`/source-classification modelling and add IPS log export, clear, time setting, cache read, backup list, and three-step download-task operations. |
+| v1.4 | 2026-10-20 | meta-dev | Add IPS log business filters (`rule_name`/`level`/`action`/`xff`) and the AO-002/AO-003/AO-004/AO-008 SSH process-restart, resource, capture-storage, and system-log observation operations. |
 
 ## Purpose
 
@@ -314,6 +315,19 @@ The IPS security-log and related operations use query strings rather than JSON b
 IPS profile payloads are modelled from the captured structures. `actionWrapper` entries use `priority` 1..5 with `action` 0/1/2. `filters` entries use `protocols`, `classtype`, `builtintype` (`dmz`/`radom`), `prioritys`, `Directs`, `OsTypes`, optional `action` and `capture_pkt`; `[{}]` means all rules. `customAddRuleList` entries carry a rule `id`, `action` 0/1/2 and optional `capture_pkt` (`true` captures packets for that rule, `false` does not); per-rule and per-filter actions override the actionWrapper level action. `whiteList` remains the exception-rule list. `fw_verify_ips_profile` classifies each entry as predefined when `config_source=18` or when `id<1000`, and as custom when `id>=1000` (the captured create response assigned id 1000 to a user-created profile); versions without `config_source` fall back to the id rule.
 
 Log management uses `GET /api/v1/export` for CSV export (the runner writes the response bytes to `output_path`), `DELETE /api/v1/deletelog` for irreversible clearing, `GET/PUT /api/v1/logsetting/logtimesetting` for backup/retention time (unit device-defined, sample 180), `GET /api/v1/logsetting/logcacheset` for the readback of the cache setting, and `GET /api/v1/logsetting/logbackcsv` for backup files (`count` plus `vals[name,mtime,logtype]`). The three-step download flow uses `POST /api/v1/downloadfilehandle` to create a task (`vals[0].downloadtaskid`), `GET /api/v1/downloadfilehandle?id=<taskid>` until `vals[0].filename` is ready, then `GET /api/v1/downloadfile?id=<filename>` for the bytes.
+
+The IPS security-log query also accepts the business filters `rule_name`, `level`, `action` and `xff` as query values; their exact device spellings are pending confirmation, while gid=1/page/size/timetype and the custom start/end window are unchanged.
+
+The AO-002/AO-003/AO-004/AO-008 verification operations use SSH and the shell block in the adapter:
+
+| Operation | Command summary |
+|---|---|
+| `fw_verify_process_restart` | Record `ps -ef` PIDs before/after a wait window, list `/trace/coredump`, and check `/trace/log/snort_die.log` for snort. Mapping: snort -> one process; vpp -> vpp-agent-init/vpp-agent/vpp. |
+| `fw_verify_system_resource` | `free -m`, `/proc/loadavg`, `top -bn1` CPU line and `df -P -k`; optional second sample for memory/disk deltas. |
+| `fw_verify_capture_storage` | `df -P -k /userdata`, `du -sk /userdata`, mount lines and `ls -ld /userdata /exdisk`; classifies with_disk/no_disk/exdisk/unknown. |
+| `fw_capture_system_log` | Tail `/var/log/messages`, `/var/log/syslog` or `journalctl` and match the IPv4/IPv6 control-policy load keywords. |
+
+For these SSH operations, credentials come from the runner credential env var (`FW_SSH_PASSWORD` by default for root), and raw command output stays in the runner result. IPS configuration/rule changes take effect immediately; existing sessions are not refreshed while new sessions use the new configuration.
 
 The control-policy create/update payloads also carry `sec_obj_data`, the device security-profile reference list. An IPS entry uses `{profile_id, profile_name, model_name: "ips"}`. The runner accepts the raw list through `--sec-obj-data-json`/`--sec-obj-data-file`, or builds the same entry from `--ips-profile-id`/`--ips-profile-name`. Omitting all of them sends an empty list, which is the previous fixed template value.
 

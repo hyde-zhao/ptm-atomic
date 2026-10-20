@@ -3,7 +3,7 @@
 package_id: security
 display_name: Security
 description: Security policy, intrusion prevention, and access control operations.
-version: "1.4.0"
+version: "1.5.0"
 operations:
   - fw_verify_acl_rule
   - fw_verify_ips_rule
@@ -31,3 +31,7 @@ operations:
   - fw_create_log_download_task
   - fw_verify_log_download_task
   - fw_download_log_file
+  - fw_verify_process_restart
+  - fw_verify_system_resource
+  - fw_verify_capture_storage
+  - fw_capture_system_log

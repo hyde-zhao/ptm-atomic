@@ -37,12 +37,41 @@ parameters:
     type: int
     required: false
     description: Unix-second end timestamp; required when timetype is custom.
+  rule_name:
+    type: string
+    required: false
+    description: >-
+      Optional rule-name filter. The query field is modelled as rule_name
+      following the existing snake_case query style; the exact device spelling
+      is pending confirmation.
+  level:
+    type: json
+    required: false
+    description: >-
+      Optional rule-level filter. Accepts a scalar or a list; the runner sends
+      a scalar for one value and a list for multiple values.
+  action:
+    type: json
+    required: false
+    description: >-
+      Optional rule-action filter. Accepts a scalar or a list; the runner
+      sends a scalar for one value and a list for multiple values.
+  xff:
+    type: string
+    required: false
+    description: Optional X-Forwarded-For filter value (query field xff).
 inputs:
   session_ref: "<session-ref>"
   gid: 1
   page: 1
   size: 10
   timetype: 24h
+  rule_name: ""
+  level:
+    - "2"
+    - "3"
+  action: "1"
+  xff: ""
 side_effect: observation
 returns:
   status: success
@@ -90,6 +119,7 @@ preconditions:
 postconditions:
   - Security-log entries are returned as the device JSON without field remapping; count, page, size and page_count are exposed for pagination.
   - 'The entry field set is modelled from the evidence meta (app_protocol, dst_ip, dst_port, src_ip, src_port, protocol, rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,sid}, timestamp_us, pcap_filename, data_filename, highlights, ...). If an entry differs from that set, the raw JSON remains authoritative.'
+  - Business filters rule_name, level, action and xff are sent as query parameters; their exact device spellings are pending confirmation and are not applied to the raw response.
   - 'Same-attack log merging is a device behaviour: identical attacks within the query window are merged and the attack count is accumulated in the log query. No separate IPS noise-reduction configuration operation exists in this repository.'
 tags:
   - firewall

@@ -1,0 +1,102 @@
+schema_version: "1.1"
+op_id: fw_verify_process_restart
+device_type: fw
+transport: ssh
+description: Detect snort or vpp process restarts over SSH using PIDs, core files, and snort die logs.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_process_restart
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  process_type:
+    type: string
+    required: true
+    description: >-
+      Process type from the mapping table. snort maps to one snort process;
+      vpp maps to vpp-agent-init, vpp-agent and vpp. The table is extensible
+      for later process types.
+  pid_before:
+    type: list
+    required: false
+    description: >-
+      Optional previously recorded PID list. When provided it is compared with
+      the current PIDs; when omitted, the runner records PIDs at op start and
+      compares the before/after samples.
+  wait_seconds:
+    type: int
+    required: false
+    description: Observation window between the before/after PID checks (0-300 seconds).
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  process_type: snort
+  pid_before: []
+  wait_seconds: 0
+side_effect: observation
+returns:
+  status: success
+  data:
+    process_type: snort
+    pid_before: "<pid-before-list>"
+    pid_after: "<pid-after-list>"
+    pid_changed: false
+    restarted: false
+    core_file: "<core-file-or-null>"
+    core_files: "<core-file-list>"
+    die_log: "<die-log-or-null>"
+    restart_evidence: "<restart-evidence-list>"
+    raw_output: "<process-restart-raw-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 360000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: diagnostics
+  rules:
+    - name: process_restart_evidence_collected
+      input_ref: "<process-restart-raw-ref>"
+      expected_result: >-
+        The device returns before/after ps output, /trace/coredump listings and
+        the snort die log when applicable. restarted is true only when the PID
+        set changes; core_file, core_files and die_log are reported separately
+        as supporting evidence.
+  summary_ref: "<process-restart-verification-summary-ref>"
+preconditions:
+  - Device management SSH service is reachable with a root-capable credential via the runner credential env var.
+  - The process type exists in PROCESS_RESTART_MAP; unsupported types are rejected explicitly.
+postconditions:
+  - Process PIDs before/after, core files and die-log evidence are available to the caller.
+  - A core file or die log is evidence of a crash but does not by itself prove the restart time; inspect mtimes when needed.
+  - Nothing is written to the repository; raw output stays in the runner result.
+tags:
+  - firewall
+  - process
+  - restart
+  - snort
+  - vpp
+  - verification
+  - cli
+aliases:
+  - process-restart
+  - snort-restart
+  - vpp-restart
+  - process-recovery
+since_version: "1.19.0"

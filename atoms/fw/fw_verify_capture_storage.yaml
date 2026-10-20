@@ -1,0 +1,83 @@
+schema_version: "1.1"
+op_id: fw_verify_capture_storage
+device_type: fw
+transport: ssh
+description: Check userdata capture storage, disk space, and device form over SSH.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_capture_storage
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+side_effect: observation
+returns:
+  status: success
+  data:
+    userdata_size_kb: 0
+    userdata_disk:
+      filesystem: "<filesystem>"
+      size_kb: 0
+      used_kb: 0
+      available_kb: 0
+      use_percent: "<use-percent>"
+      mount: /userdata
+    disk_total_kb: 0
+    disk_used_kb: 0
+    disk_available_kb: 0
+    disk_use_percent: "<use-percent>"
+    device_form: "<with_disk|no_disk|exdisk|unknown>"
+    userdata_mount_source: "<mount-source>"
+    exdisk_present: false
+    raw_output: "<capture-storage-raw-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: diagnostics
+  rules:
+    - name: capture_storage_metrics_collected
+      input_ref: "<capture-storage-raw-ref>"
+      expected_result: >-
+        The device returns /userdata du/df output, mount lines and ls output.
+        The runner exposes userdata_size_kb, userdata disk usage and a
+        device_form classification (with_disk, no_disk, exdisk, unknown). The
+        classification is heuristic and the raw output remains authoritative.
+  summary_ref: "<capture-storage-verification-summary-ref>"
+preconditions:
+  - Device management SSH service is reachable with a root-capable credential via the runner credential env var.
+postconditions:
+  - Userdata usage, disk space, mount source and device-form classification are available to the caller.
+  - The device-form heuristic treats exdisk as present when /exdisk appears, tmpfs/ramfs/rootfs as no_disk, and an ordinary /userdata mount as with_disk; unknown is reported when evidence is insufficient.
+tags:
+  - firewall
+  - storage
+  - userdata
+  - capture
+  - verification
+  - cli
+aliases:
+  - capture-storage
+  - userdata-storage
+  - disk-form
+since_version: "1.19.0"

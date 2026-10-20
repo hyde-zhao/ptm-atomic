@@ -62,6 +62,14 @@ from atomic_ops.runner.log_ops import (
     execute_log_time_verify,
 )
 from atomic_ops.runner.session import write_session_file
+from atomic_ops.runner.ssh import (
+    PROCESS_RESTART_MAP,
+    build_capture_system_log_dry_run,
+    execute_capture_system_log,
+    execute_verify_capture_storage,
+    execute_verify_process_restart,
+    execute_verify_system_resource,
+)
 
 BASE_URL = "https://192.0.2.1"
 SNORT_RULE = 'alert tcp any any -> any any ( msg:"test"; rev:100; )'
@@ -528,6 +536,30 @@ class IpsCliDryRunTests(_CliHarness):
         self.assertIn("gid=1", url)
         self.assertIn("timetype=24h", url)
 
+    def test_log_capture_business_filters_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            [
+                "ips",
+                "log",
+                "capture",
+                "--rule-name",
+                "CVE-2019-13720",
+                "--level",
+                "2",
+                "--action",
+                "1",
+                "--xff",
+                "192.0.2.10",
+            ]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        url = payload["data"]["request"]["url"]
+        self.assertIn("rule_name=CVE-2019-13720", url)
+        self.assertIn("level=2", url)
+        self.assertIn("action=1", url)
+        self.assertIn("xff=192.0.2.10", url)
+
     def test_log_evidence_dry_run(self) -> None:
         exit_code, payload, _stderr = self._cli(
             ["ips", "log", "evidence", "--meta-file", "ips_x.meta.json"]
@@ -763,6 +795,18 @@ class IpsLogTests(unittest.TestCase):
             query,
             {"gid": 1, "page": 1, "size": 10, "timetype": "24h"},
         )
+
+    def test_log_query_business_filters(self) -> None:
+        query = build_ips_log_query(
+            rule_name="CVE-2019-13720",
+            level=["2", "3"],
+            action="1",
+            xff="192.0.2.10",
+        )
+        self.assertEqual(query["rule_name"], "CVE-2019-13720")
+        self.assertEqual(query["level"], ["2", "3"])
+        self.assertEqual(query["action"], "1")
+        self.assertEqual(query["xff"], "192.0.2.10")
 
     def test_log_query_custom_requires_start_and_end(self) -> None:
         with self.assertRaises(RunnerError):
@@ -1290,6 +1334,342 @@ class LogCacheSettingTests(unittest.TestCase):
         self.assertEqual(result["log_cache_id"], 1)
         self.assertTrue(result["requested_enable"])
         self.assertEqual(result["requested_time_set"], 60)
+
+
+class SshDetectionTests(unittest.TestCase):
+    @staticmethod
+    def _shell_result(op_id: str, raw_output: str) -> dict:
+        return {
+            "op_id": op_id,
+            "status": "success",
+            "transport": "ssh",
+            "raw_output": raw_output,
+            "request": {},
+            "response": {},
+            "diag_snapshot_ref": "",
+        }
+
+    def test_process_restart_mapping(self) -> None:
+        self.assertEqual(set(PROCESS_RESTART_MAP), {"snort", "vpp"})
+        self.assertEqual(PROCESS_RESTART_MAP["snort"]["patterns"], ("snort",))
+        self.assertEqual(
+            PROCESS_RESTART_MAP["vpp"]["patterns"],
+            ("vpp-agent-init", "vpp-agent", "vpp"),
+        )
+
+    def test_snort_restart_detects_pid_change_and_evidence(self) -> None:
+        raw = "\n".join(
+            [
+                "===PS_BEFORE===",
+                "root 100 1 0 10:00 ? 00:00:01 /usr/bin/snort",
+                "===PS_AFTER===",
+                "root 200 1 0 10:01 ? 00:00:01 /usr/bin/snort",
+                "===COREDUMP===",
+                "snort.core.123",
+                "other.core",
+                "===DIELOG===",
+                "-rw-r--r-- 1 root root 10 Oct 20 10:01 /trace/log/snort_die.log",
+            ]
+        )
+        with patch(
+            "atomic_ops.runner.ssh._execute_shell_op",
+            return_value=self._shell_result("fw_verify_process_restart", raw),
+        ):
+            result = execute_verify_process_restart(
+                base_url=BASE_URL,
+                session_file=Path("/tmp/no-session.json"),
+                transport="ssh",
+                host=None,
+                port=None,
+                username="root",
+                credential_env="FW_SSH_PASSWORD",
+                process_type="snort",
+                pid_before=None,
+                wait_seconds=0,
+                timeout=10,
+            )
+        self.assertEqual(result["pid_before"], [100])
+        self.assertEqual(result["pid_after"], [200])
+        self.assertTrue(result["pid_changed"])
+        self.assertTrue(result["restarted"])
+        self.assertEqual(result["core_file"], "snort.core.123")
+        self.assertEqual(result["core_files"], ["snort.core.123"])
+        self.assertIn("snort_die.log", result["die_log"])
+        self.assertIn("pid_changed", result["restart_evidence"])
+        self.assertIn("core_file", result["restart_evidence"])
+        self.assertIn("die_log", result["restart_evidence"])
+
+    def test_vpp_multi_process_pid_comparison(self) -> None:
+        raw = "\n".join(
+            [
+                "===PS_BEFORE===",
+                "root 10 1 0 10:00 ? 00:00:01 vpp-agent-init",
+                "root 11 1 0 10:00 ? 00:00:01 vpp-agent",
+                "root 12 1 0 10:00 ? 00:00:01 vpp",
+                "===PS_AFTER===",
+                "root 10 1 0 10:00 ? 00:00:01 vpp-agent-init",
+                "root 11 1 0 10:00 ? 00:00:01 vpp-agent",
+                "root 12 1 0 10:00 ? 00:00:01 vpp",
+                "===COREDUMP===",
+                "===DIELOG===",
+            ]
+        )
+        with patch(
+            "atomic_ops.runner.ssh._execute_shell_op",
+            return_value=self._shell_result("fw_verify_process_restart", raw),
+        ):
+            result = execute_verify_process_restart(
+                base_url=BASE_URL,
+                session_file=Path("/tmp/no-session.json"),
+                transport="ssh",
+                host=None,
+                port=None,
+                username="root",
+                credential_env="FW_SSH_PASSWORD",
+                process_type="vpp",
+                pid_before=None,
+                wait_seconds=0,
+                timeout=10,
+            )
+        self.assertEqual(result["pid_before"], [10, 11, 12])
+        self.assertEqual(result["pid_after"], [10, 11, 12])
+        self.assertFalse(result["restarted"])
+        self.assertIsNone(result["core_file"])
+        self.assertIsNone(result["die_log"])
+
+        with patch(
+            "atomic_ops.runner.ssh._execute_shell_op",
+            return_value=self._shell_result("fw_verify_process_restart", raw),
+        ):
+            changed = execute_verify_process_restart(
+                base_url=BASE_URL,
+                session_file=Path("/tmp/no-session.json"),
+                transport="ssh",
+                host=None,
+                port=None,
+                username="root",
+                credential_env="FW_SSH_PASSWORD",
+                process_type="vpp",
+                pid_before=[1, 2],
+                wait_seconds=0,
+                timeout=10,
+            )
+        self.assertTrue(changed["restarted"])
+
+    def test_unsupported_process_type_is_rejected(self) -> None:
+        with self.assertRaises(RunnerError):
+            execute_verify_process_restart(
+                base_url=BASE_URL,
+                session_file=Path("/tmp/no-session.json"),
+                transport="ssh",
+                host=None,
+                port=None,
+                username="root",
+                credential_env="FW_SSH_PASSWORD",
+                process_type="nginx",
+                pid_before=None,
+                wait_seconds=0,
+                timeout=10,
+            )
+
+    def test_system_resource_metrics_and_trend(self) -> None:
+        raw = "\n".join(
+            [
+                "===MEM===",
+                "              total        used        free      shared  buff/cache   available",
+                "Mem:           8000        3000        1000         100        4000        5000",
+                "Swap:             0           0           0",
+                "===LOAD===",
+                "0.50 0.40 0.30 1/100 12345",
+                "===CPU===",
+                "%Cpu(s):  5.0 us,  3.0 sy,  0.0 ni, 92.0 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st",
+                "===DISK===",
+                "Filesystem     1024-blocks    Used Available Capacity Mounted on",
+                "/dev/sda1         10000000 4000000   6000000      40% /",
+                "===MEM2===",
+                "Mem:           8000        3500         500         100        4000        4500",
+                "===DISK2===",
+                "Filesystem     1024-blocks    Used Available Capacity Mounted on",
+                "/dev/sda1         10000000 4100000   5900000      41% /",
+            ]
+        )
+        with patch(
+            "atomic_ops.runner.ssh._execute_shell_op",
+            return_value=self._shell_result("fw_verify_system_resource", raw),
+        ):
+            result = execute_verify_system_resource(
+                base_url=BASE_URL,
+                session_file=Path("/tmp/no-session.json"),
+                transport="ssh",
+                host=None,
+                port=None,
+                username="root",
+                credential_env="FW_SSH_PASSWORD",
+                sample_interval_seconds=1,
+                timeout=10,
+            )
+        self.assertEqual(result["memory"]["total_mb"], 8000)
+        self.assertEqual(result["memory"]["used_mb"], 3000)
+        self.assertEqual(result["memory_used_delta_mb"], 500)
+        self.assertEqual(result["load"]["load_1m"], 0.5)
+        self.assertEqual(result["cpu_usage_percent"], 8.0)
+        self.assertEqual(result["disks"][0]["mount"], "/")
+        self.assertEqual(result["disk_used_delta_kb"], 100000)
+
+    def test_capture_storage_device_forms(self) -> None:
+        with_disk_raw = "\n".join(
+            [
+                "===DF_USERDATA===",
+                "Filesystem 1024-blocks Used Available Capacity Mounted on",
+                "/dev/sdb1 2000000 500000 1500000 25% /userdata",
+                "===DU_USERDATA===",
+                "500000 /userdata",
+                "===MOUNTS===",
+                "/dev/sdb1 on /userdata type ext4 (rw)",
+                "===LS===",
+                "drwxr-xr-x 2 root root 4096 Oct 20 10:00 /userdata",
+                "===DF_ALL===",
+                "Filesystem 1024-blocks Used Available Capacity Mounted on",
+                "/dev/sdb1 2000000 500000 1500000 25% /userdata",
+            ]
+        )
+        no_disk_raw = "\n".join(
+            [
+                "===DF_USERDATA===",
+                "Filesystem 1024-blocks Used Available Capacity Mounted on",
+                "tmpfs 1000000 100000 900000 10% /userdata",
+                "===DU_USERDATA===",
+                "50000 /userdata",
+                "===MOUNTS===",
+                "tmpfs on /userdata type tmpfs (rw)",
+                "===LS===",
+                "drwxr-xr-x 2 root root 40 Oct 20 10:00 /userdata",
+                "===DF_ALL===",
+                "Filesystem 1024-blocks Used Available Capacity Mounted on",
+                "tmpfs 1000000 100000 900000 10% /userdata",
+            ]
+        )
+        exdisk_raw = "\n".join(
+            [
+                "===DF_USERDATA===",
+                "Filesystem 1024-blocks Used Available Capacity Mounted on",
+                "/dev/sdc1 3000000 600000 2400000 20% /userdata",
+                "===DU_USERDATA===",
+                "600000 /userdata",
+                "===MOUNTS===",
+                "/dev/sdc1 on /userdata type ext4 (rw)",
+                "/dev/sdd1 on /exdisk type ext4 (rw)",
+                "===LS===",
+                "drwxr-xr-x 2 root root 4096 Oct 20 10:00 /userdata",
+                "drwxr-xr-x 2 root root 4096 Oct 20 10:00 /exdisk",
+                "===DF_ALL===",
+                "Filesystem 1024-blocks Used Available Capacity Mounted on",
+                "/dev/sdc1 3000000 600000 2400000 20% /userdata",
+            ]
+        )
+        for raw, expected in (
+            (with_disk_raw, "with_disk"),
+            (no_disk_raw, "no_disk"),
+            (exdisk_raw, "exdisk"),
+        ):
+            with patch(
+                "atomic_ops.runner.ssh._execute_shell_op",
+                return_value=self._shell_result("fw_verify_capture_storage", raw),
+            ):
+                result = execute_verify_capture_storage(
+                    base_url=BASE_URL,
+                    session_file=Path("/tmp/no-session.json"),
+                    transport="ssh",
+                    host=None,
+                    port=None,
+                    username="root",
+                    credential_env="FW_SSH_PASSWORD",
+                    timeout=10,
+                )
+            self.assertEqual(result["device_form"], expected)
+
+    def test_capture_system_log_matches_policy_keywords(self) -> None:
+        raw = "\n".join(
+            [
+                "===SOURCE:/var/log/messages===",
+                "Oct 20 10:00:00 fw kernel: hello",
+                "Oct 20 10:00:01 fw app: 后台加载IPv4控制策略成功(system:0)",
+                "Oct 20 10:00:02 fw app: 后台加载IPv6控制策略成功(system:0)",
+            ]
+        )
+        with patch(
+            "atomic_ops.runner.ssh._execute_shell_op",
+            return_value=self._shell_result("fw_capture_system_log", raw),
+        ):
+            result = execute_capture_system_log(
+                base_url=BASE_URL,
+                session_file=Path("/tmp/no-session.json"),
+                transport="ssh",
+                host=None,
+                port=None,
+                username="root",
+                credential_env="FW_SSH_PASSWORD",
+                lines=200,
+                log_path=None,
+                keywords=None,
+                timeout=10,
+            )
+        self.assertEqual(result["log_source"], "/var/log/messages")
+        self.assertTrue(result["ipv4_policy_loaded"])
+        self.assertTrue(result["ipv6_policy_loaded"])
+        self.assertEqual(len(result["matched_keywords"]), 2)
+        self.assertEqual(result["line_count"], 3)
+
+    def test_capture_system_log_rejects_path_outside_allowed_roots(self) -> None:
+        with self.assertRaises(RunnerError):
+            build_capture_system_log_dry_run(
+                base_url=BASE_URL,
+                session_file=Path("/tmp/no-session.json"),
+                transport="ssh",
+                host=None,
+                port=None,
+                username="root",
+                lines=10,
+                log_path="/etc/passwd",
+                keywords=None,
+                timeout=10,
+            )
+
+
+class SshCliDryRunTests(_CliHarness):
+    def test_process_restart_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            ["cli", "verify-process-restart", "--process-type", "snort"]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        command = payload["data"]["request"]["command"]
+        self.assertIn("===PS_BEFORE===", command)
+        self.assertIn("snort", command)
+
+    def test_system_resource_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(["cli", "verify-system-resource"])
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        command = payload["data"]["request"]["command"]
+        self.assertIn("free -m", command)
+        self.assertIn("df -P -k", command)
+
+    def test_capture_storage_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(["cli", "verify-capture-storage"])
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        self.assertIn("===DF_USERDATA===", payload["data"]["request"]["command"])
+
+    def test_capture_system_log_dry_run(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            ["cli", "capture-system-log", "--lines", "50"]
+        )
+        self.assertEqual(exit_code, 0)
+        assert payload is not None
+        command = payload["data"]["request"]["command"]
+        self.assertIn("===SOURCE:", command)
+        self.assertIn("tail -n 50", command)
 
 
 if __name__ == "__main__":

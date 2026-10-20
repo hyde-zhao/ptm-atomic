@@ -359,6 +359,20 @@ def _add_log_capture_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--starttime", type=int, help="Unix-second start timestamp (required for custom).")
     parser.add_argument("--endtime", type=int, help="Unix-second end timestamp (required for custom).")
+    parser.add_argument("--rule-name", help="Rule-name filter for the IPS log query.")
+    parser.add_argument(
+        "--level",
+        action="append",
+        default=[],
+        help="Rule-level filter. Repeat for multiple values.",
+    )
+    parser.add_argument(
+        "--action",
+        action="append",
+        default=[],
+        help="Rule-action filter. Repeat for multiple values.",
+    )
+    parser.add_argument("--xff", help="X-Forwarded-For filter value for the IPS log query.")
 
 
 def _add_log_evidence_args(parser: argparse.ArgumentParser) -> None:
@@ -630,6 +644,10 @@ def _run_ips_log(args: argparse.Namespace, op_id: str) -> int:
                 timetype=getattr(args, "timetype", "24h"),
                 starttime=getattr(args, "starttime", None),
                 endtime=getattr(args, "endtime", None),
+                rule_name=getattr(args, "rule_name", None),
+                level=_arg_list(args, "level"),
+                action=_arg_list(args, "action"),
+                xff=getattr(args, "xff", None),
             )
             kwargs = {**base_kwargs, "query": query}
             result = (

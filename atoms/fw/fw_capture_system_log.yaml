@@ -1,0 +1,95 @@
+schema_version: "1.1"
+op_id: fw_capture_system_log
+device_type: fw
+transport: ssh
+description: Read system logs over SSH and check IPv4/IPv6 control-policy load keywords.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_capture_system_log
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  lines:
+    type: int
+    required: false
+    description: Number of trailing log lines to read (1-5000; default 200).
+  log_path:
+    type: string
+    required: false
+    description: >-
+      Optional log path under /var/log/ or /trace/log/. When omitted the runner
+      falls back to /var/log/messages, then /var/log/syslog, then journalctl.
+  keywords:
+    type: list
+    required: false
+    description: >-
+      Optional expected keywords. When omitted the IPv4/IPv6 policy-load
+      keywords are used: 后台加载IPv4控制策略成功(system:0) and
+      后台加载IPv6控制策略成功(system:0).
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  lines: 200
+  log_path: ""
+  keywords: []
+side_effect: observation
+returns:
+  status: success
+  data:
+    log_source: "<log-source>"
+    line_count: 0
+    raw_log: "<system-log-raw-ref>"
+    expected_keywords: "<expected-keyword-list>"
+    matched_keywords: "<matched-keyword-list>"
+    ipv4_policy_loaded: false
+    ipv6_policy_loaded: false
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: diagnostics
+  rules:
+    - name: system_log_policy_keywords_checked
+      input_ref: "<system-log-raw-ref>"
+      expected_result: >-
+        The runner returns the log source, raw log lines and matched keywords.
+        ipv4_policy_loaded/ipv6_policy_loaded are true when the corresponding
+        control-policy load keyword appears in the captured log.
+  summary_ref: "<system-log-verification-summary-ref>"
+preconditions:
+  - Device management SSH service is reachable with a root-capable credential via the runner credential env var.
+  - At least one system log source is readable; otherwise log_source is none and no keyword matches.
+postconditions:
+  - System log lines and policy-load keyword matches are available to the caller.
+  - IPS configuration and rule changes take effect immediately; existing sessions are not refreshed, while new sessions use the new configuration.
+tags:
+  - firewall
+  - log
+  - acl
+  - policy
+  - ips
+  - verification
+  - cli
+aliases:
+  - system-log
+  - acl-policy-log
+  - policy-load-log
+since_version: "1.19.0"

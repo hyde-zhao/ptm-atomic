@@ -886,12 +886,19 @@ def build_ips_log_query(
     timetype: str = "24h",
     starttime: int | str | None = None,
     endtime: int | str | None = None,
+    rule_name: str | None = None,
+    level: Any = None,
+    action: Any = None,
+    xff: str | None = None,
 ) -> dict[str, Any]:
     """构造 /api/v1/monitor/seclog 的查询参数。
 
     用户最终确认：本次只支持 gid=1（入侵防御），其他日志类型不建枚举、
     后续特性再扩展。timetype=custom 时必须同时给出 starttime/endtime
     （epoch 秒）。非 custom 窗口忽略时间戳。
+
+    业务过滤参数 rule_name/level/action/xff 的查询字段名按现有查询风格
+    推断（rule_name/xff），精确拼写待设备确认；level/action 支持标量或列表。
     """
     normalized_gid = _validate_seclog_gid(gid)
     normalized_page = int(_normalize_positive_int("page", page))
@@ -917,6 +924,18 @@ def build_ips_log_query(
             )
         query["starttime"] = _validate_non_negative_epoch("starttime", starttime)
         query["endtime"] = _validate_non_negative_epoch("endtime", endtime)
+    if rule_name is not None:
+        text = str(rule_name).strip()
+        if text:
+            query["rule_name"] = text
+    for filter_name, value in (("level", level), ("action", action)):
+        normalized_filter = _normalize_filter_value(filter_name, value)
+        if normalized_filter is not None:
+            query[filter_name] = normalized_filter
+    if xff is not None:
+        text = str(xff).strip()
+        if text:
+            query["xff"] = text
     return query
 
 

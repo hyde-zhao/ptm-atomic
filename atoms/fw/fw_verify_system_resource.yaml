@@ -1,0 +1,97 @@
+schema_version: "1.1"
+op_id: fw_verify_system_resource
+device_type: fw
+transport: ssh
+description: Check memory, CPU load, and disk usage over SSH with optional trend sampling.
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_system_resource
+parameters:
+  transport:
+    type: string
+    required: false
+    description: Network transport used by the runner. ssh uses paramiko; telnet uses telnetlib. Defaults to ssh.
+  host:
+    type: string
+    required: false
+    description: Optional target host; defaults to the host parsed from the runner base_url.
+  port:
+    type: int
+    required: false
+    description: Optional TCP port; defaults to 22 for ssh and 23 for telnet.
+  sample_interval_seconds:
+    type: int
+    required: false
+    description: >-
+      Optional second-sample interval for memory/disk deltas (0-60 seconds).
+      0 takes a single sample; CPU trend is always available from the
+      1/5/15-minute load averages.
+inputs:
+  transport: ssh
+  host: ""
+  port: 22
+  sample_interval_seconds: 0
+side_effect: observation
+returns:
+  status: success
+  data:
+    memory:
+      total_mb: 0
+      used_mb: 0
+      free_mb: 0
+      available_mb: 0
+    memory_used_delta_mb: "<memory-delta-or-null>"
+    load:
+      load_1m: 0.0
+      load_5m: 0.0
+      load_15m: 0.0
+    cpu_usage_percent: 0.0
+    disks:
+      - filesystem: "<filesystem>"
+        size_kb: 0
+        used_kb: 0
+        available_kb: 0
+        use_percent: "<use-percent>"
+        mount: "<mount>"
+    disk_used_delta_kb: "<disk-delta-or-null>"
+    sample_interval_seconds: 0
+    raw_output: "<system-resource-raw-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 90000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - RUNNER_SHELL_CONNECT_FAILED
+  - RUNNER_SHELL_COMMAND_TIMEOUT
+  - STATE_MISMATCH
+verification:
+  kind: diagnostics
+  rules:
+    - name: system_resource_metrics_collected
+      input_ref: "<system-resource-raw-ref>"
+      expected_result: >-
+        The device returns free memory, /proc/loadavg, top CPU line and df
+        output. The runner exposes memory, load (1/5/15-minute trend),
+        cpu_usage_percent and disks; unparsable fields remain null and the
+        raw output is retained.
+  summary_ref: "<system-resource-verification-summary-ref>"
+preconditions:
+  - Device management SSH service is reachable with a root-capable credential via the runner credential env var.
+postconditions:
+  - Memory/CPU/disk metrics and the raw command output are available to the caller.
+  - CPU trend uses the 1/5/15-minute load averages; memory/disk trends require sample_interval_seconds > 0.
+tags:
+  - firewall
+  - resource
+  - memory
+  - cpu
+  - disk
+  - verification
+  - cli
+aliases:
+  - system-resource
+  - memory-cpu-disk
+  - resource-check
+since_version: "1.19.0"

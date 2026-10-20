@@ -2265,3 +2265,778 @@ def _match_neighbor_expectations(
             continue
         return True
     return False
+
+
+# ── 公共进程重启 / 资源 / 存储 / 系统日志检测 ──────────────
+# 用户决策：AO-002 进程重启检测、AO-003 资源检查、AO-004 抓包存储检查、
+# AO-008 系统日志读取。所有命令均为只读；输出原样写入 data，解析结果
+# 作为附加字段返回，解析失败时不臆造值。
+
+# 进程映射表：后续新增进程类型只需扩展此表。
+# snort -> 单个进程；vpp -> vpp-agent-init / vpp-agent / vpp 多个进程。
+PROCESS_RESTART_MAP: dict[str, dict[str, Any]] = {
+    "snort": {
+        "patterns": ("snort",),
+        "core_patterns": ("snort",),
+        "die_log": "/trace/log/snort_die.log",
+    },
+    "vpp": {
+        "patterns": ("vpp-agent-init", "vpp-agent", "vpp"),
+        "core_patterns": ("vpp",),
+        "die_log": None,
+    },
+}
+PROCESS_RESTART_SUCCESS_PATTERN = r"===PS_BEFORE==="
+COREDUMP_DIR = "/trace/coredump"
+SNORT_DIE_LOG = "/trace/log/snort_die.log"
+
+SYSTEM_RESOURCE_SUCCESS_PATTERN = r"===MEM==="
+CAPTURE_STORAGE_SUCCESS_PATTERN = r"===DF_USERDATA==="
+SYSTEM_LOG_SUCCESS_PATTERN = r"===SOURCE:"
+IPV4_POLICY_KEYWORD = "后台加载IPv4控制策略成功(system:0)"
+IPV6_POLICY_KEYWORD = "后台加载IPv6控制策略成功(system:0)"
+SYSTEM_LOG_KEYWORDS = (IPV4_POLICY_KEYWORD, IPV6_POLICY_KEYWORD)
+
+
+def _validate_process_restart_type(process_type: str) -> dict[str, Any]:
+    key = str(process_type).strip().lower()
+    if key not in PROCESS_RESTART_MAP:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Unsupported process type for restart detection.",
+            {"process_type": process_type, "supported": sorted(PROCESS_RESTART_MAP)},
+        )
+    return PROCESS_RESTART_MAP[key]
+
+
+def _process_restart_command(process_type: str, wait_seconds: int) -> str:
+    mapping = _validate_process_restart_type(process_type)
+    wait_seconds = _validate_wait_seconds(wait_seconds)
+    pattern = "|".join(re.escape(item) for item in mapping["patterns"])
+    if mapping.get("die_log"):
+        die_log = f"ls -l {shlex.quote(str(mapping['die_log']))} 2>/dev/null || true"
+    else:
+        die_log = "true"
+    return (
+        "echo '===PS_BEFORE==='; "
+        f"ps -ef | grep -E '{pattern}' | grep -v grep || true; "
+        f"sleep {wait_seconds}; "
+        "echo '===PS_AFTER==='; "
+        f"ps -ef | grep -E '{pattern}' | grep -v grep || true; "
+        f"echo '===COREDUMP==='; ls -1 {COREDUMP_DIR} 2>/dev/null || true; "
+        f"echo '===DIELOG==='; {die_log}"
+    )
+
+
+def build_verify_process_restart_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    process_type: str,
+    pid_before: list[int] | None,
+    wait_seconds: int,
+    timeout: float,
+) -> dict[str, Any]:
+    mapping = _validate_process_restart_type(process_type)
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or _username_preview(session_file)
+    return {
+        "op_id": "fw_verify_process_restart",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": _process_restart_command(process_type, wait_seconds),
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+            "success_pattern": PROCESS_RESTART_SUCCESS_PATTERN,
+        },
+        "process_type": process_type,
+        "process_patterns": list(mapping["patterns"]),
+        "pid_before": _normalize_pid_before(pid_before),
+        "wait_seconds": wait_seconds,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_process_restart(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    credential_env: str,
+    process_type: str,
+    pid_before: list[int] | None,
+    wait_seconds: int,
+    timeout: float,
+) -> dict[str, Any]:
+    mapping = _validate_process_restart_type(process_type)
+    command = _process_restart_command(process_type, wait_seconds)
+    requested_pid_before = _normalize_pid_before(pid_before)
+    result = _execute_shell_op(
+        op_id="fw_verify_process_restart",
+        transport=transport,
+        command=command,
+        success_pattern=PROCESS_RESTART_SUCCESS_PATTERN,
+        result_key="raw_output",
+        stdout_ref_label="<process-restart-raw-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        credential_env=credential_env,
+        timeout=timeout,
+        username=username,
+    )
+    sections = _parse_sections(result["raw_output"])
+    parsed_before = _parse_pids(sections.get("PS_BEFORE", []))
+    parsed_after = _parse_pids(sections.get("PS_AFTER", []))
+    effective_before = requested_pid_before if requested_pid_before is not None else parsed_before
+    core_files = _parse_core_files(
+        sections.get("COREDUMP", []), mapping["core_patterns"]
+    )
+    die_log = _parse_die_log(sections.get("DIELOG", []))
+    pid_changed = bool(effective_before) and bool(parsed_after) and set(effective_before) != set(parsed_after)
+    evidence: list[str] = []
+    if pid_changed:
+        evidence.append("pid_changed")
+    if core_files:
+        evidence.append("core_file")
+    if die_log:
+        evidence.append("die_log")
+    result.update(
+        {
+            "process_type": process_type,
+            "process_patterns": list(mapping["patterns"]),
+            "pid_before": effective_before,
+            "pid_after": parsed_after,
+            "pid_changed": pid_changed,
+            "restarted": pid_changed,
+            "core_file": core_files[0] if core_files else None,
+            "core_files": core_files,
+            "die_log": die_log,
+            "restart_evidence": evidence,
+            "wait_seconds": wait_seconds,
+        }
+    )
+    return result
+
+
+def _parse_sections(raw_output: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in raw_output.splitlines():
+        match = re.fullmatch(r"===(PS_BEFORE|PS_AFTER|COREDUMP|DIELOG|MEM|MEM2|LOAD|CPU|DISK|DISK2|DF_USERDATA|DU_USERDATA|MOUNTS|LS|DF_ALL)===.*", line.strip())
+        if match:
+            current = match.group(1)
+            sections.setdefault(current, [])
+            continue
+        if current is not None:
+            sections[current].append(line)
+    return sections
+
+
+def _parse_pids(lines: list[str]) -> list[int]:
+    pids: set[int] = set()
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            pids.add(int(parts[1]))
+    return sorted(pids)
+
+
+def _parse_core_files(lines: list[str], patterns: tuple[str, ...]) -> list[str]:
+    files: list[str] = []
+    for line in lines:
+        name = line.strip()
+        if not name:
+            continue
+        lowered = name.lower()
+        if any(pattern.lower() in lowered for pattern in patterns):
+            files.append(name)
+    return files
+
+
+def _parse_die_log(lines: list[str]) -> str | None:
+    for line in lines:
+        text = line.strip()
+        if text and "snort_die.log" in text:
+            return text
+    return None
+
+
+# ── 系统资源检查 ──────────────────────────────────────────
+
+
+def _system_resource_command(sample_interval_seconds: int) -> str:
+    first = (
+        "echo '===MEM==='; free -m 2>/dev/null || cat /proc/meminfo; "
+        "echo '===LOAD==='; cat /proc/loadavg 2>/dev/null || true; "
+        "echo '===CPU==='; top -bn1 2>/dev/null | grep -E '%Cpu|Cpu\\(s\\)' || true; "
+        "echo '===DISK==='; df -P -k 2>/dev/null || true"
+    )
+    if sample_interval_seconds <= 0:
+        return first
+    return (
+        first
+        + f"; sleep {sample_interval_seconds}; "
+        + "echo '===MEM2==='; free -m 2>/dev/null || cat /proc/meminfo; "
+        + "echo '===DISK2==='; df -P -k 2>/dev/null || true"
+    )
+
+
+def build_verify_system_resource_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    sample_interval_seconds: int,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or _username_preview(session_file)
+    return {
+        "op_id": "fw_verify_system_resource",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": _system_resource_command(sample_interval_seconds),
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+            "success_pattern": SYSTEM_RESOURCE_SUCCESS_PATTERN,
+        },
+        "sample_interval_seconds": sample_interval_seconds,
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_system_resource(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    credential_env: str,
+    sample_interval_seconds: int,
+    timeout: float,
+) -> dict[str, Any]:
+    command = _system_resource_command(sample_interval_seconds)
+    result = _execute_shell_op(
+        op_id="fw_verify_system_resource",
+        transport=transport,
+        command=command,
+        success_pattern=SYSTEM_RESOURCE_SUCCESS_PATTERN,
+        result_key="raw_output",
+        stdout_ref_label="<system-resource-raw-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        credential_env=credential_env,
+        timeout=timeout,
+        username=username,
+    )
+    sections = _parse_sections(result["raw_output"])
+    memory = _parse_memory(sections.get("MEM", []))
+    memory2 = _parse_memory(sections.get("MEM2", []))
+    disks = _parse_disks(sections.get("DISK", []))
+    disks2 = _parse_disks(sections.get("DISK2", []))
+    result.update(
+        {
+            "memory": memory,
+            "memory_used_delta_mb": _delta(memory, memory2, "used_mb"),
+            "load": _parse_load(sections.get("LOAD", [])),
+            "cpu_usage_percent": _parse_cpu_usage(sections.get("CPU", [])),
+            "disks": disks,
+            "disk_used_delta_kb": _disk_used_delta(disks, disks2),
+            "sample_interval_seconds": sample_interval_seconds,
+        }
+    )
+    return result
+
+
+def _parse_memory(lines: list[str]) -> dict[str, Any]:
+    for line in lines:
+        text = line.strip()
+        if text.startswith("Mem:"):
+            parts = text.split()
+            if len(parts) >= 4:
+                return {
+                    "total_mb": _int_or_none(parts[1]),
+                    "used_mb": _int_or_none(parts[2]),
+                    "free_mb": _int_or_none(parts[3]),
+                    "available_mb": _int_or_none(parts[-1]),
+                }
+    # /proc/meminfo fallback
+    values: dict[str, int] = {}
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].endswith(":"):
+            value = _int_or_none(parts[1])
+            if value is not None:
+                values[parts[0].rstrip(":")] = value
+    if "MemTotal" in values:
+        total_kb = values["MemTotal"]
+        available_kb = values.get("MemAvailable", values.get("MemFree", 0))
+        used_kb = max(total_kb - available_kb, 0)
+        return {
+            "total_mb": round(total_kb / 1024),
+            "used_mb": round(used_kb / 1024),
+            "free_mb": round(values.get("MemFree", 0) / 1024),
+            "available_mb": round(available_kb / 1024),
+        }
+    return {}
+
+
+def _parse_load(lines: list[str]) -> dict[str, float]:
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 3:
+            try:
+                return {
+                    "load_1m": float(parts[0]),
+                    "load_5m": float(parts[1]),
+                    "load_15m": float(parts[2]),
+                }
+            except ValueError:
+                continue
+    return {}
+
+
+def _parse_cpu_usage(lines: list[str]) -> float | None:
+    for line in lines:
+        match = re.search(r"(\d+(?:\.\d+)?)\s*id", line)
+        if match:
+            try:
+                return round(max(0.0, 100.0 - float(match.group(1))), 2)
+            except ValueError:
+                continue
+    return None
+
+
+def _parse_disks(lines: list[str]) -> list[dict[str, Any]]:
+    disks: list[dict[str, Any]] = []
+    for line in lines:
+        parts = line.split(maxsplit=5)
+        if len(parts) < 6 or parts[0] == "Filesystem":
+            continue
+        if not parts[1].isdigit():
+            continue
+        disks.append(
+            {
+                "filesystem": parts[0],
+                "size_kb": _int_or_none(parts[1]),
+                "used_kb": _int_or_none(parts[2]),
+                "available_kb": _int_or_none(parts[3]),
+                "use_percent": parts[4],
+                "mount": parts[5],
+            }
+        )
+    return disks
+
+
+def _delta(first: dict[str, Any], second: dict[str, Any], key: str) -> int | None:
+    a = first.get(key) if isinstance(first, dict) else None
+    b = second.get(key) if isinstance(second, dict) else None
+    if isinstance(a, int) and isinstance(b, int):
+        return b - a
+    return None
+
+
+def _disk_used_delta(first: list[dict[str, Any]], second: list[dict[str, Any]]) -> int | None:
+    def root_used(disks: list[dict[str, Any]]) -> int | None:
+        for disk in disks:
+            if disk.get("mount") == "/":
+                value = disk.get("used_kb")
+                return value if isinstance(value, int) else None
+        return None
+
+    a = root_used(first)
+    b = root_used(second)
+    if isinstance(a, int) and isinstance(b, int):
+        return b - a
+    return None
+
+
+# ── 抓包存储检查 ──────────────────────────────────────────
+
+
+CAPTURE_STORAGE_COMMAND = (
+    "echo '===DF_USERDATA==='; df -P -k /userdata 2>/dev/null || true; "
+    "echo '===DU_USERDATA==='; du -sk /userdata 2>/dev/null || true; "
+    "echo '===MOUNTS==='; mount 2>/dev/null | grep -E 'userdata|exdisk' || true; "
+    "echo '===LS==='; ls -ld /userdata /exdisk 2>/dev/null || true; "
+    "echo '===DF_ALL==='; df -P -k 2>/dev/null || true"
+)
+
+
+def build_verify_capture_storage_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or _username_preview(session_file)
+    return {
+        "op_id": "fw_verify_capture_storage",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": CAPTURE_STORAGE_COMMAND,
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+            "success_pattern": CAPTURE_STORAGE_SUCCESS_PATTERN,
+        },
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_verify_capture_storage(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    credential_env: str,
+    timeout: float,
+) -> dict[str, Any]:
+    result = _execute_shell_op(
+        op_id="fw_verify_capture_storage",
+        transport=transport,
+        command=CAPTURE_STORAGE_COMMAND,
+        success_pattern=CAPTURE_STORAGE_SUCCESS_PATTERN,
+        result_key="raw_output",
+        stdout_ref_label="<capture-storage-raw-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        credential_env=credential_env,
+        timeout=timeout,
+        username=username,
+    )
+    sections = _parse_sections(result["raw_output"])
+    userdata_disks = _parse_disks(sections.get("DF_USERDATA", []))
+    all_disks = _parse_disks(sections.get("DF_ALL", []))
+    userdata_size_kb = _parse_du_size(sections.get("DU_USERDATA", []))
+    mount_lines = sections.get("MOUNTS", [])
+    ls_lines = sections.get("LS", [])
+    mount_text = "\n".join(mount_lines)
+    exdisk_present = "/exdisk" in mount_text or any("/exdisk" in line for line in ls_lines)
+    mount_source = _userdata_mount_source(mount_lines)
+    userdata_disk = userdata_disks[0] if userdata_disks else _find_mount_disk(all_disks, "/userdata")
+    device_form = _capture_device_form(
+        exdisk_present=exdisk_present,
+        mount_source=mount_source,
+        userdata_disk=userdata_disk,
+        mount_text=mount_text,
+    )
+    result.update(
+        {
+            "userdata_size_kb": userdata_size_kb,
+            "userdata_disk": userdata_disk,
+            "disk_total_kb": userdata_disk.get("size_kb") if userdata_disk else None,
+            "disk_used_kb": userdata_disk.get("used_kb") if userdata_disk else None,
+            "disk_available_kb": userdata_disk.get("available_kb") if userdata_disk else None,
+            "disk_use_percent": userdata_disk.get("use_percent") if userdata_disk else None,
+            "device_form": device_form,
+            "userdata_mount_source": mount_source,
+            "exdisk_present": exdisk_present,
+        }
+    )
+    return result
+
+
+def _parse_du_size(lines: list[str]) -> int | None:
+    for line in lines:
+        parts = line.split()
+        if parts and parts[0].isdigit():
+            return int(parts[0])
+    return None
+
+
+def _userdata_mount_source(lines: list[str]) -> str | None:
+    for line in lines:
+        if "/userdata" in line:
+            parts = line.split()
+            if parts:
+                return parts[0]
+    return None
+
+
+def _find_mount_disk(disks: list[dict[str, Any]], mount: str) -> dict[str, Any] | None:
+    for disk in disks:
+        if disk.get("mount") == mount:
+            return disk
+    return None
+
+
+def _capture_device_form(
+    *,
+    exdisk_present: bool,
+    mount_source: str | None,
+    userdata_disk: dict[str, Any] | None,
+    mount_text: str,
+) -> str:
+    if exdisk_present:
+        return "exdisk"
+    candidates = [mount_source or "", (userdata_disk or {}).get("filesystem") or ""]
+    if any(re.search(r"^(tmpfs|ramfs|rootfs)$", item) for item in candidates):
+        return "no_disk"
+    if "userdata" in mount_text and re.search(r"\b(tmpfs|ramfs|rootfs)\b", mount_text):
+        return "no_disk"
+    if userdata_disk is not None:
+        return "with_disk"
+    return "unknown"
+
+
+# ── 系统日志读取 ──────────────────────────────────────────
+
+
+def _system_log_command(lines: int, log_path: str | None) -> str:
+    lines = _validate_line_count(lines)
+    if log_path:
+        if not (log_path.startswith("/var/log/") or log_path.startswith("/trace/log/")):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "System log path must be under /var/log/ or /trace/log/.",
+                {"field": "log_path", "value": log_path},
+            )
+        quoted = shlex.quote(log_path)
+        return (
+            f"echo '===SOURCE:{log_path}==='; "
+            f"tail -n {lines} {quoted} 2>/dev/null || true"
+        )
+    return (
+        "if [ -f /var/log/messages ]; then "
+        "echo '===SOURCE:/var/log/messages==='; "
+        f"tail -n {lines} /var/log/messages 2>/dev/null; "
+        "elif [ -f /var/log/syslog ]; then "
+        "echo '===SOURCE:/var/log/syslog==='; "
+        f"tail -n {lines} /var/log/syslog 2>/dev/null; "
+        "elif command -v journalctl >/dev/null 2>&1; then "
+        "echo '===SOURCE:journalctl==='; "
+        f"journalctl -n {lines} --no-pager 2>/dev/null; "
+        "else echo '===SOURCE:none==='; fi"
+    )
+
+
+def build_capture_system_log_dry_run(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    lines: int,
+    log_path: str | None,
+    keywords: list[str] | None,
+    timeout: float,
+) -> dict[str, Any]:
+    target_host = _resolve_host(explicit_host=host, base_url=base_url)
+    target_port = port if port is not None else _default_port(transport)
+    effective_username = username or _username_preview(session_file)
+    return {
+        "op_id": "fw_capture_system_log",
+        "status": "dry_run",
+        "execute_required": True,
+        "transport": transport,
+        "request": {
+            "command": _system_log_command(lines, log_path),
+            "host": target_host,
+            "port": target_port,
+            "username": effective_username,
+            "success_pattern": SYSTEM_LOG_SUCCESS_PATTERN,
+        },
+        "lines": lines,
+        "log_path": log_path,
+        "keywords": list(keywords) if keywords else list(SYSTEM_LOG_KEYWORDS),
+        "session_file": str(session_file),
+        "timeout": timeout,
+    }
+
+
+def execute_capture_system_log(
+    *,
+    base_url: str,
+    session_file: Path,
+    transport: str,
+    host: str | None,
+    port: int | None,
+    username: str | None,
+    credential_env: str,
+    lines: int,
+    log_path: str | None,
+    keywords: list[str] | None,
+    timeout: float,
+) -> dict[str, Any]:
+    result = _execute_shell_op(
+        op_id="fw_capture_system_log",
+        transport=transport,
+        command=_system_log_command(lines, log_path),
+        success_pattern=SYSTEM_LOG_SUCCESS_PATTERN,
+        result_key="raw_output",
+        stdout_ref_label="<system-log-raw-ref>",
+        base_url=base_url,
+        session_file=session_file,
+        host=host,
+        port=port,
+        credential_env=credential_env,
+        timeout=timeout,
+        username=username,
+    )
+    raw_output = result["raw_output"]
+    source, raw_log = _split_system_log(raw_output)
+    expected = list(keywords) if keywords else list(SYSTEM_LOG_KEYWORDS)
+    matched = [keyword for keyword in expected if keyword in raw_log]
+    result.update(
+        {
+            "log_source": source,
+            "line_count": len(raw_log.splitlines()),
+            "raw_log": raw_log,
+            "expected_keywords": expected,
+            "matched_keywords": matched,
+            "ipv4_policy_loaded": IPV4_POLICY_KEYWORD in raw_log,
+            "ipv6_policy_loaded": IPV6_POLICY_KEYWORD in raw_log,
+        }
+    )
+    return result
+
+
+def _split_system_log(raw_output: str) -> tuple[str | None, str]:
+    source: str | None = None
+    body: list[str] = []
+    for line in raw_output.splitlines():
+        match = re.fullmatch(r"===SOURCE:(.*?)===", line.strip())
+        if match:
+            source = match.group(1)
+            continue
+        if source is not None:
+            body.append(line)
+    return source, "\n".join(body)
+
+
+def _normalize_pid_before(value: list[int] | None) -> list[int] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        items: list[Any] = value.replace(",", " ").split()
+    elif isinstance(value, (list, tuple)):
+        items = list(value)
+    else:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "pid_before must be a list of positive integers.",
+            {"field": "pid_before", "value": value},
+        )
+    pids: list[int] = []
+    for item in items:
+        if isinstance(item, bool):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "pid_before must contain positive integers.",
+                {"field": "pid_before", "value": item},
+            )
+        try:
+            pid = int(item)
+        except (TypeError, ValueError) as exc:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "pid_before must contain positive integers.",
+                {"field": "pid_before", "value": item},
+            ) from exc
+        if pid < 1:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "pid_before must contain positive integers.",
+                {"field": "pid_before", "value": item},
+            )
+        pids.append(pid)
+    unique = sorted(set(pids))
+    return unique or None
+
+
+def _validate_wait_seconds(value: int) -> int:
+    if isinstance(value, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "wait_seconds must be an integer from 0 to 300.",
+            {"field": "wait_seconds", "value": value},
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "wait_seconds must be an integer from 0 to 300.",
+            {"field": "wait_seconds", "value": value},
+        ) from exc
+    if parsed < 0 or parsed > 300:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "wait_seconds must be an integer from 0 to 300.",
+            {"field": "wait_seconds", "value": value},
+        )
+    return parsed
+
+
+def _validate_line_count(value: int) -> int:
+    if isinstance(value, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "lines must be an integer from 1 to 5000.",
+            {"field": "lines", "value": value},
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "lines must be an integer from 1 to 5000.",
+            {"field": "lines", "value": value},
+        ) from exc
+    if parsed < 1 or parsed > 5000:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "lines must be an integer from 1 to 5000.",
+            {"field": "lines", "value": value},
+        )
+    return parsed
+
+
+def _int_or_none(value: str) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

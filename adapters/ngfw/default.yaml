@@ -7707,6 +7707,10 @@ operations:
         timetype: "{{ params.timetype }}"
         starttime: "{{ params.starttime }}"
         endtime: "{{ params.endtime }}"
+        rule_name: "{{ params.rule_name }}"
+        level: "{{ params.level }}"
+        action: "{{ params.action }}"
+        xff: "{{ params.xff }}"
       payload_template: {}
     response:
       success_status:
@@ -7719,6 +7723,7 @@ operations:
         - "gid defaults to 1. The user-confirmed scope implements only gid=1 (IPS); other security-log types are not enumerated and will be added by later features. The runner rejects other values."
         - "timetype accepts 24h, all, 1h, 7d, 1m or custom; custom requires starttime and endtime as Unix-second values."
         - GET uses query-string values and sends no JSON body.
+        - "Business filters rule_name, level, action and xff are sent as query values; their exact device spellings are pending confirmation. level/action accept a scalar or a list."
         - "The top-level count drives pagination. The entry field set is modelled from the evidence meta (app_protocol, dst_ip, dst_port, src_ip, src_port, protocol, rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,sid}, timestamp_us, pcap_filename, data_filename, highlights, ...). The runner returns the raw JSON unchanged; if an entry differs from that set, the raw JSON remains authoritative."
         - "Log merging is device behaviour: identical attacks within the query window are merged and the attack count is accumulated in the log query. No separate IPS noise-reduction configuration operation exists."
   fw_verify_seclog_evidence:
@@ -8087,3 +8092,77 @@ operations:
         - The id is the ready filename returned by fw_verify_log_download_task and is URL-encoded before the request.
         - The runner writes the response bytes to output_path and reports file_size/sha256 without parsing the contents.
         - GET uses a query-string id and sends no JSON body.
+  fw_verify_process_restart:
+    atom_ref: atoms/fw/fw_verify_process_restart.yaml
+    intent: Detect snort or vpp process restarts over SSH using PIDs, core files, and snort die logs.
+    transport: ssh
+    shell:
+      command_template: "ps -ef | grep -E '{{ process_type }}' | grep -v grep"
+      success_pattern: "===PS_BEFORE==="
+      prompt_timeout_ms: 360000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner builds a multi-section command that records PIDs before and after an optional wait window, lists /trace/coredump and checks /trace/log/snort_die.log for snort.
+        - "Process mapping: snort -> one snort process; vpp -> vpp-agent-init, vpp-agent and vpp. Extend PROCESS_RESTART_MAP for later process types."
+        - restarted is true only when the PID set changes; core_file, core_files and die_log are reported separately as supporting evidence.
+        - A pre-recorded pid_before can be supplied for comparison; otherwise the runner records PIDs at op start.
+        - Session output is captured in the runner result and never written to the repository.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_verify_system_resource:
+    atom_ref: atoms/fw/fw_verify_system_resource.yaml
+    intent: Check memory, CPU load, and disk usage over SSH with optional trend sampling.
+    transport: ssh
+    shell:
+      command_template: "free -m; cat /proc/loadavg; top -bn1; df -P -k"
+      success_pattern: "===MEM==="
+      prompt_timeout_ms: 90000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner reads free memory, /proc/loadavg, the top CPU line and df output in one SSH session.
+        - The 1/5/15-minute load averages provide the CPU trend; memory/disk deltas are computed only when sample_interval_seconds is greater than 0.
+        - Unparsable metrics remain null and the raw output is retained.
+        - Session output is captured in the runner result and never written to the repository.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_verify_capture_storage:
+    atom_ref: atoms/fw/fw_verify_capture_storage.yaml
+    intent: Check userdata capture storage, disk space, and device form over SSH.
+    transport: ssh
+    shell:
+      command_template: "df -P -k /userdata; du -sk /userdata; mount; ls -ld /userdata /exdisk"
+      success_pattern: "===DF_USERDATA==="
+      prompt_timeout_ms: 30000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner reads /userdata df/du output, mount lines, ls output and the full df table.
+        - "Device form is heuristic: /exdisk present -> exdisk; tmpfs/ramfs/rootfs for /userdata -> no_disk; an ordinary /userdata mount -> with_disk; insufficient evidence -> unknown."
+        - The raw output remains authoritative when the heuristic disagrees with the device.
+        - Session output is captured in the runner result and never written to the repository.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_capture_system_log:
+    atom_ref: atoms/fw/fw_capture_system_log.yaml
+    intent: Read system logs over SSH and check IPv4/IPv6 control-policy load keywords.
+    transport: ssh
+    shell:
+      command_template: "tail -n {{ lines }} {{ log_path }}"
+      success_pattern: "===SOURCE:"
+      prompt_timeout_ms: 30000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - When log_path is omitted the runner falls back to /var/log/messages, then /var/log/syslog, then journalctl.
+        - log_path is restricted to /var/log/ or /trace/log/ and shell-escaped.
+        - "The default keywords are 后台加载IPv4控制策略成功(system:0) and 后台加载IPv6控制策略成功(system:0); custom keywords can replace them."
+        - IPS configuration and rule changes take effect immediately; existing sessions are not refreshed, while new sessions use the new configuration.
+        - Session output is captured in the runner result and never written to the repository.
+        - ptm-atomic run can execute this command only when --execute is explicit.
