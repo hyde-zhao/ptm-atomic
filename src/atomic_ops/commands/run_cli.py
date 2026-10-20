@@ -876,6 +876,14 @@ def _run_verify_neighbor_probe(args: argparse.Namespace) -> int:
 
 def _add_verify_iplink_etcd_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
+    # 2026-10-20 houjialin：注册 --username（修复 RUNNER_SHELL_CONNECT_FAILED：
+    # 未注册时 parse_known_args 静默吞掉该 flag，handler 回退 session 的 Web 用户名
+    # admin 去 SSH，NGFW 设备只允许 root —— etcdctl 必须走 root，与 abf 同型 default）。
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (etcdctl requires root privileges).",
+    )
     parser.add_argument(
         "--name",
         required=True,
@@ -941,6 +949,14 @@ def _run_verify_iplink_etcd(args: argparse.Namespace) -> int:
 
 def _add_verify_iplink_group_etcd_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
+    # 2026-10-20 houjialin：注册 --username（修复 RUNNER_SHELL_CONNECT_FAILED：
+    # 未注册时 parse_known_args 静默吞掉该 flag，handler 回退 session 的 Web 用户名
+    # admin 去 SSH，NGFW 设备只允许 root —— etcdctl 必须走 root，与 abf 同型 default）。
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (etcdctl requires root privileges).",
+    )
     parser.add_argument(
         "--name",
         required=True,
@@ -1006,6 +1022,14 @@ def _run_verify_iplink_group_etcd(args: argparse.Namespace) -> int:
 
 def _add_verify_iplink_status_etcd_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
+    # 2026-10-20 houjialin：注册 --username（修复 RUNNER_SHELL_CONNECT_FAILED：
+    # 未注册时 parse_known_args 静默吞掉该 flag，handler 回退 session 的 Web 用户名
+    # admin 去 SSH，NGFW 设备只允许 root —— etcdctl 必须走 root，与 abf 同型 default）。
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (etcdctl requires root privileges).",
+    )
     parser.add_argument(
         "--name",
         required=True,
@@ -1080,6 +1104,14 @@ def _run_verify_iplink_status_etcd(args: argparse.Namespace) -> int:
 
 def _add_verify_iplink_group_status_etcd_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
+    # 2026-10-20 houjialin：注册 --username（修复 RUNNER_SHELL_CONNECT_FAILED：
+    # 未注册时 parse_known_args 静默吞掉该 flag，handler 回退 session 的 Web 用户名
+    # admin 去 SSH，NGFW 设备只允许 root —— etcdctl 必须走 root，与 abf 同型 default）。
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (etcdctl requires root privileges).",
+    )
     parser.add_argument(
         "--name",
         required=True,
