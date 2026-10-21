@@ -15,11 +15,16 @@ filter is supplied the query is passed through unchanged.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from atomic_ops.runner.errors import RunnerError, raise_if_device_session_rejected
+from atomic_ops.runner.errors import (
+    RunnerError,
+    is_resource_not_found,
+    raise_if_device_session_rejected,
+)
 from atomic_ops.runner.http import request_json
 from atomic_ops.runner.ngfw_login import normalize_base_url
 from atomic_ops.runner.session import read_session_file
@@ -55,6 +60,14 @@ PAIR_RESULT_FIELDS = (
 PAIR_FILTER_FIELDS = ("name", "receive_interface", "transmit_interface")
 DEFAULT_FILTER_PAGE_SIZE = 100
 MAX_FILTER_PAGES = 1000
+# 设备实测（2026-10-21，<DUT_IP>）：接口对名称只允许中文、字母、数字、
+# 短横线和点，长度 1-31，**下划线不合法**。创建/更新在本地先按该规则拦截，
+# 避免把必然被设备拒绝的名称发出去。
+PAIR_NAME_PATTERN = re.compile(r"^[一-龥a-zA-Z0-9.-]{1,31}$")
+PAIR_NAME_RULE = (
+    "Interface-pair name allows only Chinese characters, letters, digits, '-' and "
+    "'.'; length must be 1-31 characters; underscores are not allowed."
+)
 
 
 # ── payload builders ───────────────────────────────────────
@@ -122,6 +135,7 @@ def _build_pair_val(
     allowed_vlan: str | int,
 ) -> dict[str, Any]:
     _validate_non_empty("name", name)
+    _validate_pair_name(name)
     _validate_non_empty("receive_interface", receive_interface)
     _validate_non_empty("transmit_interface", transmit_interface)
     if not isinstance(remark, str):
@@ -226,6 +240,7 @@ def _normalize_pair_val(val: dict[str, Any], *, default_name: str | None) -> dic
             "Interface-pair val.name is required.",
             {"field": "val.name"},
         )
+    _validate_pair_name(name)
     receive_interface = val.get("receive_interface")
     transmit_interface = val.get("transmit_interface")
     if not isinstance(receive_interface, str) or not receive_interface.strip():
@@ -560,16 +575,49 @@ def _raise_for_failure(
     response_payload: dict[str, Any],
 ) -> None:
     raise_if_device_session_rejected(status_code, response_payload, op_id=op_id)
+    err_code = response_payload.get("errCode")
+    err_msg = response_payload.get("errMsg") or response_payload.get("message")
+    details: dict[str, Any] = {
+        "op_id": op_id,
+        "status_code": status_code,
+        "err_code": err_code,
+        "err_msg": err_msg,
+        "response_keys": sorted(response_payload.keys()),
+    }
+
+    # 2026-10-21 实测（<DUT_IP>）：重复创建接口对返回 400
+    # {"errCode": "eObjCreateExist", "errMsg": "接口对名称已存在"}。这是明确的
+    # 配置拒绝（名称冲突），不是本地参数格式错误，故映射为 CONFIG_REJECTED，
+    # 并把设备原始 errCode/errMsg 原样保留在 details。
+    if (
+        op_id in {"fw_config_interface_pair", "fw_update_interface_pair"}
+        and status_code == 400
+        and err_code == "eObjCreateExist"
+    ):
+        raise RunnerError(
+            "RUNNER_CONFIG_REJECTED",
+            "Interface-pair name already exists on the device; the request was rejected.",
+            {**details, "error_type": "CONFIG_REJECTED"},
+        )
+
+    # 2026-10-21 实测（<DUT_IP>）：删除不存在的接口对返回 400
+    # {"errCode": "eObjGetNoExist", "errMsg": "未找到对应的接口对"}。该 op 声明
+    # idempotent: false —— 重复删除**不视为成功**；这里只把设备语义归类为
+    # RESOURCE_NOT_FOUND（details.error_type），运行时代码仍为
+    # RUNNER_CONFIG_REJECTED（exit 48），且**不写** idempotent 幂等键。
+    if op_id == "fw_delete_interface_pair" and is_resource_not_found(
+        status_code, response_payload, op_id=op_id
+    ):
+        raise RunnerError(
+            "RUNNER_CONFIG_REJECTED",
+            "Interface-pair was not found on the device; repeat delete is not treated as success.",
+            {**details, "error_type": "RESOURCE_NOT_FOUND"},
+        )
+
     raise RunnerError(
         "RUNNER_RESPONSE_INVALID" if method == "GET" else "RUNNER_CONFIG_REJECTED",
         "Interface-pair device request did not return a success status.",
-        {
-            "op_id": op_id,
-            "status_code": status_code,
-            "err_code": response_payload.get("errCode"),
-            "err_msg": response_payload.get("errMsg") or response_payload.get("message"),
-            "response_keys": sorted(response_payload.keys()),
-        },
+        details,
     )
 
 
@@ -608,4 +656,24 @@ def _validate_non_empty(field: str, value: str) -> None:
             "RUNNER_VALIDATION_FAILED",
             "Required interface-pair field is empty.",
             {"field": field},
+        )
+
+
+def _validate_pair_name(name: str) -> None:
+    """接口对名称本地校验（创建/更新）。
+
+    设备实测规则：只允许中文/字母/数字/``-``/``.``，长度 1-31，不允许下划线。
+    不匹配时返回 RUNNER_VALIDATION_FAILED，错误信息直接给出规则，details 携带
+    字段名、实际值与正则，便于调用方定位。
+    """
+    if not PAIR_NAME_PATTERN.fullmatch(name):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"Invalid interface-pair name {name!r}: {PAIR_NAME_RULE}",
+            {
+                "field": "name",
+                "value": name,
+                "pattern": PAIR_NAME_PATTERN.pattern,
+                "rule": PAIR_NAME_RULE,
+            },
         )

@@ -189,6 +189,70 @@ class InterfacePairPayloadTests(unittest.TestCase):
             build_interface_pair_filters(name=" ")
 
 
+class InterfacePairNameRuleTests(unittest.TestCase):
+    """接口对名称规则（2026-10-21 设备实测）：中文/字母/数字/-/.，1-31，无下划线。"""
+
+    def test_create_accepts_valid_names(self) -> None:
+        for name in ("pair1", "pair-1.2", "接口对1", "A" * 31):
+            with self.subTest(name=name):
+                payload = build_interface_pair_payload(
+                    name=name,
+                    receive_interface="GE0_1",
+                    transmit_interface="GE0_2",
+                )
+                self.assertEqual(payload["val"]["name"], name)
+
+    def test_create_rejects_underscore_name(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_interface_pair_payload(
+                name="pair_1",
+                receive_interface="GE0_1",
+                transmit_interface="GE0_2",
+            )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+        self.assertIn("underscores are not allowed", ctx.exception.message)
+        self.assertEqual(ctx.exception.details["value"], "pair_1")
+
+    def test_create_rejects_name_longer_than_31(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_interface_pair_payload(
+                name="a" * 32,
+                receive_interface="GE0_1",
+                transmit_interface="GE0_2",
+            )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_update_rejects_underscore_name(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            build_interface_pair_update_payload(
+                entry_id="pair_1",
+                receive_interface="GE0_1",
+                transmit_interface="GE0_2",
+            )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_raw_payload_rejects_underscore_name(self) -> None:
+        with self.assertRaises(RunnerError) as ctx:
+            validate_interface_pair_payload(
+                {
+                    "val": {
+                        "name": "pair_1",
+                        "receive_interface": "GE0_1",
+                        "transmit_interface": "GE0_2",
+                    }
+                },
+                op_id="fw_config_interface_pair",
+            )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_VALIDATION_FAILED")
+
+    def test_delete_keeps_non_empty_id_rule(self) -> None:
+        # 删除只要求 id 非空；名称规则由创建/更新入口负责（任务范围）。
+        payload = validate_interface_pair_payload(
+            {"id": "pair_1"}, op_id="fw_delete_interface_pair"
+        )
+        self.assertEqual(payload, {"id": "pair_1"})
+
+
 class InterfacePairExecuteTests(unittest.TestCase):
     def test_verify_without_filters_projects_known_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -336,6 +400,189 @@ class InterfacePairExecuteTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertTrue(request_mock.call_args.args[1].endswith("?id=pair+1"))
         self.assertIsNone(request_mock.call_args.kwargs["json_payload"])
+
+    def test_create_success_returns_success_envelope(self) -> None:
+        payload = build_interface_pair_payload(
+            name="pair1",
+            receive_interface="GE0_1",
+            transmit_interface="GE0_2",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.interface_pair.request_json",
+                return_value=(200, {"msg": "success"}, ""),
+            ) as request_mock:
+                result = execute_interface_pair(
+                    op_id="fw_config_interface_pair",
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=payload,
+                    verify_tls=False,
+                    timeout=5.0,
+                )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["status_code"], 200)
+        self.assertEqual(result["response"], {"msg": "success"})
+        self.assertEqual(request_mock.call_args.args[0], "POST")
+        self.assertEqual(
+            request_mock.call_args.kwargs["json_payload"]["val"]["name"], "pair1"
+        )
+
+    def test_duplicate_create_maps_eobjcreateexist(self) -> None:
+        payload = build_interface_pair_payload(
+            name="pair1",
+            receive_interface="GE0_1",
+            transmit_interface="GE0_2",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.interface_pair.request_json",
+                return_value=(
+                    400,
+                    {"errCode": "eObjCreateExist", "errMsg": "接口对名称已存在"},
+                    "",
+                ),
+            ):
+                with self.assertRaises(RunnerError) as ctx:
+                    execute_interface_pair(
+                        op_id="fw_config_interface_pair",
+                        base_url=BASE_URL,
+                        session_file=session_file,
+                        auth_header="Authorization",
+                        payload=payload,
+                        verify_tls=False,
+                        timeout=5.0,
+                    )
+        error = ctx.exception
+        self.assertEqual(error.error_code, "RUNNER_CONFIG_REJECTED")
+        self.assertEqual(error.details["error_type"], "CONFIG_REJECTED")
+        self.assertEqual(error.details["status_code"], 400)
+        self.assertEqual(error.details["err_code"], "eObjCreateExist")
+        self.assertEqual(error.details["err_msg"], "接口对名称已存在")
+        self.assertNotIn("idempotent", error.details)
+
+    def test_update_success_returns_success_envelope(self) -> None:
+        payload = build_interface_pair_update_payload(
+            entry_id="pair1",
+            receive_interface="GE0_1",
+            transmit_interface="GE0_2",
+            remark="updated",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.interface_pair.request_json",
+                return_value=(200, {"msg": "success"}, ""),
+            ) as request_mock:
+                result = execute_interface_pair(
+                    op_id="fw_update_interface_pair",
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload=payload,
+                    verify_tls=False,
+                    timeout=5.0,
+                )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(request_mock.call_args.args[0], "PUT")
+        self.assertEqual(request_mock.call_args.kwargs["json_payload"]["id"], "pair1")
+
+    def test_duplicate_update_name_maps_eobjcreateexist(self) -> None:
+        payload = build_interface_pair_update_payload(
+            entry_id="pair1",
+            receive_interface="GE0_1",
+            transmit_interface="GE0_2",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.interface_pair.request_json",
+                return_value=(
+                    400,
+                    {"errCode": "eObjCreateExist", "errMsg": "接口对名称已存在"},
+                    "",
+                ),
+            ):
+                with self.assertRaises(RunnerError) as ctx:
+                    execute_interface_pair(
+                        op_id="fw_update_interface_pair",
+                        base_url=BASE_URL,
+                        session_file=session_file,
+                        auth_header="Authorization",
+                        payload=payload,
+                        verify_tls=False,
+                        timeout=5.0,
+                    )
+        self.assertEqual(ctx.exception.error_code, "RUNNER_CONFIG_REJECTED")
+        self.assertEqual(ctx.exception.details["error_type"], "CONFIG_REJECTED")
+        self.assertEqual(ctx.exception.details["err_code"], "eObjCreateExist")
+
+    def test_update_nonexistent_preserves_device_error(self) -> None:
+        # 更新不存在的 API 行为未实测：保守处理为失败，保留设备 errCode/errMsg，
+        # 不归类为 RESOURCE_NOT_FOUND（避免把未确认语义当成目标状态已达成）。
+        payload = build_interface_pair_update_payload(
+            entry_id="pair1",
+            receive_interface="GE0_1",
+            transmit_interface="GE0_2",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.interface_pair.request_json",
+                return_value=(
+                    400,
+                    {"errCode": "eObjGetNoExist", "errMsg": "未找到对应的接口对"},
+                    "",
+                ),
+            ):
+                with self.assertRaises(RunnerError) as ctx:
+                    execute_interface_pair(
+                        op_id="fw_update_interface_pair",
+                        base_url=BASE_URL,
+                        session_file=session_file,
+                        auth_header="Authorization",
+                        payload=payload,
+                        verify_tls=False,
+                        timeout=5.0,
+                    )
+        error = ctx.exception
+        self.assertEqual(error.error_code, "RUNNER_CONFIG_REJECTED")
+        self.assertEqual(error.details["err_code"], "eObjGetNoExist")
+        self.assertEqual(error.details["err_msg"], "未找到对应的接口对")
+        self.assertNotEqual(error.details.get("error_type"), "RESOURCE_NOT_FOUND")
+
+    def test_repeat_delete_maps_eobjgetnoexist_without_idempotent_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.interface_pair.request_json",
+                return_value=(
+                    400,
+                    {"errCode": "eObjGetNoExist", "errMsg": "未找到对应的接口对"},
+                    "",
+                ),
+            ):
+                with self.assertRaises(RunnerError) as ctx:
+                    execute_interface_pair(
+                        op_id="fw_delete_interface_pair",
+                        base_url=BASE_URL,
+                        session_file=session_file,
+                        auth_header="Authorization",
+                        payload={"id": "pair1"},
+                        verify_tls=False,
+                        timeout=5.0,
+                    )
+        error = ctx.exception
+        self.assertEqual(error.error_code, "RUNNER_CONFIG_REJECTED")
+        self.assertEqual(error.details["error_type"], "RESOURCE_NOT_FOUND")
+        self.assertEqual(error.details["err_code"], "eObjGetNoExist")
+        self.assertEqual(error.details["err_msg"], "未找到对应的接口对")
+        # 真实重复删除不是成功：不得出现幂等成功键。
+        self.assertNotIn("idempotent", error.details)
+        self.assertNotIn("idempotent_source", error.details)
 
 
 class SystemTimeTests(unittest.TestCase):
@@ -540,6 +787,24 @@ class InterfacePairCliDryRunTests(_CliHarness):
         assert payload is not None
         self.assertEqual(payload["error_code"], "RUNNER_VALIDATION_FAILED")
 
+    def test_pair_config_underscore_name_reports_validation_error(self) -> None:
+        exit_code, payload, _stderr = self._cli(
+            [
+                "interface",
+                "pair-config",
+                "--name",
+                "pair_1",
+                "--receive-interface",
+                "GE0_1",
+                "--transmit-interface",
+                "GE0_2",
+            ]
+        )
+        self.assertNotEqual(exit_code, 0)
+        assert payload is not None
+        self.assertEqual(payload["error_code"], "RUNNER_VALIDATION_FAILED")
+        self.assertIn("underscores are not allowed", payload["message"])
+
     def test_pair_verify_repeated_filter_reports_validation_error(self) -> None:
         exit_code, payload, _stderr = self._cli(
             ["interface", "pair-verify", "--name", "pair1", "--name", "pair2"]
@@ -582,6 +847,25 @@ class AtomAdapterContractTests(unittest.TestCase):
                 (self.ROOT / f"atoms/fw/{op_id}.yaml").read_text(encoding="utf-8")
             )
             self.assertEqual(atom["post_verify"]["op_id"], "fw_verify_interface_pair")
+
+    def test_delete_pair_stays_non_idempotent_and_declares_not_found(self) -> None:
+        atom = yaml.safe_load(
+            (self.ROOT / "atoms/fw/fw_delete_interface_pair.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        # 真实重复删除返回 400 eObjGetNoExist：不声明幂等成功。
+        self.assertIs(atom["idempotent"], False)
+        self.assertIn("RESOURCE_NOT_FOUND", atom["error_types"])
+
+    def test_config_and_update_pair_declare_name_rule(self) -> None:
+        for op_id in ("fw_config_interface_pair", "fw_update_interface_pair"):
+            atom = yaml.safe_load(
+                (self.ROOT / f"atoms/fw/{op_id}.yaml").read_text(encoding="utf-8")
+            )
+            description = atom["parameters"]["params"]["description"]
+            self.assertIn("[一-龥a-zA-Z0-9.-]{1,31}", description)
+            self.assertIn("underscore", description)
 
 
 class L2PreparationSequenceTests(unittest.TestCase):

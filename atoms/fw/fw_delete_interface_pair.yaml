@@ -2,7 +2,11 @@ schema_version: "1.1"
 op_id: fw_delete_interface_pair
 device_type: fw
 adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_interface_pair
-description: Delete an NGFW interface pair by name through DELETE /api/v1/intf/pair.
+description: >-
+  Delete an NGFW interface pair by name through DELETE /api/v1/intf/pair.
+  A missing pair answers HTTP 400 eObjGetNoExist; the runner surfaces it as
+  RESOURCE_NOT_FOUND in the error details, but this operation stays
+  idempotent: false — a repeat delete is a failure, not a success.
 parameters:
   state_ref:
     type: string
@@ -76,6 +80,7 @@ error_types:
   - NONE
   - STATE_INVALID
   - VALIDATION_FAILED
+  - RESOURCE_NOT_FOUND
   - GATE_MISSING
   - CONFIG_REJECTED
   - DEVICE_UNREACHABLE
@@ -97,6 +102,11 @@ preconditions:
   - External orchestration holds a valid state_ref or session_ref.
   - Gate evidence exists before this high-risk interface-pair deletion is used.
   - DELETE uses the pair name as a query value and sends no JSON body.
+  - >-
+    Deleting an already-absent pair answers HTTP 400 eObjGetNoExist
+    (未找到对应的接口对). This is reported as a failure with
+    details.error_type=RESOURCE_NOT_FOUND and no idempotent marker; a repeat
+    delete is not considered success.
 postconditions:
   - Interface-pair deletion result and diagnostic references are available to the caller.
   - A follow-up fw_verify_interface_pair query can confirm the pair is absent.

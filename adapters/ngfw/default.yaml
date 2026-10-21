@@ -8276,6 +8276,8 @@ operations:
         - Both physical interfaces must be prepared with fw_update_interface mode="Pair" before the pair is created; configure the interfaces first, then create the pair.
         - For L2 forwarding, prepare member ports with fw_update_interface (mode Switch, pvid, linkType) and create the BVI with fw_config_interface before creating the pair.
         - val carries name, remark, receive_interface, transmit_interface, status_sync and allowed_vlan.
+        - "val.name must match ^[一-龥a-zA-Z0-9.-]{1,31}$: Chinese characters, letters, digits, '-' and '.' only, 1-31 characters, no underscores; the runner rejects an invalid name locally with RUNNER_VALIDATION_FAILED."
+        - "A duplicate pair name is rejected by the device with HTTP 400 eObjCreateExist (接口对名称已存在); the runner maps it to CONFIG_REJECTED and preserves errCode/errMsg in the error details."
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_interface_pair:
     atom_ref: atoms/fw/fw_verify_interface_pair.yaml
@@ -8331,6 +8333,9 @@ operations:
         - The top-level id is the existing pair name and must equal val.name.
         - The referenced physical interfaces are already in mode="Pair" through fw_update_interface.
         - The same six val fields as create are sent; update the pair, then confirm it with fw_verify_interface_pair.
+        - "val.name follows the same rule as create: ^[一-龥a-zA-Z0-9.-]{1,31}$, no underscores; an invalid name is rejected locally with RUNNER_VALIDATION_FAILED."
+        - Updating a pair that does not exist remains a failure; the device errCode/errMsg are preserved in the error details.
+        - "If the device answers HTTP 400 eObjCreateExist for an update name collision, the runner maps it to CONFIG_REJECTED and preserves errCode/errMsg in details."
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_interface_pair:
     atom_ref: atoms/fw/fw_delete_interface_pair.yaml
@@ -8358,6 +8363,7 @@ operations:
         - DELETE sends the pair name as ?id=<pair-name> and sends no JSON body.
         - Swagger declares id as list[str]; this single delete follows the repository delete convention and sends one id query value.
         - Confirm the pair is absent with fw_verify_interface_pair after deletion.
+        - "A repeat delete answers HTTP 400 eObjGetNoExist (未找到对应的接口对). The runner reports details.error_type=RESOURCE_NOT_FOUND with no idempotent marker; the operation is idempotent: false, so a repeat delete is not treated as success."
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_verify_system_time:
     atom_ref: atoms/fw/fw_verify_system_time.yaml

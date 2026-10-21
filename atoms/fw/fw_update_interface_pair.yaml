@@ -23,7 +23,13 @@ parameters:
       Complete interface-pair update envelope {id: <pair-name>, val: {...}}.
       The top-level id is the pair name and must equal val.name. val carries
       name, receive_interface, transmit_interface, status_sync, allowed_vlan
-      and remark.
+      and remark. val.name must match ^[一-龥a-zA-Z0-9.-]{1,31}$ (Chinese
+      characters, letters, digits, '-' and '.'; 1-31 characters; underscores
+      are not allowed) and is validated locally before the request is sent.
+      Updating a pair that does not exist keeps the device error (errCode/errMsg)
+      in the failure details; it is never treated as success. A duplicate name
+      answered with HTTP 400 eObjCreateExist is mapped to CONFIG_REJECTED with
+      the original errCode/errMsg preserved.
   idempotency_key:
     type: string
     required: true

@@ -23,6 +23,12 @@ parameters:
       Complete interface-pair create envelope {val: {...}}. val carries name,
       receive_interface, transmit_interface, status_sync, allowed_vlan and remark.
       POST /api/v1/intf/pair has no top-level id; name is the pair identity.
+      val.name must match ^[一-龥a-zA-Z0-9.-]{1,31}$ (Chinese characters,
+      letters, digits, '-' and '.'; 1-31 characters; underscores are not
+      allowed) and is validated locally before the request is sent.
+      A duplicate name is rejected by the device with HTTP 400
+      eObjCreateExist (CONFIG_REJECTED); the original errCode/errMsg are
+      preserved in the error details.
   idempotency_key:
     type: string
     required: true

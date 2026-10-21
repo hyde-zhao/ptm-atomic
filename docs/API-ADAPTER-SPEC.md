@@ -117,6 +117,10 @@ The interface-pair resource is `/api/v1/intf/pair` and is separate from the `/ap
 
 `val.allowed_vlan` is a string such as `"0"` (untagged) or `"1-4094"`; the runner also accepts an integer and normalizes it to a string. `status_sync` is a boolean. The pair name is the identity: create carries no top-level `id`, update carries `id` equal to `val.name`, and delete uses the name as the `?id=` value. Swagger declares the delete `id` as `list[str]`; this single-delete operation follows the repository delete convention and sends one query value.
 
+**Name rule.** Measured on 2026-10-21 (<DUT_IP>): the device accepts `^[一-龥a-zA-Z0-9.-]{1,31}$` only — Chinese characters, ASCII letters, digits, `-` and `.`, length 1-31, and **no underscores**. `fw_config_interface_pair` and `fw_update_interface_pair` enforce this rule locally before any request is sent and return `RUNNER_VALIDATION_FAILED` (details carry `field`, `value`, `pattern`, `rule`) for a violation. Delete keeps the historical non-empty `id` rule.
+
+**Failure mapping.** A duplicate create answers HTTP 400 `{"errCode":"eObjCreateExist","errMsg":"接口对名称已存在"}`; the runner maps it to `CONFIG_REJECTED` (`RUNNER_CONFIG_REJECTED`, exit 48) and keeps the device `errCode`/`errMsg` in `details`. A delete of an absent pair answers HTTP 400 `{"errCode":"eObjGetNoExist","errMsg":"未找到对应的接口对"}`; the runner reports `details.error_type=RESOURCE_NOT_FOUND` while the runtime code stays `RUNNER_CONFIG_REJECTED`. `fw_delete_interface_pair` is deliberately `idempotent: false`: it is **not** registered in `IDEMPOTENT_ERROR_TYPES`, no `idempotent`/`idempotent_source` keys are emitted, and a repeat delete is **not** treated as success. Updating a pair that does not exist was not measured; the runner keeps it as a failure with the original device error preserved rather than guessing a not-found success semantic.
+
 **Preparation order.** Configure interfaces first, then create the pair:
 
 1. Pair forwarding: set both physical ports with `fw_update_interface` `mode="Pair"` (and the required pvid/linkType fields) before `fw_config_interface_pair`.
