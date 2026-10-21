@@ -12,6 +12,7 @@ the NGFW session file.
 from __future__ import annotations
 
 import json
+import math
 import re
 from ipaddress import AddressValueError, ip_address
 from pathlib import Path
@@ -39,6 +40,19 @@ TREX_STATEFUL_OPS = {
     "tg_stop_stateful_stream",
     "tg_delete_stateful_template",
 }
+
+# 组合 op：一次 CLI 调用内先 apply 模板、成功后再 start 流；两者本身仍是
+# trex-api 的独立 op，组合逻辑只存在于本 runner（不改 TG 服务）。
+COMPOSITE_STATEFUL_OPS = {
+    "tg_start_custom_l7_stream",
+    "tg_start_pcap_stream",
+}
+# 自定义 L7 只开放攻击载体模板：http-attack（HTTP 注入/爆破/下载）
+# 与 ftp-auth（FTP 认证爆破）。
+CUSTOM_L7_TEMPLATES = ("http-attack", "ftp-auth")
+P2P_REPLAY_TEMPLATE = "p2p-replay"
+# pcap 只允许 basename（防止 ../ 路径穿越读取 TG 主机任意文件）。
+PCAP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 TREX_OPS: dict[str, tuple[str, str]] = {
     op_id: ("POST", f"/api/v1/ops/{op_id}")
@@ -83,6 +97,8 @@ _USER_ID_FORWARD_OPS = {
 }
 # Stateful (ASTF) ops also forward user_id
 _USER_ID_FORWARD_OPS.update(TREX_STATEFUL_OPS)
+# 组合 op 的 user_id 会同时下发给 apply 与 start 两个底层请求
+_USER_ID_FORWARD_OPS.update(COMPOSITE_STATEFUL_OPS)
 
 # trex-api OperationEnvelope.error_type -> (CLI runner error_code, retryable)
 ERROR_TYPE_MAP: dict[str, tuple[str, bool]] = {
@@ -230,6 +246,23 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
             "mult": params.get("mult", 1),
             "duration": params.get("duration", -1),
         }
+    elif op_id == "tg_start_custom_l7_stream":
+        # 组合 op 的逻辑载荷：apply 的 template/tunables + start 的 mult/duration。
+        # tunables 缺省为 {}，原样传给 tg_apply_stateful_template。
+        payload = {
+            "template": params.get("template") or "http-attack",
+            "tunables": params.get("tunables") if params.get("tunables") is not None else {},
+            "mult": params.get("mult", 1),
+            "duration": params.get("duration", 30),
+        }
+    elif op_id == "tg_start_pcap_stream":
+        # pcap/cps 由 runner 组装成 p2p-replay 的 tunables 后再 apply。
+        payload = {
+            "pcap": params.get("pcap"),
+            "cps": params.get("cps", 10),
+            "mult": params.get("mult", 1),
+            "duration": params.get("duration", 30),
+        }
     elif op_id == "tg_verify_stateful_metrics":
         payload = {}
         max_loss = params.get("max_loss")
@@ -275,7 +308,7 @@ def build_trex_payload(op_id: str, params: dict[str, Any]) -> dict[str, Any]:
         raise RunnerError(
             "RUNNER_UNSUPPORTED_OP",
             "Runner does not support this TRex operation.",
-            {"op_id": op_id, "supported_ops": list(TREX_OPS)},
+            {"op_id": op_id, "supported_ops": [*TREX_OPS, *sorted(COMPOSITE_STATEFUL_OPS)]},
         )
     # 多用户占用模式：非 default 的 user_id 转发到 trex-api（default/省略走旧 force 模式）
     if op_id in _USER_ID_FORWARD_OPS:
@@ -466,6 +499,54 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
                 "duration must be -1 (continuous) or a positive integer.",
                 {"field": "duration"},
             )
+    elif op_id == "tg_start_custom_l7_stream":
+        template = payload.get("template") or "http-attack"
+        if template not in CUSTOM_L7_TEMPLATES:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                f"template must be one of {list(CUSTOM_L7_TEMPLATES)}.",
+                {"field": "template", "actual": template},
+            )
+        payload["template"] = template
+        tunables = payload.get("tunables")
+        if tunables is None:
+            tunables = {}
+        if not isinstance(tunables, dict):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "tunables must be a JSON object.",
+                {"field": "tunables", "type": type(tunables).__name__},
+            )
+        payload["tunables"] = tunables
+        _validate_composite_stream_params(payload)
+    elif op_id == "tg_start_pcap_stream":
+        pcap = payload.get("pcap")
+        if not isinstance(pcap, str) or not pcap.strip():
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "pcap is required and must be a non-empty filename.",
+                {"field": "pcap"},
+            )
+        if "/" in pcap or "\\" in pcap or ".." in pcap or not PCAP_NAME_RE.fullmatch(pcap):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "pcap must be a basename under the TG avl directory "
+                "(no path separators and no '..').",
+                {"field": "pcap", "actual": pcap},
+            )
+        cps = payload.get("cps", 10)
+        if (
+            isinstance(cps, bool)
+            or not isinstance(cps, (int, float))
+            or not math.isfinite(cps)
+            or cps <= 0
+        ):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "cps must be a positive number.",
+                {"field": "cps", "actual": cps},
+            )
+        _validate_composite_stream_params(payload)
     elif op_id in {"tg_start_capture", "tg_stop_capture"}:
         ports = payload.get("ports")
         if not isinstance(ports, list) or not ports:
@@ -560,12 +641,51 @@ def validate_trex_payload(op_id: str, payload: dict[str, Any]) -> dict[str, Any]
         raise RunnerError(
             "RUNNER_UNSUPPORTED_OP",
             "Runner does not support this TRex operation.",
-            {"op_id": op_id, "supported_ops": list(TREX_OPS)},
+            {"op_id": op_id, "supported_ops": [*TREX_OPS, *sorted(COMPOSITE_STATEFUL_OPS)]},
         )
     # 转发的 user_id 校验命名规范（覆盖 CLI 传参与 --payload-json 两种入口）
     if op_id in _USER_ID_FORWARD_OPS and "user_id" in payload:
         _validate_user_id(payload["user_id"])
     return payload
+
+
+def build_composite_stateful_payloads(
+    op_id: str, payload: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """把组合 op 的逻辑载荷拆成 apply 与 start 两个 trex-api 请求载荷。
+
+    ``tg_start_custom_l7_stream`` -> apply ``http-attack``/``ftp-auth``；
+    ``tg_start_pcap_stream`` -> apply ``p2p-replay``（pcap/cps 作为 tunables）。
+    user_id 非 default 时同时下发给两个底层请求（多用户占用模式）。
+    """
+    if op_id not in COMPOSITE_STATEFUL_OPS:
+        raise RunnerError(
+            "RUNNER_UNSUPPORTED_OP",
+            "Runner does not support this composite TRex operation.",
+            {"op_id": op_id, "supported_ops": sorted(COMPOSITE_STATEFUL_OPS)},
+        )
+    if op_id == "tg_start_custom_l7_stream":
+        apply_payload: dict[str, Any] = {
+            "template": payload.get("template") or "http-attack",
+            "tunables": payload.get("tunables") or {},
+        }
+    else:
+        apply_payload = {
+            "template": P2P_REPLAY_TEMPLATE,
+            "tunables": {
+                "pcap": payload.get("pcap"),
+                "cps": payload.get("cps", 10),
+            },
+        }
+    start_payload: dict[str, Any] = {
+        "mult": payload.get("mult", 1),
+        "duration": payload.get("duration", 30),
+    }
+    user_id = payload.get("user_id")
+    if user_id is not None and user_id != "default":
+        apply_payload["user_id"] = user_id
+        start_payload["user_id"] = user_id
+    return apply_payload, start_payload
 
 
 def build_trex_dry_run(
@@ -576,6 +696,14 @@ def build_trex_dry_run(
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
+    if op_id in COMPOSITE_STATEFUL_OPS:
+        return _build_composite_dry_run(
+            op_id=op_id,
+            base_url=base_url,
+            payload=payload or {},
+            verify_tls=verify_tls,
+            timeout=timeout,
+        )
     method, _path = _method_path(op_id)
     return {
         "op_id": op_id,
@@ -593,6 +721,46 @@ def build_trex_dry_run(
     }
 
 
+def _build_composite_dry_run(
+    *,
+    op_id: str,
+    base_url: str,
+    payload: dict[str, Any],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    """组合 op 的 dry-run：完整展示 apply -> start 两个请求，不发起 HTTP。"""
+    apply_payload, start_payload = build_composite_stateful_payloads(op_id, payload)
+    steps: list[dict[str, Any]] = []
+    for step_op, step_payload in (
+        ("tg_apply_stateful_template", apply_payload),
+        ("tg_start_stateful_stream", start_payload),
+    ):
+        method, _path = _method_path(step_op)
+        steps.append(
+            {
+                "op_id": step_op,
+                "request": {
+                    "method": method,
+                    "url": _request_url(base_url, step_op),
+                    "auth": {"name": "(none)", "value": "<trex-no-auth>"},
+                    "content_type": "application/json",
+                    "payload": step_payload,
+                },
+            }
+        )
+    return {
+        "op_id": op_id,
+        "status": "dry_run",
+        "execute_required": True,
+        "composite": True,
+        "payload": payload,
+        "steps": steps,
+        "verify_tls": verify_tls,
+        "timeout": timeout,
+    }
+
+
 def execute_trex(
     *,
     op_id: str,
@@ -601,6 +769,14 @@ def execute_trex(
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
+    if op_id in COMPOSITE_STATEFUL_OPS:
+        return _execute_composite_stateful(
+            op_id=op_id,
+            base_url=base_url,
+            payload=payload or {},
+            verify_tls=verify_tls,
+            timeout=timeout,
+        )
     method, path = _method_path(op_id)
     if method == "GET":
         # ownership 查询：GET 端点，无请求体，响应是裸 {count, ownerships} 对象非 OperationEnvelope
@@ -629,6 +805,32 @@ def execute_trex(
             "request": {"method": "GET", "path": path, "auth": {"name": "(none)"}},
             "response": response_payload,
         }
+    method, path, status_code, data = _post_trex_operation(
+        op_id=op_id,
+        base_url=base_url,
+        payload=payload,
+        verify_tls=verify_tls,
+        timeout=timeout,
+    )
+    return {
+        "op_id": op_id,
+        "status": "success",
+        "status_code": status_code,
+        "request": {"method": method, "path": path, "auth": {"name": "(none)"}},
+        "response": data,
+    }
+
+
+def _post_trex_operation(
+    *,
+    op_id: str,
+    base_url: str,
+    payload: dict[str, Any] | None,
+    verify_tls: bool,
+    timeout: float,
+) -> tuple[str, str, int, dict[str, Any]]:
+    """执行单个 trex-api POST op，返回 (method, path, status_code, data)。"""
+    method, path = _method_path(op_id)
     headers = {"Content-Type": "application/json"}
     status_code, response_payload, _text = request_json(
         method,
@@ -651,14 +853,8 @@ def execute_trex(
     envelope_status = str(response_payload.get("status") or "")
     if envelope_status == "success":
         data = response_payload.get("data") or {}
-        _verify_capture_checks_echoed(op_id, payload, data)
-        return {
-            "op_id": op_id,
-            "status": "success",
-            "status_code": status_code,
-            "request": {"method": method, "path": path, "auth": {"name": "(none)"}},
-            "response": data,
-        }
+        _verify_capture_checks_echoed(op_id, payload or {}, data)
+        return method, path, status_code, data
     error_type = str(response_payload.get("error_type") or "INTERNAL_ERROR")
     error_code, retryable = ERROR_TYPE_MAP.get(error_type, ("RUNNER_RESPONSE_INVALID", False))
     details: dict[str, Any] = {
@@ -676,6 +872,110 @@ def execute_trex(
         details,
         retryable=retryable,
     )
+
+
+def _execute_composite_stateful(
+    *,
+    op_id: str,
+    base_url: str,
+    payload: dict[str, Any],
+    verify_tls: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    """组合 op：先 apply 模板，成功后再 start；apply 失败时不发 start。"""
+    apply_op = "tg_apply_stateful_template"
+    start_op = "tg_start_stateful_stream"
+    apply_payload, start_payload = build_composite_stateful_payloads(op_id, payload)
+
+    try:
+        _method, apply_path, apply_status, apply_data = _post_trex_operation(
+            op_id=apply_op,
+            base_url=base_url,
+            payload=apply_payload,
+            verify_tls=verify_tls,
+            timeout=timeout,
+        )
+    except RunnerError as exc:
+        details = dict(exc.details)
+        details.update(
+            {
+                "composite_op_id": op_id,
+                "composite_step": "apply",
+                "start_skipped": True,
+            }
+        )
+        raise RunnerError(
+            exc.error_code,
+            exc.message,
+            details,
+            retryable=exc.retryable,
+            suggestion=exc.suggestion,
+        ) from exc
+
+    apply_result = {
+        "op_id": apply_op,
+        "status": "success",
+        "status_code": apply_status,
+        "response": apply_data,
+    }
+
+    try:
+        _method, start_path, start_status, start_data = _post_trex_operation(
+            op_id=start_op,
+            base_url=base_url,
+            payload=start_payload,
+            verify_tls=verify_tls,
+            timeout=timeout,
+        )
+    except RunnerError as exc:
+        details = dict(exc.details)
+        details.update(
+            {
+                "composite_op_id": op_id,
+                "composite_step": "start",
+                "apply": apply_result,
+            }
+        )
+        raise RunnerError(
+            exc.error_code,
+            exc.message,
+            details,
+            retryable=exc.retryable,
+            suggestion=exc.suggestion,
+        ) from exc
+
+    start_result = {
+        "op_id": start_op,
+        "status": "success",
+        "status_code": start_status,
+        "response": start_data,
+    }
+    data: dict[str, Any] = {
+        "user_id": payload.get("user_id") or "default",
+        "template": apply_payload["template"],
+        "tunables": apply_payload["tunables"],
+        "mult": payload.get("mult", 1),
+        "duration": payload.get("duration", 30),
+        "apply": apply_result,
+        "start": start_result,
+    }
+    if op_id == "tg_start_pcap_stream":
+        data["pcap"] = payload.get("pcap")
+        data["cps"] = payload.get("cps", 10)
+    return {
+        "op_id": op_id,
+        "status": "success",
+        "status_code": start_status,
+        "request": {
+            "method": "POST",
+            "auth": {"name": "(none)"},
+            "steps": [
+                {"op_id": apply_op, "path": apply_path, "payload": apply_payload},
+                {"op_id": start_op, "path": start_path, "payload": start_payload},
+            ],
+        },
+        "response": data,
+    }
 
 
 def _verify_capture_checks_echoed(op_id: str, payload: dict[str, Any], data: dict[str, Any]) -> None:
@@ -722,7 +1022,7 @@ def _method_path(op_id: str) -> tuple[str, str]:
         raise RunnerError(
             "RUNNER_UNSUPPORTED_OP",
             "Runner does not support this TRex operation.",
-            {"op_id": op_id, "supported_ops": list(TREX_OPS)},
+            {"op_id": op_id, "supported_ops": [*TREX_OPS, *sorted(COMPOSITE_STATEFUL_OPS)]},
         ) from exc
 
 
@@ -939,6 +1239,32 @@ def _validate_port_int(field: str, value: Any) -> int:
             {"field": field, "actual": value},
         )
     return value
+
+
+def _validate_composite_stream_params(payload: dict[str, Any]) -> None:
+    """校验组合 op 共享的 mult/duration 语义。
+
+    mult 必须是正整数；duration 必须是 -1（持续）或正整数。显式排除 bool
+    （``isinstance(True, int)`` 为真，不拦会把 True 当成 1 静默放行）。
+    """
+    mult = payload.get("mult", 1)
+    if isinstance(mult, bool) or not isinstance(mult, int) or mult < 1:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "mult must be a positive integer.",
+            {"field": "mult", "actual": mult},
+        )
+    duration = payload.get("duration", 30)
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, int)
+        or (duration != -1 and duration <= 0)
+    ):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "duration must be -1 (continuous) or a positive integer.",
+            {"field": "duration", "actual": duration},
+        )
 
 
 def _validate_positive_int(field: str, value: Any) -> int:

@@ -1,0 +1,95 @@
+schema_version: "1.1"
+op_id: tg_start_pcap_stream
+device_type: tg
+description: Apply the p2p-replay ASTF template with a pcap and start replay traffic.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_start_pcap_stream
+parameters:
+  user_id:
+    type: string
+    required: false
+    description: TRex multi-user owner id. Defaults to "default".
+  pcap:
+    type: string
+    required: true
+    description: >-
+      pcap basename under the TG avl directory (for example
+      threat_p2p_feiqiu.pcap). Path separators and ".." are rejected so the
+      tunable cannot escape the avl directory.
+  cps:
+    type: float
+    required: false
+    description: >-
+      Connections per second for pcap replay. Defaults to 10. Must be a
+      positive number.
+  mult:
+    type: int
+    required: false
+    description: CPS multiplier. mult x replay cps = actual CPS. Defaults to 1.
+  duration:
+    type: int
+    required: false
+    description: >-
+      Run duration in seconds. >0 = timed, -1 = continuous until stop.
+      Defaults to 30.
+returns:
+  status: success
+  data:
+    user_id: dev163-1
+    pcap: threat_p2p_feiqiu.pcap
+    cps: 10.0
+    template: p2p-replay
+    tunables:
+      pcap: threat_p2p_feiqiu.pcap
+      cps: 10.0
+    mult: 1
+    duration: 30
+    apply:
+      op_id: tg_apply_stateful_template
+      status: success
+      status_code: 200
+      response:
+        template: p2p-replay
+        status: applied
+    start:
+      op_id: tg_start_stateful_stream
+      status: success
+      status_code: 200
+      response:
+        state: running
+  error_type: INVALID_PARAM
+  diag_snapshot_ref: ""
+idempotent: false
+side_effect: traffic_runtime
+rollback_strategy:
+  type: inverse_op
+  op_id: tg_stop_stateful_stream
+  snapshot_required: false
+  required_inputs:
+    - user_id
+  notes: Stop terminates the replay stream and clears runtime state.
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 60000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - STATE_MISMATCH
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - ASTF interfaces have been configured via tg_config_stateful_interface.
+  - The requested pcap exists in the TG avl directory.
+  - The trex-astf.service is running and RPC port 4511 is reachable.
+postconditions:
+  - The p2p-replay profile is loaded and pcap replay traffic is running.
+  - If the apply step fails, no start request is sent.
+tags:
+  - traffic
+  - trex
+  - stateful
+  - stream
+  - pcap
+  - p2p
+  - composite
+since_version: "1.4.0"

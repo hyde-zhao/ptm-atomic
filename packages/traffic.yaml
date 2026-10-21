@@ -4,9 +4,9 @@ package_id: traffic
 display_name: Traffic
 description: >-
   Traffic generator operations for TRex STL template/stream lifecycle, ASTF
-  stateful application traffic (http/dns/ftp/mixed), multi-user port ownership,
-  and ownership query.
-version: "1.3.0"
+  stateful application traffic (http/dns/ftp/mixed), custom L7 attack traffic,
+  pcap replay, multi-user port ownership, and ownership query.
+version: "1.4.0"
 operations:
   - tg_acquire_ports
   - tg_config_interface
@@ -20,6 +20,8 @@ operations:
   - tg_config_stateful_interface
   - tg_apply_stateful_template
   - tg_start_stateful_stream
+  - tg_start_custom_l7_stream
+  - tg_start_pcap_stream
   - tg_verify_stateful_metrics
   - tg_stop_stateful_stream
   - tg_delete_stateful_template

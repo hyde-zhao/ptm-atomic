@@ -478,7 +478,7 @@ ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-i
 | `ngfw_capacity_config` | 188 | `fw_config_interface`、`fw_update_interface`、`fw_delete_interface`、`fw_config_interface_pair`、`fw_config_policy_route`、`fw_config_ips_rule` |
 | `ngfw_verification` | 78 | `fw_verify_interface`、`fw_verify_interface_pair`、`fw_verify_system_time`、`fw_verify_policy_route`、`fw_verify_ips_rule`、`fw_capture_ips_log`、`fw_verify_process_restart` |
 | `ngfw_batch_config` | 13 | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_static_route`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
-| `traffic` | 15 | `tg_start_traffic_stream`、`tg_capture_traffic_result`、`tg_verify_traffic_loss` |
+| `traffic` | 17 | `tg_start_traffic_stream`、`tg_start_custom_l7_stream`、`tg_start_pcap_stream`、`tg_verify_traffic_loss` |
 
 `package_id` 必须与 `packages/<package_id>.yaml` 文件名一致。package 是 `list`、`validate --package` 等命令使用的过滤视图，不复制 atom 文件，不安装 atom，不执行 atom，不分发 atom，也不表示可执行计划。
 

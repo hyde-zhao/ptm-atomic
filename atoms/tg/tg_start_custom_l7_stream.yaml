@@ -1,0 +1,95 @@
+schema_version: "1.1"
+op_id: tg_start_custom_l7_stream
+device_type: tg
+description: Apply a custom L7 ASTF template and start stateful traffic in one operation.
+adapter_contract_ref: adapters/trex/default.yaml#/operations/tg_start_custom_l7_stream
+parameters:
+  user_id:
+    type: string
+    required: false
+    description: TRex multi-user owner id. Defaults to "default".
+  template:
+    type: string
+    required: false
+    description: >-
+      Custom L7 ASTF template to apply. Allowed values: http-attack
+      (method/uri/body/resp_status/resp_body/attempts tunables) and ftp-auth
+      (username/password/resp_status/attempts tunables). Defaults to
+      http-attack.
+  tunables:
+    type: json
+    required: false
+    description: >-
+      Template-specific tunables JSON object, passed unchanged to
+      tg_apply_stateful_template. String values accept a "b64:<base64>" form
+      to escape values argparse would mistake for options.
+  mult:
+    type: int
+    required: false
+    description: CPS multiplier. mult x template base_cps = actual CPS. Defaults to 1.
+  duration:
+    type: int
+    required: false
+    description: >-
+      Run duration in seconds. >0 = timed, -1 = continuous until stop.
+      Defaults to 30.
+returns:
+  status: success
+  data:
+    user_id: dev163-1
+    template: http-attack
+    tunables:
+      method: POST
+      uri: /login
+      body: IPS_DBSQLI_MARKER_5b17
+      content_type: application/x-www-form-urlencoded
+    mult: 1
+    duration: 30
+    apply:
+      op_id: tg_apply_stateful_template
+      status: success
+      status_code: 200
+      response:
+        template: http-attack
+        status: applied
+    start:
+      op_id: tg_start_stateful_stream
+      status: success
+      status_code: 200
+      response:
+        state: running
+  error_type: INVALID_PARAM
+  diag_snapshot_ref: ""
+idempotent: false
+side_effect: traffic_runtime
+rollback_strategy:
+  type: inverse_op
+  op_id: tg_stop_stateful_stream
+  snapshot_required: false
+  required_inputs:
+    - user_id
+  notes: Stop terminates the stateful stream and clears runtime state.
+dry_run_supported: true
+risk_level: medium
+timeout_ms: 60000
+error_types:
+  - INVALID_PARAM
+  - RESOURCE_NOT_FOUND
+  - STATE_MISMATCH
+  - DEVICE_UNREACHABLE
+  - TIMEOUT
+  - INTERNAL_ERROR
+preconditions:
+  - ASTF interfaces have been configured via tg_config_stateful_interface.
+  - The trex-astf.service is running and RPC port 4511 is reachable.
+postconditions:
+  - The custom L7 ASTF profile is loaded and stateful traffic is running.
+  - If the apply step fails, no start request is sent.
+tags:
+  - traffic
+  - trex
+  - stateful
+  - stream
+  - l7
+  - composite
+since_version: "1.4.0"
