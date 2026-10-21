@@ -930,8 +930,9 @@ def build_ips_log_query(
     后续特性再扩展。timetype=custom 时必须同时给出 starttime/endtime
     （epoch 秒）。非 custom 窗口忽略时间戳。
 
-    业务过滤参数 rule_name/level/action/xff 的查询字段名按现有查询风格
-    推断（rule_name/xff），精确拼写待设备确认；level/action 支持标量或列表。
+    业务过滤参数 rule_name/level/action/xff：2026-10-21 DUT2 实机确认
+    rule_name 对应日志 hit_rule（规则 msg），level/action 支持标量或列表，
+    action=3 告警、4 阻断；查询窗口 timetype 与 page/size 均生效。
     """
     normalized_gid = _validate_seclog_gid(gid)
     normalized_page = int(_normalize_positive_int("page", page))

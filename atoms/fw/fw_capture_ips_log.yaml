@@ -119,7 +119,7 @@ preconditions:
 postconditions:
   - Security-log entries are returned as the device JSON without field remapping; count, page, size and page_count are exposed for pagination.
   - 'The entry field set is modelled from the evidence meta (app_protocol, dst_ip, dst_port, src_ip, src_port, protocol, rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,sid}, timestamp_us, pcap_filename, data_filename, highlights, ...). If an entry differs from that set, the raw JSON remains authoritative.'
-  - Business filters rule_name, level, action and xff are sent as query parameters; their exact device spellings are pending confirmation and are not applied to the raw response.
+  - Business filters rule_name (matches log hit_rule), level, action and xff are sent as query parameters; live device check 2026-10-21 confirmed rule_name/action/level filtering (action=3 alert, 4 block). The raw response is unchanged.
   - 'Same-attack log merging is a device behaviour: identical attacks within the query window are merged and the attack count is accumulated in the log query. No separate IPS noise-reduction configuration operation exists in this repository.'
 tags:
   - firewall
