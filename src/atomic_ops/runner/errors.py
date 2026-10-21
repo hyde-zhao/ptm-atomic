@@ -232,6 +232,12 @@ IDEMPOTENT_ERROR_TYPES: dict[str, frozenset[str]] = {
     # ⇒ 禁用的目标状态已达成。与删除族同构，故入表；判据由 runner 在**本地**给出
     # （读回是成功的空列表，无设备错误可引用），不走 is_resource_not_found。
     "fw_disable_dhcpv6_server": frozenset({"RESOURCE_NOT_FOUND"}),
+    # IPS 规则/防护模板删除（2026-10-19 用户补充的权威错误口径）：
+    #   规则重复删除 400 eConfigWrite「删除规则失败(C)」
+    #   模板重复删除 400 eConfigWrite「读取profile错误」
+    # eConfigWrite 是通用写入码，不能进码级明确集，故用 op 专属组合表。
+    "fw_delete_ips_rule": frozenset({"RESOURCE_NOT_FOUND"}),
+    "fw_delete_ips_profile": frozenset({"RESOURCE_NOT_FOUND"}),
 }
 
 _IDEMPOTENT_DECL_FIELD = "idempotent"
@@ -411,6 +417,10 @@ RESOURCE_NOT_FOUND_MESSAGE_MARKERS = ("Couldn't found", "不存在")
 RESOURCE_NOT_FOUND_OP_CODE_MARKERS: dict[str, tuple[str, tuple[str, ...]]] = {
     # 2026-10-16 在 <DUT_IP> 实测五例对照，见 IDEMPOTENT_ERROR_TYPES 处注释。
     "fw_delete_dhcpv6_server": ("eRequestParam", ("http请求参数错误",)),
+    # IPS 删除（2026-10-19 用户补充）：规则与模板的重复删除都答通用写入码
+    # eConfigWrite，只能靠文案区分；两条文案互不重叠，作用域限定到各自 op。
+    "fw_delete_ips_rule": ("eConfigWrite", ("删除规则失败(C)",)),
+    "fw_delete_ips_profile": ("eConfigWrite", ("读取profile错误",)),
 }
 
 
@@ -434,18 +444,19 @@ def is_resource_not_found(
     err_code = response_payload.get("errCode")
     if not isinstance(err_code, str):
         return False
+    blob = " ".join(
+        str(response_payload.get(key) or "")
+        for key in ("errMsg", "errMessage", "message")
+    )
+    # op 专属「通用码 + 文案」组合优先判定：eConfigWrite 等写入码不在 generic 集合，
+    # 作用域仍由 IDEMPOTENT_ERROR_TYPES 登记表门控（validate_idempotent_registry 强制）。
+    scoped = RESOURCE_NOT_FOUND_OP_CODE_MARKERS.get(op_id or "")
+    if scoped and err_code == scoped[0]:
+        return any(marker in blob for marker in scoped[1])
     if err_code in RESOURCE_NOT_FOUND_ERR_CODES:
         return True
     if err_code in _RESOURCE_NOT_FOUND_GENERIC_ERR_CODES:
-        blob = " ".join(
-            str(response_payload.get(key) or "")
-            for key in ("errMsg", "errMessage", "message")
-        )
-        if any(marker in blob for marker in RESOURCE_NOT_FOUND_MESSAGE_MARKERS):
-            return True
-        scoped = RESOURCE_NOT_FOUND_OP_CODE_MARKERS.get(op_id or "")
-        if scoped and err_code == scoped[0]:
-            return any(marker in blob for marker in scoped[1])
+        return any(marker in blob for marker in RESOURCE_NOT_FOUND_MESSAGE_MARKERS)
     return False
 
 

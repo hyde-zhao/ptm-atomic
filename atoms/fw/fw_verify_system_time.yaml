@@ -1,0 +1,83 @@
+schema_version: "1.1"
+op_id: fw_verify_system_time
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_system_time
+description: Query NGFW system time through GET /api/v1/systime.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be system_time for this operation.
+  expected_date:
+    type: string
+    required: false
+    description: Optional expected date in YYYY-MM-DD form for an exact-match assertion.
+  expected_time:
+    type: string
+    required: false
+    description: Optional expected time in HH:MM:SS form for an exact-match assertion.
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: system_time
+  expected_date: "2026-10-21"
+  expected_time: "12:00:00"
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<system-time-state-ref>"
+    name: systime
+    enable: true
+    date: "2026-10-21"
+    time: "12:00:00"
+    ntp:
+      interval: 0
+      mainserver: ""
+    matches_expected_date: true
+    matches_expected_time: true
+    matches_expected: true
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - STATE_MISMATCH
+  - UNKNOWN_ERROR
+verification:
+  kind: capacity_domain
+  rules:
+    - name: system_time_returns_vals_entry
+      input_ref: "<system-time-query-result-ref>"
+      expected_result: >-
+        the device returns vals[0] with name, enable, date, time and ntp; when
+        expected_date or expected_time is supplied, the corresponding match flag
+        reports whether the observed value equals the expected value exactly.
+  summary_ref: "<system-time-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - The system time query is read-only; this operation never changes the device clock.
+postconditions:
+  - System time fields and match flags are available to the caller.
+  - The result can be used as a log timestamp baseline or a time-accuracy check.
+tags:
+  - firewall
+  - system
+  - time
+  - verification
+aliases:
+  - system-time
+  - sys-time
+  - device-time
+since_version: "1.20.0"

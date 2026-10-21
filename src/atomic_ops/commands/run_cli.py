@@ -101,6 +101,41 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             add_args=_add_process_args,
         ),
         CommandSpec(
+            name="verify-process-restart",
+            help="Detect snort/vpp process restarts over SSH.",
+            description=(
+                "Record process PIDs before/after an observation window, list /trace/coredump "
+                "core files and check /trace/log/snort_die.log for snort."
+            ),
+            handler=_run_verify_process_restart,
+            add_args=_add_process_restart_args,
+        ),
+        CommandSpec(
+            name="verify-system-resource",
+            help="Check memory/CPU/disk usage over SSH.",
+            description="Read free/loadavg/top/df over SSH and optionally take a second sample for deltas.",
+            handler=_run_verify_system_resource,
+            add_args=_add_system_resource_args,
+        ),
+        CommandSpec(
+            name="verify-capture-storage",
+            help="Check userdata capture storage over SSH.",
+            description="Read /userdata usage, disk space and mount form (with disk / no disk / exdisk).",
+            handler=_run_verify_capture_storage,
+            add_args=_add_capture_storage_args,
+        ),
+        CommandSpec(
+            name="capture-system-log",
+            help="Read system logs and check ACL policy-load keywords.",
+            description=(
+                "Tail /var/log/messages, /var/log/syslog or journalctl and check the IPv4/IPv6 "
+                "control-policy load keywords. IPS config/rule changes take effect immediately; "
+                "old sessions are not refreshed and new sessions use the new configuration."
+            ),
+            handler=_run_capture_system_log,
+            add_args=_add_capture_system_log_args,
+        ),
+        CommandSpec(
             name="kill-process",
             help="Kill vpp/dnsmasq/agent by pid over SSH (auto-restarts).",
             description="kill -9 <pid>; the device supervisor restarts the process automatically.",
@@ -341,6 +376,77 @@ def _add_kill_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_process_restart_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (process ops run in the Linux shell).",
+    )
+    parser.add_argument(
+        "--process-type",
+        required=True,
+        help="Process type from the mapping table: snort (single process) or vpp (multiple processes).",
+    )
+    parser.add_argument(
+        "--pid-before",
+        action="append",
+        type=int,
+        default=None,
+        help="Previously recorded PID. Repeat for multi-process types; when omitted, PIDs are captured at op start.",
+    )
+    parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=0,
+        help="Observation window between the before/after PID checks (0-300 seconds).",
+    )
+
+
+def _add_system_resource_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (resource metrics run in the Linux shell).",
+    )
+    parser.add_argument(
+        "--sample-interval-seconds",
+        type=int,
+        default=0,
+        help="Optional second-sample interval for memory/disk deltas (0-60 seconds; 0 takes one sample).",
+    )
+
+
+def _add_capture_storage_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (storage checks run in the Linux shell).",
+    )
+
+
+def _add_capture_system_log_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (system log reads run in the Linux shell).",
+    )
+    parser.add_argument("--lines", type=int, default=200, help="Number of trailing log lines to read (1-5000).")
+    parser.add_argument(
+        "--log-path",
+        help="Optional log path under /var/log/ or /trace/log/; defaults to messages, syslog or journalctl fallback.",
+    )
+    parser.add_argument(
+        "--keyword",
+        action="append",
+        default=[],
+        help="Expected keyword to match. Repeat for multiple keywords; defaults to the IPv4/IPv6 policy-load keywords.",
+    )
+
+
 def _add_dns_diag_args(parser: argparse.ArgumentParser) -> None:
     _add_transport_args(parser)
     parser.add_argument(
@@ -397,6 +503,166 @@ def _run_verify_process_state(args: argparse.Namespace) -> int:
                 process=process,
                 timeout=float(ctx.get("timeout", 10.0)),
             )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _run_verify_process_restart(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_process_restart_dry_run,
+        execute_verify_process_restart,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", "root")
+        process_type = getattr(args, "process_type")
+        pid_before = getattr(args, "pid_before", None)
+        wait_seconds = getattr(args, "wait_seconds", 0)
+        common = dict(
+            base_url=ctx["base_url"],
+            session_file=session_file,
+            transport=transport,
+            host=host,
+            port=port,
+            username=username,
+            process_type=process_type,
+            pid_before=pid_before,
+            wait_seconds=wait_seconds,
+            timeout=float(ctx.get("timeout", 10.0)),
+        )
+        if not ctx.get("execute"):
+            result = build_verify_process_restart_dry_run(**common)
+        else:
+            credential_env = getattr(args, "credential_env", None) or _default_credential_env(username)
+            result = execute_verify_process_restart(**common, credential_env=credential_env)
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _run_verify_system_resource(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_system_resource_dry_run,
+        execute_verify_system_resource,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", "root")
+        sample_interval_seconds = getattr(args, "sample_interval_seconds", 0)
+        common = dict(
+            base_url=ctx["base_url"],
+            session_file=session_file,
+            transport=transport,
+            host=host,
+            port=port,
+            username=username,
+            sample_interval_seconds=sample_interval_seconds,
+            timeout=float(ctx.get("timeout", 10.0)),
+        )
+        if not ctx.get("execute"):
+            result = build_verify_system_resource_dry_run(**common)
+        else:
+            credential_env = getattr(args, "credential_env", None) or _default_credential_env(username)
+            result = execute_verify_system_resource(**common, credential_env=credential_env)
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _run_verify_capture_storage(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_capture_storage_dry_run,
+        execute_verify_capture_storage,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", "root")
+        common = dict(
+            base_url=ctx["base_url"],
+            session_file=session_file,
+            transport=transport,
+            host=host,
+            port=port,
+            username=username,
+            timeout=float(ctx.get("timeout", 10.0)),
+        )
+        if not ctx.get("execute"):
+            result = build_verify_capture_storage_dry_run(**common)
+        else:
+            credential_env = getattr(args, "credential_env", None) or _default_credential_env(username)
+            result = execute_verify_capture_storage(**common, credential_env=credential_env)
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _run_capture_system_log(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_capture_system_log_dry_run,
+        execute_capture_system_log,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", "root")
+        keywords = getattr(args, "keyword", None) or None
+        common = dict(
+            base_url=ctx["base_url"],
+            session_file=session_file,
+            transport=transport,
+            host=host,
+            port=port,
+            username=username,
+            lines=getattr(args, "lines", 200),
+            log_path=getattr(args, "log_path", None),
+            keywords=keywords,
+            timeout=float(ctx.get("timeout", 10.0)),
+        )
+        if not ctx.get("execute"):
+            result = build_capture_system_log_dry_run(**common)
+        else:
+            credential_env = getattr(args, "credential_env", None) or _default_credential_env(username)
+            result = execute_capture_system_log(**common, credential_env=credential_env)
         _write_output(_to_run_envelope(result), output_format)
         return 0
     except RunnerError as exc:

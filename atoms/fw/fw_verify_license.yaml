@@ -1,0 +1,81 @@
+schema_version: "1.1"
+op_id: fw_verify_license
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_license
+description: Query device license info and modules through /api/v1/license.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+inputs:
+  session_ref: "<session-ref>"
+side_effect: observation
+returns:
+  status: success
+  data:
+    license_info:
+      license_auth_count: 0
+      license_auth_type: "<license-auth-type>"
+      service_code: "<service-code>"
+      user_name: "<user-name>"
+      license_left: 0
+      end: "<license-end>"
+      start: "<license-start>"
+      language: "<language>"
+      product_ver: "<product-version>"
+      product_name: "<product-name>"
+      license_id: "<license-id>"
+      device_sn: "<device-sn>"
+      license_type: "<license-type>"
+    modules:
+      - license_left: 0
+        count: 0
+        end: "<module-end>"
+        begin: "<module-begin>"
+        enabled: true
+        name: "<module-name>"
+    ips_module: "<ips-license-module>"
+    module_count: 0
+    raw_response_ref: "<license-raw-response-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: license_query_exposes_info_and_modules
+      input_ref: "<license-query-result-ref>"
+      expected_result: >-
+        The device returns info with license_auth_count, license_auth_type,
+        service_code, user_name, license_left, end, start, language,
+        product_ver, product_name, license_id, device_sn and license_type,
+        plus module entries carrying license_left, count, end, begin, enabled
+        and name. The IPS module is identified by module.name equal to 入侵防御.
+  summary_ref: "<license-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - License info, the full module list, and the IPS module entry are available to the caller; the raw response is retained.
+tags:
+  - firewall
+  - license
+  - ips
+  - verification
+aliases:
+  - license
+  - license-info
+  - ips-license
+  - software-license
+since_version: "1.17.0"

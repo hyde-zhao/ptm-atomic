@@ -1,0 +1,57 @@
+schema_version: "1.1"
+op_id: fw_verify_log_time_set
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_log_time_set
+description: Read the log backup/retention time through GET /api/v1/logsetting/logtimesetting.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+inputs:
+  session_ref: "<session-ref>"
+side_effect: observation
+returns:
+  status: success
+  data:
+    time_set: 180
+    raw_response_ref: "<log-time-setting-query-result-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: log_time_setting_query_returns_time_set
+      input_ref: "<log-time-setting-query-result-ref>"
+      expected_result: >-
+        The device returns the stored timeSet; the runner extracts it from
+        the top level or val object and keeps the raw response. The timeSet
+        unit is device-defined and is not asserted as seconds or minutes.
+  summary_ref: "<log-time-setting-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - The stored timeSet and raw response are available to the caller.
+tags:
+  - firewall
+  - log
+  - setting
+  - verification
+aliases:
+  - log-time-setting
+  - logtimesetting
+  - log-retention
+  - log-backup-time
+since_version: "1.18.0"

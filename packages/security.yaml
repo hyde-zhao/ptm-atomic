@@ -2,7 +2,36 @@
 # They do not install, copy, or distribute operation YAML files.
 package_id: security
 display_name: Security
-description: Security policy and access control verification operations.
-version: "1.0.0"
+description: Security policy, intrusion prevention, and access control operations.
+version: "1.5.0"
 operations:
   - fw_verify_acl_rule
+  - fw_verify_ips_rule
+  - fw_config_ips_rule
+  - fw_update_ips_rule
+  - fw_delete_ips_rule
+  - fw_delete_batch_ips_rule
+  - fw_verify_ips_profile
+  - fw_config_ips_profile
+  - fw_update_ips_profile
+  - fw_delete_ips_profile
+  - fw_delete_batch_ips_profile
+  - fw_capture_ips_log
+  - fw_verify_seclog_evidence
+  - fw_download_seclog_pcap
+  - fw_verify_license_dev
+  - fw_verify_license
+  - fw_config_log_cache_set
+  - fw_export_ips_log
+  - fw_clear_ips_log
+  - fw_config_log_time_set
+  - fw_verify_log_time_set
+  - fw_verify_log_cache_set
+  - fw_verify_log_backup_list
+  - fw_create_log_download_task
+  - fw_verify_log_download_task
+  - fw_download_log_file
+  - fw_verify_process_restart
+  - fw_verify_system_resource
+  - fw_verify_capture_storage
+  - fw_capture_system_log

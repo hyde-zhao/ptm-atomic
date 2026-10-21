@@ -1,0 +1,76 @@
+schema_version: "1.1"
+op_id: fw_download_seclog_pcap
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_download_seclog_pcap
+description: Download an IPS security-log pcap file from /api/v1/downloadfile.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  pcap_filename:
+    type: string
+    required: true
+    description: >-
+      Pcap file name from the log entry or evidence meta.pcap_filename, for
+      example ips_20261019_120000.pcap. The runner prefixes logpcap/ when the
+      value is a bare file name and URL-encodes the resulting id.
+  output_path:
+    type: string
+    required: true
+    description: Local path where the downloaded pcap bytes are written.
+inputs:
+  session_ref: "<session-ref>"
+  pcap_filename: ips_20261019_120000.pcap
+  output_path: /tmp/ips_20261019_120000.pcap
+side_effect: observation
+returns:
+  status: success
+  data:
+    pcap_id: "logpcap/ips_20261019_120000.pcap"
+    pcap_filename: ips_20261019_120000.pcap
+    file_ref: /tmp/ips_20261019_120000.pcap
+    file_size: 1024
+    sha256: "<sha256-of-pcap>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 60000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: seclog_pcap_download_writes_bytes
+      input_ref: "<seclog-pcap-download-result-ref>"
+      expected_result: >-
+        GET /api/v1/downloadfile?id=logpcap%2F<name> returns the pcap bytes and
+        the runner writes them to output_path; the response body is never
+        parsed as JSON or interpreted as a packet.
+  summary_ref: "<seclog-pcap-download-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - pcap_filename comes from the evidence meta.pcap_filename or the IPS log entry.
+postconditions:
+  - The pcap bytes are written to output_path and file_size/sha256 are reported.
+  - Contents are never parsed by the runner.
+tags:
+  - firewall
+  - ips
+  - log
+  - pcap
+  - download
+aliases:
+  - seclog-pcap
+  - ips-pcap
+  - download-pcap
+  - packet-capture-file
+since_version: "1.17.0"

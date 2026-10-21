@@ -1,0 +1,74 @@
+schema_version: "1.1"
+op_id: fw_create_log_download_task
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_create_log_download_task
+description: Create a log export download task through POST /api/v1/downloadfilehandle.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  data_ids:
+    type: list
+    required: true
+    description: Non-empty list of exported data ids to include in the download task.
+  moduletype:
+    type: string
+    required: false
+    description: Task module type; the user-confirmed value is influxTask.
+  filetype:
+    type: string
+    required: false
+    description: Download file type; the user-confirmed value is csv.
+inputs:
+  session_ref: "<session-ref>"
+  data_ids:
+    - "<export-data-id>"
+  moduletype: influxTask
+  filetype: csv
+side_effect: observation
+returns:
+  status: success
+  data:
+    task_id: "<download-task-id>"
+    raw_response_ref: "<log-download-task-create-result-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: log_download_task_returns_task_id
+      input_ref: "<log-download-task-create-result-ref>"
+      expected_result: >-
+        The device returns a download task id; the runner reads it from
+        vals[0].downloadtaskid or the equivalent taskid/id field and exposes
+        it as task_id. The raw response is retained.
+  summary_ref: "<log-download-task-create-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - The task id is available for fw_verify_log_download_task polling.
+tags:
+  - firewall
+  - log
+  - export
+  - download
+  - task
+aliases:
+  - log-download-task-create
+  - download-task-create
+  - influx-task-create
+since_version: "1.18.0"

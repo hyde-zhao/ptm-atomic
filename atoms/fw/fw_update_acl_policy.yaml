@@ -19,7 +19,22 @@ parameters:
   params:
     type: json
     required: true
-    description: Control-policy update object with a top-level id and a full val body. policy_type selects the IPv4 (ip4policy) or IPv6 (ip6policy) address family and only changes the request path; the val body is identical for both families. The id must be resolved by a fw_verify_acl_policy query matching the policy name before update.
+    description: >-
+      Control-policy update object with a top-level id and a full val body.
+      policy_type selects the IPv4 (ip4policy) or IPv6 (ip6policy) address
+      family and only changes the request path; the val body is identical for
+      both families. The id must be resolved by a fw_verify_acl_policy query
+      matching the policy name before update.
+
+      Optional IPS integration fields inside params: sec_obj_data is the raw
+      device list of security-profile references (for example
+      [{"profile_id": 1003, "profile_name": "所有1", "model_name": "ips"}]).
+      ips_enabled is an orchestration convenience: true requires
+      ips_profile_id and ips_profile_name and emits the equivalent single IPS
+      sec_obj_data entry; false omits it. Omitting all four fields keeps the
+      previous empty sec_obj_data list, so existing callers remain backward
+      compatible. The val body replaces the policy wholesale, so an update
+      that must keep an existing IPS reference has to resend it.
   idempotency_key:
     type: string
     required: true
@@ -45,6 +60,17 @@ inputs:
     dst_addr_is_group: false
     service: any
     service_is_group: false
+    # 需要保留或修改 IPS 防护模板引用时二选一：
+    # 1) 直接给设备原始列表：
+    #    sec_obj_data:
+    #      - profile_id: 1003
+    #        profile_name: "所有1"
+    #        model_name: ips
+    # 2) 使用编排便捷字段：
+    #    ips_enabled: true
+    #    ips_profile_id: 1003
+    #    ips_profile_name: "所有1"
+    sec_obj_data: []
   idempotency_key: "<idempotency-key>"
 side_effect: state_mutation
 returns:
@@ -113,6 +139,7 @@ preconditions:
 postconditions:
   - Control-policy update result and diagnostic references are available to the caller.
   - A follow-up fw_verify_acl_policy query can confirm the device control-policy state.
+  - An IPS reference submitted through sec_obj_data (or the ips_enabled convenience fields) is returned by fw_verify_acl_policy inside the policy's sec_obj_data list with model_name ips.
 tags:
   - firewall
   - capacity

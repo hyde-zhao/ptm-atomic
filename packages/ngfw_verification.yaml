@@ -3,9 +3,11 @@
 package_id: ngfw_verification
 display_name: NGFW Capacity Verification
 description: Capacity verification contract operations for NGFW domains.
-version: "1.5.0"
+version: "1.10.0"
 operations:
   - fw_verify_interface
+  - fw_verify_interface_pair
+  - fw_verify_system_time
   - fw_verify_object
   - fw_verify_ip6pool_object
   - fw_verify_acl_policy
@@ -63,3 +65,21 @@ operations:
   - fw_verify_dhcp_static_ip
   - fw_verify_dhcpv6_server
   - fw_verify_dhcpv6_static_ip
+  - fw_verify_ips_rule
+  - fw_verify_ips_profile
+  - fw_capture_ips_log
+  - fw_verify_seclog_evidence
+  - fw_download_seclog_pcap
+  - fw_verify_license_dev
+  - fw_verify_license
+  - fw_export_ips_log
+  - fw_verify_log_time_set
+  - fw_verify_log_cache_set
+  - fw_verify_log_backup_list
+  - fw_create_log_download_task
+  - fw_verify_log_download_task
+  - fw_download_log_file
+  - fw_verify_process_restart
+  - fw_verify_system_resource
+  - fw_verify_capture_storage
+  - fw_capture_system_log

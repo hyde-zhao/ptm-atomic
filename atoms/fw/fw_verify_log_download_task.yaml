@@ -1,0 +1,64 @@
+schema_version: "1.1"
+op_id: fw_verify_log_download_task
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_log_download_task
+description: Query a log download task through GET /api/v1/downloadfilehandle?id=<taskid>.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  task_id:
+    type: string
+    required: true
+    description: Download task id returned by fw_create_log_download_task.
+inputs:
+  session_ref: "<session-ref>"
+  task_id: "<download-task-id>"
+side_effect: observation
+returns:
+  status: success
+  data:
+    task_id: "<download-task-id>"
+    filename: "<ready-filename>"
+    ready: true
+    raw_response_ref: "<log-download-task-query-result-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: diagnostics
+  rules:
+    - name: log_download_task_query_returns_filename
+      input_ref: "<log-download-task-query-result-ref>"
+      expected_result: >-
+        The device returns vals[0].filename when the task is ready; the
+        runner exposes task_id, filename, ready and the raw response. Callers
+        repeat this query until ready=true.
+  summary_ref: "<log-download-task-query-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - task_id comes from fw_create_log_download_task.
+postconditions:
+  - The ready filename and raw task response are available to the caller.
+tags:
+  - firewall
+  - log
+  - export
+  - download
+  - task
+aliases:
+  - log-download-task-verify
+  - download-task-verify
+since_version: "1.18.0"

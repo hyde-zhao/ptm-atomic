@@ -1,0 +1,140 @@
+schema_version: "1.1"
+op_id: fw_verify_ips_rule
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_ips_rule
+description: Query IPS rules with pagination, keyword search, attribute filters, or selected ids.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  ids:
+    type: list
+    required: false
+    description: >-
+      Optional non-empty list of IPS rule ids. When set, the request switches to
+      the selected-rule detailed query body {"id": [...]} and the other filters
+      are ignored.
+  page:
+    type: int
+    required: false
+    description: >-
+      Page number for the list query. The captured device request sends page as
+      a JSON string ("1"); the runner performs the same conversion.
+  size:
+    type: int
+    required: false
+    description: Page size for the list query, sent as a JSON string in the captured request.
+  key:
+    type: string
+    required: false
+    description: Keyword search value for the list query; an empty string means no keyword filter.
+  config_source:
+    type: string
+    required: false
+    description: >-
+      Optional config_source filter. 0 means no filtering (the captured rule
+      list and profile rule-selection requests send "0"); 18 selects
+      firewall-predefined rules. There is no isCustom request filter. In
+      responses, config_source=18 marks firewall-predefined rules and a
+      missing config_source marks custom rules.
+  level:
+    type: json
+    required: false
+    description: >-
+      Protection-level filter. Accepts a scalar (for example "2") or a list
+      (for example ["2", "3"]); the captured request uses string values and
+      sends a scalar when only one level is selected.
+  direct:
+    type: json
+    required: false
+    description: >-
+      Traffic-direction filter. Accepts a scalar or list of string values
+      (captured values include "1" and "2").
+  os:
+    type: json
+    required: false
+    description: >-
+      Operating-system filter. Accepts a scalar or list of string values
+      (captured values include "1" and "2").
+  classtype:
+    type: json
+    required: false
+    description: >-
+      Rule-category filter. Accepts a scalar or list of string values
+      (captured values include "2", "3" and "4").
+inputs:
+  session_ref: "<session-ref>"
+  page: 1
+  size: 10
+  key: ""
+  config_source: "0"
+  level:
+    - "2"
+    - "3"
+  direct:
+    - "1"
+    - "2"
+  os:
+    - "1"
+    - "2"
+  classtype: "3"
+side_effect: observation
+returns:
+  status: success
+  data:
+    observed_state_ref: "<ips-rule-state-ref>"
+    full_config_ref: "<ips-rule-full-config-ref>"
+    vals_ref: "<ips-rule-vals-ref>"
+    rule_ids: "<ips-rule-id-list>"
+    count: 0
+    page: 1
+    size: 10
+    account: "<ips-rule-account-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - CONFIG_RESULT_MISSING
+  - STATE_MISMATCH
+  - MANUAL_HANDLING_REQUIRED
+verification:
+  kind: capacity_domain
+  rules:
+    - name: ips_rule_query_returns_expected_shape
+      input_ref: "<ips-rule-query-result-ref>"
+      expected_result: >-
+        The selected-id query returns vals only; the list query returns count,
+        page, size, vals, and account counters. Each list entry carries id,
+        name, priority, direct, osType, isCustom, cveId, server, protocol,
+        classtype, cnnvdId and action when the device provides them. A
+        response entry with config_source=18 is a firewall-predefined rule;
+        an entry without config_source is custom. There is no isCustom
+        request filter.
+  summary_ref: "<ips-rule-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+  - The ids form and the list-filter form are mutually exclusive; the runner rejects an empty ids list rather than sending an ambiguous body.
+postconditions:
+  - IPS rule query results and diagnostic references are available to the caller.
+  - The returned rule_ids list lets callers resolve ids for fw_update_ips_rule, fw_delete_ips_rule and fw_delete_batch_ips_rule.
+tags:
+  - firewall
+  - ips
+  - rule
+  - verification
+aliases:
+  - ips
+  - ips-rule
+  - intrusion-prevention
+  - intrusion-prevention-rule
+  - signature-rule
+  - snort-rule
+since_version: "1.16.0"

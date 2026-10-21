@@ -1,0 +1,120 @@
+schema_version: "1.1"
+op_id: fw_delete_ips_rule
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_ips_rule
+description: Delete one custom IPS rule by id through /api/v1/appsec/ips/rules.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be ips_rule for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      IPS rule delete selector. id is the numeric rule id carried as the
+      query parameter `?id=<id>` (DELETE /api/v1/appsec/ips/rules?id=...).
+      Live device check 2026-10-21: a JSON body {"id": "..."} is rejected
+      with eObjParse id参数为空/错误.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: ips_rule
+  params:
+    id: "5191533"
+  idempotency_key: "<idempotency-key>"
+side_effect: destructive
+returns:
+  status: success
+  data:
+    ips_rule_id: "<ips-rule-id>"
+    pre_snapshot_ref: "<ips-rule-pre-delete-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: ips_rule
+      applied_ref: "<ips-rule-delete-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - ips_rule_id
+    - full_config
+  notes: Recreate the IPS rule from the full pre-delete snapshot.
+pre_snapshot:
+  op_id: fw_verify_ips_rule
+  capture_fields:
+    - rule_ids
+    - full_config
+  notes: Capture the full rule (name, desc and isProfenal) before delete; it is the only record of the removed rule text.
+rollback_apply:
+  op_id: fw_config_ips_rule
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_ips_rule
+  expected_state: absent
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - RESOURCE_NOT_FOUND
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - security_domain
+    - destructive
+gate:
+  required: true
+  reason: Deleting an IPS rule removes intrusion-detection coverage and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk deletion contract is used.
+  - The rule is not referenced by a protection profile, or the caller accepts removing that coverage.
+postconditions:
+  - 'The device answers {"msg": "success"} for a successful delete.'
+  - 'A repeat delete answers 400 eConfigWrite with errMsg "删除规则失败(C)"; the runner maps that code-and-message pair to RESOURCE_NOT_FOUND with idempotent=true, meaning the goal state is already reached.'
+  - A follow-up fw_verify_ips_rule selected-id query confirms the rule is absent.
+tags:
+  - firewall
+  - ips
+  - rule
+  - delete
+aliases:
+  - ips
+  - ips-rule
+  - intrusion-prevention
+  - intrusion-prevention-rule
+  - signature-rule
+  - snort-rule
+since_version: "1.16.0"

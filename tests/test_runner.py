@@ -8081,7 +8081,14 @@ class OpScopedNotFoundMarkerTests(unittest.TestCase):
             RESOURCE_NOT_FOUND_OP_CODE_MARKERS,
         )
 
-        self.assertEqual(set(RESOURCE_NOT_FOUND_OP_CODE_MARKERS), {"fw_delete_dhcpv6_server"})
+        self.assertEqual(
+            set(RESOURCE_NOT_FOUND_OP_CODE_MARKERS),
+            {
+                "fw_delete_dhcpv6_server",
+                "fw_delete_ips_rule",
+                "fw_delete_ips_profile",
+            },
+        )
         for op_id in RESOURCE_NOT_FOUND_OP_CODE_MARKERS:
             self.assertIn(op_id, IDEMPOTENT_ERROR_TYPES)
 

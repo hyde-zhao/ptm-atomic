@@ -27,6 +27,16 @@ parameters:
 
       action 取值为整数: 0=阻断(deny), 1=放行(permit)。与 NGFW Web UI
       策略配置中"动作"下拉框的"阻断/放行"一一对应。
+
+      Optional IPS integration fields inside params:
+      sec_obj_data is the raw device list of security-profile references
+      (for example [{"profile_id": 1003, "profile_name": "所有1",
+      "model_name": "ips"}]). ips_enabled is an orchestration convenience:
+      true requires ips_profile_id and ips_profile_name and emits the
+      equivalent single IPS sec_obj_data entry; false omits it. When
+      sec_obj_data, ips_enabled, ips_profile_id and ips_profile_name are all
+      omitted, the device body keeps the previous empty sec_obj_data list,
+      so existing callers remain backward compatible.
   idempotency_key:
     type: string
     required: true
@@ -51,6 +61,17 @@ inputs:
     dst_addr_is_group: false
     service: any
     service_is_group: false
+    # 默认不引用安全配置模板；需要应用 IPS 防护模板时二选一：
+    # 1) 直接给设备原始列表：
+    #    sec_obj_data:
+    #      - profile_id: 1003
+    #        profile_name: "所有1"
+    #        model_name: ips
+    # 2) 使用编排便捷字段（runner 会转换为上面的 sec_obj_data）：
+    #    ips_enabled: true
+    #    ips_profile_id: 1003
+    #    ips_profile_name: "所有1"
+    sec_obj_data: []
   idempotency_key: "<idempotency-key>"
 side_effect: state_mutation
 returns:
@@ -120,6 +141,7 @@ preconditions:
 postconditions:
   - Configuration result and diagnostic references are available to the caller.
   - The device does not return the new policy id on create; a follow-up fw_verify_acl_policy query filtered by policy_name resolves the id for update or delete.
+  - An IPS reference submitted through sec_obj_data (or the ips_enabled convenience fields) is returned by fw_verify_acl_policy inside the policy's sec_obj_data list with model_name ips.
 tags:
   - firewall
   - capacity

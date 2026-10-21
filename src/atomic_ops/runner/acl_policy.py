@@ -60,15 +60,34 @@ def build_acl_policy_payload(
     dst_addr_is_group: bool = False,
     service: str = "any",
     service_is_group: bool = False,
-    entry_id: int | str = 0,
+    entry_id: int | str | None = 0,
+    sec_obj_data: list[dict[str, Any]] | None = None,
+    ips_enabled: bool | None = None,
+    ips_profile_id: int | str | None = None,
+    ips_profile_name: str | None = None,
 ) -> dict[str, Any]:
     """构造控制策略 config/update 的请求 body。
 
     entry_id 为 0 时返回 config 的 {val: {...}}（POST 不带顶层 id）；
     entry_id>0 时返回 update 的 {id, val}（PUT 顶层带 id，val 不含 id）。
+
+    IPS 集成（ips-api.md 抓包，/api/v1/ip4policy/fwaclconf 与
+    /api/v1/ip6policy/fwaclconf 的 POST body）：
+    - sec_obj_data 是设备原始安全配置引用列表，IPS 条目形如
+      {profile_id: 1003, profile_name: "所有1", model_name: "ips"}；
+    - ips_enabled/ips_profile_id/ips_profile_name 是编排便捷字段：
+      ips_enabled=true 时必须同时给出 profile id 与 name，runner 生成同形
+      的单条 IPS sec_obj_data；false 表示不引用 IPS；
+    - 四者全空时保持历史行为，发送空列表 []（向后兼容）。
     """
     _validate_non_empty("name", name)
     _validate_policy_type(policy_type)
+    resolved_sec_obj_data = _resolve_sec_obj_data(
+        sec_obj_data=sec_obj_data,
+        ips_enabled=ips_enabled,
+        ips_profile_id=ips_profile_id,
+        ips_profile_name=ips_profile_name,
+    )
     val: dict[str, Any] = {
         "enable": enable,
         # do_reset：设备固件（DAS-TGFW-G3300-HU，2026-10-12 实测）以
@@ -96,12 +115,127 @@ def build_acl_policy_payload(
         "applist": [],
         "userlist": [],
         "app_tag_name": [],
-        "sec_obj_data": [],
+        "sec_obj_data": resolved_sec_obj_data,
     }
     if entry_id is not None:
         entry_id = _validate_non_negative_int("id", entry_id)
         return {"id": entry_id, "val": val}
     return {"val": val}
+
+
+def _resolve_sec_obj_data(
+    *,
+    sec_obj_data: list[dict[str, Any]] | None,
+    ips_enabled: bool | None,
+    ips_profile_id: int | str | None,
+    ips_profile_name: str | None,
+) -> list[dict[str, Any]]:
+    """解析安全配置引用列表，兼容原始列表与 IPS 便捷字段。"""
+    has_ips_convenience = (
+        ips_enabled is not None or ips_profile_id is not None or ips_profile_name is not None
+    )
+    if sec_obj_data is not None and has_ips_convenience:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "sec_obj_data and the IPS convenience fields cannot be used together.",
+            {"fields": ["sec_obj_data", "ips_enabled", "ips_profile_id", "ips_profile_name"]},
+        )
+    if sec_obj_data is not None:
+        return _validate_sec_obj_data(sec_obj_data)
+    if not has_ips_convenience:
+        # 历史行为：不引用任何安全配置模板。
+        return []
+    if ips_enabled is False:
+        if ips_profile_id is not None or ips_profile_name is not None:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "ips_enabled=false cannot be combined with an IPS profile reference.",
+                {"fields": ["ips_enabled", "ips_profile_id", "ips_profile_name"]},
+            )
+        return []
+    if ips_profile_id is None or ips_profile_name is None:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "Enabling IPS requires both ips_profile_id and ips_profile_name.",
+            {"fields": ["ips_profile_id", "ips_profile_name"]},
+        )
+    profile_id = _validate_ips_profile_id(ips_profile_id)
+    profile_name = str(ips_profile_name).strip()
+    if not profile_name:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ips_profile_name must be non-empty.",
+            {"field": "ips_profile_name"},
+        )
+    return [{"profile_id": profile_id, "profile_name": profile_name, "model_name": "ips"}]
+
+
+def _validate_sec_obj_data(sec_obj_data: Any) -> list[dict[str, Any]]:
+    if not isinstance(sec_obj_data, list):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "sec_obj_data must be a list of security-profile reference objects.",
+            {"field": "sec_obj_data", "received_type": type(sec_obj_data).__name__},
+        )
+    validated: list[dict[str, Any]] = []
+    for index, item in enumerate(sec_obj_data):
+        if not isinstance(item, dict):
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each sec_obj_data entry must be an object.",
+                {"field": "sec_obj_data", "index": index},
+            )
+        missing = [
+            key
+            for key in ("profile_id", "profile_name", "model_name")
+            if key not in item
+        ]
+        if missing:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Each sec_obj_data entry requires profile_id, profile_name and model_name.",
+                {"field": "sec_obj_data", "index": index, "missing": missing},
+            )
+        profile_name = str(item.get("profile_name")).strip()
+        model_name = str(item.get("model_name")).strip()
+        if not profile_name or not model_name:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "sec_obj_data profile_name and model_name must be non-empty.",
+                {"field": "sec_obj_data", "index": index},
+            )
+        validated.append(
+            {
+                "profile_id": _validate_ips_profile_id(item.get("profile_id")),
+                "profile_name": profile_name,
+                "model_name": model_name,
+            }
+        )
+    return validated
+
+
+def _validate_ips_profile_id(value: Any) -> int:
+    if isinstance(value, bool):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ips profile_id must be a positive integer.",
+            {"field": "profile_id", "value": value},
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ips profile_id must be a positive integer.",
+            {"field": "profile_id", "value": value},
+        ) from exc
+    if parsed < 1:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "ips profile_id must be positive.",
+            {"field": "profile_id", "value": value},
+        )
+    return parsed
 
 
 def build_acl_policy_delete_payload(*, entry_id: int | str) -> dict[str, int]:

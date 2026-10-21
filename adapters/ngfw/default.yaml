@@ -2731,7 +2731,7 @@ operations:
           applist: []
           userlist: []
           app_tag_name: []
-          sec_obj_data: []
+          sec_obj_data: "{{ params.sec_obj_data }}"
     response:
       success_status:
         - 200
@@ -2743,6 +2743,14 @@ operations:
       runner_required: true
       notes:
         - "policy_type selects the request path: ipv4 uses /api/v1/ip4policy/fwaclconf and ipv6 uses /api/v1/ip6policy/fwaclconf; the val body is identical for both families."
+        - >-
+          sec_obj_data is the device security-profile reference list. An IPS
+          entry uses {profile_id, profile_name, model_name=ips}; the captured
+          request applies profile 1003 with profile_name 所有1. When
+          params.sec_obj_data is omitted, send an empty list, which is the
+          previous fixed template value. params.ips_enabled/
+          ips_profile_id/ips_profile_name are runner conveniences that build
+          the same single-entry list.
         - The device does not return the new policy id on create; resolve it with a fw_verify_acl_policy query filtered by policy_name.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
@@ -2792,7 +2800,7 @@ operations:
           applist: []
           userlist: []
           app_tag_name: []
-          sec_obj_data: []
+          sec_obj_data: "{{ params.sec_obj_data }}"
     response:
       success_status:
         - 200
@@ -2804,6 +2812,14 @@ operations:
       runner_required: true
       notes:
         - "policy_type selects the request path: ipv4 uses /api/v1/ip4policy/fwaclconf and ipv6 uses /api/v1/ip6policy/fwaclconf; the val body is identical for both families."
+        - >-
+          PUT replaces the complete val object. sec_obj_data is the device
+          security-profile reference list; an IPS entry uses {profile_id,
+          profile_name, model_name=ips}. When params.sec_obj_data is omitted,
+          send an empty list, which is the previous fixed template value.
+          params.ips_enabled/ips_profile_id/ips_profile_name are runner
+          conveniences that build the same single-entry list. An update that
+          must keep an existing IPS reference has to resend it explicitly.
         - The top-level id must be resolved by a fw_verify_acl_policy query before update; the device does not look up policies by name on PUT.
         - Live endpoint, session material, and credentials must come from runner input.
         - ptm-atomic run can execute this request only when --execute is explicit.
@@ -7367,6 +7383,789 @@ operations:
         - "It is extremely permissive: a repeat delete, an address that never existed and even a DELETE carrying no id at all each answer 200 with a success body. A success therefore does not establish that a binding was removed, and no resource-not-found judgement is possible on this endpoint. Confirm the effect with fw_verify_dhcpv6_static_ip."
         - The id must be non-empty; the runner refuses an empty one before the request leaves.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ips_rule:
+    atom_ref: atoms/fw/fw_verify_ips_rule.yaml
+    intent: Build an IPS rule list, filter, keyword-search, or selected-id query request.
+    request:
+      method: GET
+      path: /api/v1/appsec/ips/rules
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        key: "{{ params.key }}"
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        config_source: "{{ params.config_source }}"
+        id: "{{ params.ids }}"
+        level: "{{ params.level }}"
+        direct: "{{ params.direct }}"
+        os: "{{ params.os }}"
+        classtype: "{{ params.classtype }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <ips-rule-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET carries a JSON body in the captured Web UI traffic; unlike other paginated GETs in this profile, key/page/size and the filters are sent in the request body rather than the query string.
+        - "Exactly one mode is used: a non-empty ids list sends only id, while the list mode omits id and sends key, page, size, config_source when provided, and any selected filters."
+        - page, size, key and config_source are sent as strings in the captured requests.
+        - "config_source semantics: 0 means no filtering (captured list/selection requests); 18 selects firewall-predefined rules. In responses, config_source=18 marks firewall-predefined rules and a missing config_source marks custom rules. There is no isCustom request filter."
+        - level, direct, os and classtype accept a scalar or a list; the captured single-filter requests send a scalar string.
+        - The list response carries count, page, size, vals and account counters; each vals entry carries rule attributes including isCustom, priority, direct, osType and classtype.
+  fw_config_ips_rule:
+    atom_ref: atoms/fw/fw_config_ips_rule.yaml
+    intent: Build a custom IPS rule create request.
+    request:
+      method: POST
+      path: /api/v1/appsec/ips/rules
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          isProfenal: "{{ params.isProfenal }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-rule-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - desc carries the raw Snort-style rule body and must be non-empty.
+        - "isProfenal=true selects the protection-rule form; the captured device accepts an empty name in that form and derives the displayed name from the rule text. For isProfenal=false, name must be non-empty."
+        - 'The success response is {"vals": [{"Id": <numeric-id>, "Name": <name>}]}.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_ips_rule:
+    atom_ref: atoms/fw/fw_update_ips_rule.yaml
+    intent: Build a custom IPS rule update request by id.
+    request:
+      method: PUT
+      path: /api/v1/appsec/ips/rules
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          name: "{{ params.name }}"
+          desc: "{{ params.desc }}"
+          isProfenal: "{{ params.isProfenal }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-rule-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The top-level id is the numeric rule id returned by create or listed by fw_verify_ips_rule.
+        - The val body replaces the whole rule; name, desc and isProfenal must all be resent.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_ips_rule:
+    atom_ref: atoms/fw/fw_delete_ips_rule.yaml
+    intent: Build a single IPS rule delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/appsec/ips/rules
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-rule-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "Live device check 2026-10-21: DELETE requires the id as query ?id=<id>; a JSON body is rejected with eObjParse id参数为空/错误."
+        - 'The captured success response is {"msg": "success"}.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_ips_rule:
+    atom_ref: atoms/fw/fw_delete_batch_ips_rule.yaml
+    intent: Build a batch custom IPS rule delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/appsec/ips/rules
+            body:
+              id:
+                - "{{ params.ids }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-rule-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The batch body contains only DELETE /api/v1/appsec/ips/rules items.
+        - The captured Web UI request emits one item per id, each with a single-element body.id list; the runner follows that shape.
+        - 'The success response is {"BatchResult": [{"msg": "success"}, ...]} with one entry per requested id.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_verify_ips_profile:
+    atom_ref: atoms/fw/fw_verify_ips_profile.yaml
+    intent: Build an IPS protection-profile list query request.
+    request:
+      method: GET
+      path: /api/v1/appsec/ips/profiles
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        key: "{{ params.key }}"
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        config_source: "{{ params.config_source }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <ips-profile-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - GET carries a JSON body in the captured Web UI traffic; key, page, size and the optional config_source are sent in the request body.
+        - page, size, key and config_source are sent as strings in the captured requests.
+        - "config_source semantics: 0 means no filtering (captured list/preload requests); 18 selects firewall-predefined entries. In responses, config_source=18 marks firewall-predefined entries and a missing config_source marks custom entries. There is no isCustom request filter."
+        - The response carries count, page, size and vals. Custom profiles include filters, ruleCount, actionWrapper, whiteList, customAddRuleList and desc; the device exposes no separate profile-detail endpoint.
+        - "Source discrimination in responses: id<1000 is predefined and id>=1000 is custom (the captured create response assigned id=1000 to a user-created profile); config_source=18 is also treated as predefined for compatibility, and versions without config_source fall back to the id rule."
+  fw_config_ips_profile:
+    atom_ref: atoms/fw/fw_config_ips_profile.yaml
+    intent: Build an IPS protection-profile create request.
+    request:
+      method: POST
+      path: /api/v1/appsec/ips/profiles
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          name: "{{ params.name }}"
+          actionWrapper: "{{ params.actionWrapper }}"
+          filters: "{{ params.filters }}"
+          whiteList: "{{ params.whiteList }}"
+          customAddRuleList: "{{ params.customAddRuleList }}"
+          desc: "{{ params.desc }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-profile-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - name is required.
+        - "actionWrapper maps protection levels to actions: each entry uses priority 1..5 and action 0/1/2. filters entries use prioritys, Directs, OsTypes, classtype, protocols or builtintype together with optional action and capture_pkt; captured examples include [{\"protocols\":[\"file\"]}], [{\"classtype\":[4]}], [{\"builtintype\":\"dmz\"}], [{\"builtintype\":\"radom\"}] and [{}] for all rules. whiteList is the IPS exception-rule list: each entry carries ruleId. customAddRuleList entries carry id, action 0/1/2 and optional capture_pkt (true captures packets for that rule, false does not). Per-rule and per-filter actions override the actionWrapper level action for matched rules as captured from the Web UI."
+        - 'The success response is {"vals": [{"Id": <numeric-id>, "Name": <name>}]}.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_update_ips_profile:
+    atom_ref: atoms/fw/fw_update_ips_profile.yaml
+    intent: Build an IPS protection-profile update request by id.
+    request:
+      method: PUT
+      path: /api/v1/appsec/ips/profiles
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          name: "{{ params.name }}"
+          actionWrapper: "{{ params.actionWrapper }}"
+          filters: "{{ params.filters }}"
+          whiteList: "{{ params.whiteList }}"
+          customAddRuleList: "{{ params.customAddRuleList }}"
+          desc: "{{ params.desc }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-profile-update-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The top-level id is the numeric profile id returned by create or listed by fw_verify_ips_profile.
+        - "PUT replaces the complete val object: fields omitted from val (actionWrapper, filters, whiteList, customAddRuleList, desc) are cleared on the device. whiteList is the IPS exception-rule list, so an update that must keep exceptions has to resend them. actionWrapper entries use priority 1..5 and action 0/1/2; filters and customAddRuleList carry optional capture_pkt, where true captures packets for the matched/listed rule and false does not."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_ips_profile:
+    atom_ref: atoms/fw/fw_delete_ips_profile.yaml
+    intent: Build a single IPS protection-profile delete request by id.
+    request:
+      method: DELETE
+      path: /api/v1/appsec/ips/profiles
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_template:
+        id: "{{ params.id }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-profile-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "Live device check 2026-10-21: DELETE requires the id as query ?id=<id>; a JSON body is rejected with eObjParse id参数为空."
+        - 'The captured success response is {"msg": "success"}.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_delete_batch_ips_profile:
+    atom_ref: atoms/fw/fw_delete_batch_ips_profile.yaml
+    intent: Build a batch IPS protection-profile delete request.
+    request:
+      method: POST
+      path: /api/v1/batch
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        batch:
+          - method: DELETE
+            resource: /api/v1/appsec/ips/profiles
+            body:
+              id:
+                - "{{ params.ids }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-profile-batch-delete-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The batch body contains only DELETE /api/v1/appsec/ips/profiles items.
+        - The captured Web UI request emits one item per id, each with a single-element body.id list; the runner follows that shape.
+        - 'The success response is {"BatchResult": [{"msg": "success"}, ...]} with one entry per requested id.'
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_capture_ips_log:
+    atom_ref: atoms/fw/fw_capture_ips_log.yaml
+    intent: Build an IPS security-log query request with gid, time window, and pagination.
+    request:
+      method: GET
+      path: /api/v1/monitor/seclog
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        gid: "{{ params.gid }}"
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        timetype: "{{ params.timetype }}"
+        starttime: "{{ params.starttime }}"
+        endtime: "{{ params.endtime }}"
+        rule_name: "{{ params.rule_name }}"
+        level: "{{ params.level }}"
+        action: "{{ params.action }}"
+        xff: "{{ params.xff }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ips-seclog-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "gid defaults to 1. The user-confirmed scope implements only gid=1 (IPS); other security-log types are not enumerated and will be added by later features. The runner rejects other values."
+        - "timetype accepts 24h, all, 1h, 7d, 1m or custom; custom requires starttime and endtime as Unix-second values."
+        - GET uses query-string values and sends no JSON body.
+        - "Business filters rule_name, level, action and xff are sent as query values; their exact device spellings are pending confirmation. level/action accept a scalar or a list."
+        - "The top-level count drives pagination. The entry field set is modelled from the evidence meta (app_protocol, dst_ip, dst_port, src_ip, src_port, protocol, rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,sid}, timestamp_us, pcap_filename, data_filename, highlights, ...). The runner returns the raw JSON unchanged; if an entry differs from that set, the raw JSON remains authoritative."
+        - "Log merging is device behaviour: identical attacks within the query window are merged and the attack count is accumulated in the log query. No separate IPS noise-reduction configuration operation exists."
+  fw_verify_seclog_evidence:
+    atom_ref: atoms/fw/fw_verify_seclog_evidence.yaml
+    intent: Build an IPS packet-capture evidence metadata query by meta_file.
+    request:
+      method: GET
+      path: /api/v1/seclog/evidence
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        meta_file: "{{ params.meta_file }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <seclog-evidence-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - meta_file is taken from an IPS security-log entry; the runner does not construct it.
+        - "vals.meta carries app_protocol, data_filename, data_size, dst_ip, dst_port, highlights, pcap_filename, pcap_size, protocol, rule, src_ip, src_port, timestamp_us and version; vals.meta_file and vals.packet_data (base64) are also returned."
+        - The runner exposes meta, pcap_filename and packet-data presence/size, and keeps the raw JSON including packet_data in the response.
+        - meta.pcap_filename feeds fw_download_seclog_pcap as its pcap_filename input.
+  fw_download_seclog_pcap:
+    atom_ref: atoms/fw/fw_download_seclog_pcap.yaml
+    intent: Download an IPS security-log pcap file by its logpcap id.
+    request:
+      method: GET
+      path: /api/v1/downloadfile
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "logpcap/{{ params.pcap_filename }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <seclog-pcap-download-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The query id is logpcap/<pcap_filename> and is URL-encoded before the request, so the slash becomes %2F."
+        - The response body is binary pcap content; the runner writes it to output_path and never parses it as JSON.
+        - pcap_filename comes from the evidence meta.pcap_filename or the IPS log entry.
+  fw_verify_license_dev:
+    atom_ref: atoms/fw/fw_verify_license_dev.yaml
+    intent: Build a device license identity query request.
+    request:
+      method: GET
+      path: /api/v1/licensedev
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <license-dev-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The device returns devType, devSn, devAuthType, userAuthType, cpuNum, memSize and DeviceTypeName.
+        - The runner returns the raw JSON and exposes the same values under snake_case keys.
+        - GET sends no JSON body.
+  fw_verify_license:
+    atom_ref: atoms/fw/fw_verify_license.yaml
+    intent: Build a device license info and module query request.
+    request:
+      method: GET
+      path: /api/v1/license
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <license-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "info carries license_auth_count, license_auth_type, service_code, user_name, license_left, end, start, language, product_ver, product_name, license_id, device_sn and license_type."
+        - "module entries carry license_left, count, end, begin, enabled and name. The IPS module is the entry whose name is 入侵防御."
+        - The runner returns the raw JSON and exposes license_info, modules and the IPS module entry.
+        - GET sends no JSON body.
+  fw_config_log_cache_set:
+    atom_ref: atoms/fw/fw_config_log_cache_set.yaml
+    intent: Configure global log-cache merging through PUT /api/v1/logsetting/logcacheset.
+    request:
+      method: PUT
+      path: /api/v1/logsetting/logcacheset
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          enable: "{{ params.enable }}"
+          timeSet: "{{ params.timeSet }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <log-cache-config-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The endpoint supports PUT only and exposes no GET readback; the runner reports acceptance, not an observed post-state.
+        - "id supports only 1. id is not gid; this global setting applies to log merging for all log types."
+        - "timeSet is the merge window modelled as an integer; its unit is device-defined (sample 60) and is not asserted as seconds or minutes."
+        - "Verify indirectly through /api/v1/monitor/seclog: identical attacks within the configured window are merged and the attack count accumulates in the gid=1 log query."
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  fw_export_ips_log:
+    atom_ref: atoms/fw/fw_export_ips_log.yaml
+    intent: Build an IPS log CSV export request with a time window.
+    request:
+      method: GET
+      path: /api/v1/export
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: logexport
+        logtype: "{{ params.logtype }}"
+        type: "{{ params.export_type }}"
+        timetype: "{{ params.timetype }}"
+        starttime: "{{ params.starttime }}"
+        endtime: "{{ params.endtime }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <ips-log-export-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The documented query is id=logexport&logtype=ipslog&type=csv&timetype=24h; the user-confirmed scope implements only logtype=ipslog and type=csv."
+        - timetype accepts 24h, all, 1h, 7d, 1m or custom; custom requires starttime and endtime.
+        - The endpoint returns the export payload directly. The runner writes the response bytes to output_path and reports file_size/sha256 without parsing; if the device returns JSON, the same bytes are written and the raw response is exposed.
+  fw_clear_ips_log:
+    atom_ref: atoms/fw/fw_clear_ips_log.yaml
+    intent: Build an IPS log clear request.
+    request:
+      method: DELETE
+      path: /api/v1/deletelog
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        logtype: "{{ params.logtype }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <ips-log-clear-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The documented query is logtype=ipslog; the user-confirmed scope implements only ipslog."
+        - Clearing logs is irreversible in this repository; recovery depends on device-side backups.
+        - DELETE uses query-string values and sends no JSON body.
+  fw_config_log_time_set:
+    atom_ref: atoms/fw/fw_config_log_time_set.yaml
+    intent: Build a log backup/retention time-setting request.
+    request:
+      method: PUT
+      path: /api/v1/logsetting/logtimesetting
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        id: "{{ params.id }}"
+        val:
+          timeSet: "{{ params.timeSet }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <log-time-setting-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The captured body is {\"id\":\"0\",\"val\":{\"timeSet\":180}}."
+        - timeSet is modelled as an integer; its unit is device-defined and is not asserted as seconds or minutes.
+        - The previous value can be read through fw_verify_log_time_set and restored by re-PUT.
+  fw_verify_log_time_set:
+    atom_ref: atoms/fw/fw_verify_log_time_set.yaml
+    intent: Build a log backup/retention time-setting query request.
+    request:
+      method: GET
+      path: /api/v1/logsetting/logtimesetting
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-time-setting-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner extracts timeSet from the top level or val object and keeps the raw response.
+        - The timeSet unit is device-defined and is not asserted as seconds or minutes.
+        - GET sends no JSON body.
+  fw_verify_log_cache_set:
+    atom_ref: atoms/fw/fw_verify_log_cache_set.yaml
+    intent: Build a global log-cache setting query request.
+    request:
+      method: GET
+      path: /api/v1/logsetting/logcacheset
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-cache-setting-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner extracts the enable flag and timeSet from the top level or val object and keeps the raw response.
+        - id is fixed to 1 and is not gid; the setting applies to log merging for all log types.
+        - GET sends no JSON body.
+  fw_verify_log_backup_list:
+    atom_ref: atoms/fw/fw_verify_log_backup_list.yaml
+    intent: Build a log backup file list query request.
+    request:
+      method: GET
+      path: /api/v1/logsetting/logbackcsv
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
+        keywords: "{{ params.keywords }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-backup-list-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The device returns count and vals; each vals entry carries name, mtime and logtype.
+        - The runner exposes count, a backup_files summary and the raw response.
+        - GET uses query-string values and sends no JSON body.
+  fw_create_log_download_task:
+    atom_ref: atoms/fw/fw_create_log_download_task.yaml
+    intent: Build a log export download-task creation request.
+    request:
+      method: POST
+      path: /api/v1/downloadfilehandle
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      payload_template:
+        val:
+          dataId: "{{ params.data_ids }}"
+          moduletype: "{{ params.moduletype }}"
+          filetype: "{{ params.filetype }}"
+    response:
+      success_status:
+        - 200
+        - 201
+        - 202
+      result_ref: <log-download-task-create-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - "The captured body shape is {\"val\":{\"dataId\":[\"...\"],\"moduletype\":\"influxTask\",\"filetype\":\"csv\"}}."
+        - The runner reads the task id from vals[0].downloadtaskid or the equivalent taskid/id field and exposes it as task_id.
+        - The raw response is retained.
+  fw_verify_log_download_task:
+    atom_ref: atoms/fw/fw_verify_log_download_task.yaml
+    intent: Build a log download-task query request.
+    request:
+      method: GET
+      path: /api/v1/downloadfilehandle
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "{{ params.task_id }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-download-task-query-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The device returns vals[0].filename when the task is ready; the runner exposes task_id, filename, ready and the raw response.
+        - Callers repeat this query until ready=true, then pass filename to fw_download_log_file.
+        - GET uses a query-string id and sends no JSON body.
+  fw_download_log_file:
+    atom_ref: atoms/fw/fw_download_log_file.yaml
+    intent: Build an exported log file download request.
+    request:
+      method: GET
+      path: /api/v1/downloadfile
+      content_type: application/json
+      auth:
+        mode: external_session_ref
+        header_name: Authorization
+        value_ref: <session-ref>
+      query_params:
+        id: "{{ params.file_id }}"
+      payload_template: {}
+    response:
+      success_status:
+        - 200
+      result_ref: <log-file-download-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The id is the ready filename returned by fw_verify_log_download_task and is URL-encoded before the request.
+        - The runner writes the response bytes to output_path and reports file_size/sha256 without parsing the contents.
+        - GET uses a query-string id and sends no JSON body.
+  fw_verify_process_restart:
+    atom_ref: atoms/fw/fw_verify_process_restart.yaml
+    intent: Detect snort or vpp process restarts over SSH using PIDs, core files, and snort die logs.
+    transport: ssh
+    shell:
+      command_template: "ps -ef | grep -E '{{ process_type }}' | grep -v grep"
+      success_pattern: "===PS_BEFORE==="
+      prompt_timeout_ms: 360000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner builds a multi-section command that records PIDs before and after an optional wait window, lists /trace/coredump and checks /trace/log/snort_die.log for snort.
+        - "Process mapping: snort -> one snort process; vpp -> vpp-agent-init, vpp-agent and vpp. Extend PROCESS_RESTART_MAP for later process types."
+        - restarted is true only when the PID set changes; core_file, core_files and die_log are reported separately as supporting evidence.
+        - A pre-recorded pid_before can be supplied for comparison; otherwise the runner records PIDs at op start.
+        - Session output is captured in the runner result and never written to the repository.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_verify_system_resource:
+    atom_ref: atoms/fw/fw_verify_system_resource.yaml
+    intent: Check memory, CPU load, and disk usage over SSH with optional trend sampling.
+    transport: ssh
+    shell:
+      command_template: "free -m; cat /proc/loadavg; top -bn1; df -P -k"
+      success_pattern: "===MEM==="
+      prompt_timeout_ms: 90000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner reads free memory, /proc/loadavg, the top CPU line and df output in one SSH session.
+        - The 1/5/15-minute load averages provide the CPU trend; memory/disk deltas are computed only when sample_interval_seconds is greater than 0.
+        - Unparsable metrics remain null and the raw output is retained.
+        - Session output is captured in the runner result and never written to the repository.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_verify_capture_storage:
+    atom_ref: atoms/fw/fw_verify_capture_storage.yaml
+    intent: Check userdata capture storage, disk space, and device form over SSH.
+    transport: ssh
+    shell:
+      command_template: "df -P -k /userdata; du -sk /userdata; mount; ls -ld /userdata /exdisk"
+      success_pattern: "===DF_USERDATA==="
+      prompt_timeout_ms: 30000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - The runner reads /userdata df/du output, mount lines, ls output and the full df table.
+        - "Device form is heuristic: /exdisk present -> exdisk; tmpfs/ramfs/rootfs for /userdata -> no_disk; an ordinary /userdata mount -> with_disk; insufficient evidence -> unknown."
+        - The raw output remains authoritative when the heuristic disagrees with the device.
+        - Session output is captured in the runner result and never written to the repository.
+        - ptm-atomic run can execute this command only when --execute is explicit.
+  fw_capture_system_log:
+    atom_ref: atoms/fw/fw_capture_system_log.yaml
+    intent: Read system logs over SSH and check IPv4/IPv6 control-policy load keywords.
+    transport: ssh
+    shell:
+      command_template: "tail -n {{ lines }} {{ log_path }}"
+      success_pattern: "===SOURCE:"
+      prompt_timeout_ms: 30000
+      privilege_level: root
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - When log_path is omitted the runner falls back to /var/log/messages, then /var/log/syslog, then journalctl.
+        - log_path is restricted to /var/log/ or /trace/log/ and shell-escaped.
+        - "The default keywords are 后台加载IPv4控制策略成功(system:0) and 后台加载IPv6控制策略成功(system:0); custom keywords can replace them."
+        - IPS configuration and rule changes take effect immediately; existing sessions are not refreshed, while new sessions use the new configuration.
+        - Session output is captured in the runner result and never written to the repository.
+        - ptm-atomic run can execute this command only when --execute is explicit.
   fw_verify_iplink_etcd:
     atom_ref: atoms/fw/fw_verify_iplink_etcd.yaml
     intent: Query an iplink entry's backend etcd config over SSH or Telnet.
@@ -7450,175 +8249,69 @@ operations:
         - Session output is captured into diag_snapshot_ref and never written to the repo.
         - ptm-atomic run can execute this command only when --execute is explicit.
         - The runner selects SSH (paramiko) or Telnet (telnetlib) based on the transport parameter; the profile's transport field is the default.
-  fw_config_customappobj:
-    atom_ref: atoms/fw/fw_config_customappobj.yaml
-    intent: Build a custom application-object create request.
+  fw_config_interface_pair:
+    atom_ref: atoms/fw/fw_config_interface_pair.yaml
+    intent: Build an interface-pair create request.
     request:
       method: POST
-      path: /api/v1/customappobj
+      path: /api/v1/intf/pair
       content_type: application/json
       auth:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
       payload_template:
-        val:
-          name_cn: "{{ params.name_cn }}"
-          pid: "{{ params.pid }}"
-          protocol: "{{ params.protocol }}"
-          platform: "{{ params.platform }}"
-          ip: "{{ params.ip }}"
-          path: "{{ params.path }}"
-          pattern_type: "{{ params.pattern_type }}"
-          pattern: "{{ params.pattern }}"
-          desc: "{{ params.desc }}"
-          customflag: "{{ params.customflag }}"
-          name_en: "{{ params.name_en }}"
-          tcpudpcfg:
-            offset: "{{ params.tcp_offset }}"
-            port: "{{ params.tcp_port }}"
-            direct: "{{ params.tcp_direct }}"
+        val: "{{ params.val }}"
     response:
       success_status:
         - 200
         - 201
         - 202
-      result_ref: <customappobj-config-result-ref>
+      result_ref: <interface-pair-create-result-ref>
     safety:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - The device assigns the id and returns the full object in the response.
-        - tcpudpcfg applies only to TCP/UDP protocol objects.
+        - 'The create body is {"val": {...}} with no top-level id; val.name is the pair identity.'
+        - Both physical interfaces must be prepared with fw_update_interface mode="Pair" before the pair is created; configure the interfaces first, then create the pair.
+        - For L2 forwarding, prepare member ports with fw_update_interface (mode Switch, pvid, linkType) and create the BVI with fw_config_interface before creating the pair.
+        - val carries name, remark, receive_interface, transmit_interface, status_sync and allowed_vlan.
+        - "val.name must match ^[一-龥a-zA-Z0-9.-]{1,31}$: Chinese characters, letters, digits, '-' and '.' only, 1-31 characters, no underscores; the runner rejects an invalid name locally with RUNNER_VALIDATION_FAILED."
+        - "A duplicate pair name is rejected by the device with HTTP 400 eObjCreateExist (接口对名称已存在); the runner maps it to CONFIG_REJECTED and preserves errCode/errMsg in the error details."
         - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_customappobj:
-    atom_ref: atoms/fw/fw_update_customappobj.yaml
-    intent: Build a custom application-object update request by name_cn.
-    request:
-      method: PUT
-      path: /api/v1/customappobj
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.name_cn }}"
-        val:
-          name_cn: "{{ params.name_cn }}"
-          pid: "{{ params.pid }}"
-          protocol: "{{ params.protocol }}"
-          pattern_type: "{{ params.pattern_type }}"
-          pattern: "{{ params.pattern }}"
-          id: "{{ params.appid }}"
-          customflag: "{{ params.customflag }}"
-          name_en: "{{ params.name_en }}"
-          tcpudpcfg:
-            offset: "{{ params.tcp_offset }}"
-            port: "{{ params.tcp_port }}"
-            direct: "{{ params.tcp_direct }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <customappobj-update-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Top-level id is name_cn; val.id is the numeric appid returned by create.
-        - The device delete id is name_cn, not the numeric appid.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_customappobj:
-    atom_ref: atoms/fw/fw_delete_batch_customappobj.yaml
-    intent: Build a batch custom application-object delete request.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/customappobj
-            body:
-              id:
-                - "{{ params.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <customappobj-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch body contains only DELETE /api/v1/customappobj items.
-        - Each body.id is a single-element list.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_customappobj:
-    atom_ref: atoms/fw/fw_verify_customappobj.yaml
-    intent: Build a custom application-object query request.
+  fw_verify_interface_pair:
+    atom_ref: atoms/fw/fw_verify_interface_pair.yaml
+    intent: Build an interface-pair list query with optional pagination.
     request:
       method: GET
-      path: /api/v1/appobjsearch
+      path: /api/v1/intf/pair
       content_type: application/json
       auth:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
+      query_params:
+        page: "{{ params.page }}"
+        size: "{{ params.size }}"
       payload_template: {}
     response:
       success_status:
         - 200
-      result_ref: <appobj-search-result-ref>
+      result_ref: <interface-pair-query-result-ref>
     safety:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - GET takes searchkeyword and istagcustom query parameters and returns the full AppClass, AppGroup, and AppStatic tree.
-        - GET requests send no JSON body.
-        - Empty searchkeyword returns the full application tree.
-  fw_config_customappobjtag:
-    atom_ref: atoms/fw/fw_config_customappobjtag.yaml
-    intent: Build a custom application-tag create request.
-    request:
-      method: POST
-      path: /api/v1/customappobjtag
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val:
-          name_cn: "{{ params.name_cn }}"
-          desc: "{{ params.desc }}"
-          customflag: "{{ params.customflag }}"
-          appobjkeys: "{{ params.appobjkeys }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <customappobjtag-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - The tag id is its name_cn; appobjkeys is a list of {appname, appid} objects.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_customappobjtag:
-    atom_ref: atoms/fw/fw_update_customappobjtag.yaml
-    intent: Build a custom application-tag update request by name_cn.
+        - GET /api/v1/intf/pair sends no JSON body and accepts only page and size.
+        - The endpoint has no server-side name/receive/transmit filters; the runner fetches all pages, filters client-side and then applies the requested page/size slice.
+        - The response carries count and vals; each vals entry retains name, remark, receive_interface, transmit_interface, allowed_vlan, status_sync, config_source and create_time when present.
+        - Omitting page and size requests the device default page.
+  fw_update_interface_pair:
+    atom_ref: atoms/fw/fw_update_interface_pair.yaml
+    intent: Build an interface-pair update request.
     request:
       method: PUT
-      path: /api/v1/customappobjtag
+      path: /api/v1/intf/pair
       content_type: application/json
       auth:
         mode: external_session_ref
@@ -7632,981 +8325,24 @@ operations:
         - 200
         - 201
         - 202
-      result_ref: <customappobjtag-update-result-ref>
+      result_ref: <interface-pair-update-result-ref>
     safety:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - The tag id is its name_cn and is supplied both at the top level and inside val.
+        - The top-level id is the existing pair name and must equal val.name.
+        - The referenced physical interfaces are already in mode="Pair" through fw_update_interface.
+        - The same six val fields as create are sent; update the pair, then confirm it with fw_verify_interface_pair.
+        - "val.name follows the same rule as create: ^[一-龥a-zA-Z0-9.-]{1,31}$, no underscores; an invalid name is rejected locally with RUNNER_VALIDATION_FAILED."
+        - Updating a pair that does not exist remains a failure; the device errCode/errMsg are preserved in the error details.
+        - "If the device answers HTTP 400 eObjCreateExist for an update name collision, the runner maps it to CONFIG_REJECTED and preserves errCode/errMsg in details."
         - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_customappobjtag:
-    atom_ref: atoms/fw/fw_delete_batch_customappobjtag.yaml
-    intent: Build a batch custom application-tag delete request.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/customappobjtag
-            body:
-              id:
-                - "{{ params.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <customappobjtag-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch body contains only DELETE /api/v1/customappobjtag items.
-        - Each body.id is a single-element list holding the tag name_cn.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_customappobjtag:
-    atom_ref: atoms/fw/fw_verify_customappobjtag.yaml
-    intent: Build a custom application-tag query request with pagination.
-    request:
-      method: GET
-      path: /api/v1/customappobjtag
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <customappobjtag-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET takes page, size and optional keywords query parameters and returns count and vals.
-        - GET requests send no JSON body.
-        - Each val entry carries name_cn, desc, customflag, appobjkeys and refcnt fields.
-  fw_config_servicepool:
-    atom_ref: atoms/fw/fw_config_servicepool.yaml
-    intent: Build a custom service pool create request.
-    request:
-      method: POST
-      path: /api/v1/servicepool
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val:
-          name: "{{ params.name }}"
-          desc: "{{ params.desc }}"
-          type: CUSTOM
-          ranges: "{{ params.ranges }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <servicepool-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - type is forced to CUSTOM; PRESET services are device-defined and not creatable.
-        - ranges is a list of {proto, s_start, s_end, d_start, d_end} objects.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_servicepool:
-    atom_ref: atoms/fw/fw_update_servicepool.yaml
-    intent: Build a custom service pool update request by name.
-    request:
-      method: PUT
-      path: /api/v1/servicepool
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
-        val: "{{ params.val }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <servicepool-update-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Update requires the service pool name as id and keeps type CUSTOM.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_servicepool:
-    atom_ref: atoms/fw/fw_delete_batch_servicepool.yaml
-    intent: Build a batch custom service pool delete request.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/servicepool
-            body:
-              id:
-                - "{{ params.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <servicepool-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch body contains only DELETE /api/v1/servicepool items.
-        - Each body.id is a single-element list holding the service pool name.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_servicepool:
-    atom_ref: atoms/fw/fw_verify_servicepool.yaml
-    intent: Build a custom service pool query request (type CUSTOM).
-    request:
-      method: GET
-      path: /api/v1/servicepool
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <servicepool-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET takes page, size, type=CUSTOM and optional keywords query parameters and returns count and vals.
-        - GET requests send no JSON body.
-  fw_verify_servicepool_preset:
-    atom_ref: atoms/fw/fw_verify_servicepool_preset.yaml
-    intent: Build a preset service pool query request (type PRESET).
-    request:
-      method: GET
-      path: /api/v1/servicepool
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <servicepool-preset-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET takes page, size and type=PRESET query parameters and returns count and vals.
-        - Preset services are device-defined and read-only; no keywords filter.
-        - GET requests send no JSON body.
-  fw_config_servicepool_group:
-    atom_ref: atoms/fw/fw_config_servicepool_group.yaml
-    intent: Build a service pool group create request.
-    request:
-      method: POST
-      path: /api/v1/servicepool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val:
-          name: "{{ params.name }}"
-          desc: "{{ params.desc }}"
-          servicepools: "{{ params.servicepools }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <servicepool-group-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - servicepools is a list of service pool name strings.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_servicepool_group:
-    atom_ref: atoms/fw/fw_update_servicepool_group.yaml
-    intent: Build a service pool group update request by name.
-    request:
-      method: PUT
-      path: /api/v1/servicepool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
-        val: "{{ params.val }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <servicepool-group-update-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Update requires the group name as id.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_servicepool_group:
-    atom_ref: atoms/fw/fw_delete_batch_servicepool_group.yaml
-    intent: Build a batch service pool group delete request.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/servicepool/group
-            body:
-              id:
-                - "{{ params.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <servicepool-group-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch body contains only DELETE /api/v1/servicepool/group items (note the /group suffix).
-        - Each body.id is a single-element list holding the group name.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_servicepool_group:
-    atom_ref: atoms/fw/fw_verify_servicepool_group.yaml
-    intent: Build a service pool group query request with pagination.
-    request:
-      method: GET
-      path: /api/v1/servicepool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <servicepool-group-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET takes page, size and optional keywords query parameters and returns count and vals.
-        - GET requests send no JSON body.
-        - Each val entry carries name, desc, servicepools and refcnt fields.
-  fw_config_ippool_group:
-    atom_ref: atoms/fw/fw_config_ippool_group.yaml
-    intent: Build an IPv4 address group create request.
-    request:
-      method: POST
-      path: /api/v1/ippool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val:
-          name: "{{ params.name }}"
-          desc: "{{ params.desc }}"
-          ippools: "{{ params.ippools }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <ippool-group-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - ippools is a list of IPv4 address pool name strings.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_ippool_group:
-    atom_ref: atoms/fw/fw_update_ippool_group.yaml
-    intent: Build an IPv4 address group update request by name.
-    request:
-      method: PUT
-      path: /api/v1/ippool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
-        val: "{{ params.val }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <ippool-group-update-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Update requires the group name as id.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_ippool_group:
-    atom_ref: atoms/fw/fw_delete_ippool_group.yaml
-    intent: Build an IPv4 address group delete request by name.
+  fw_delete_interface_pair:
+    atom_ref: atoms/fw/fw_delete_interface_pair.yaml
+    intent: Build a single interface-pair delete request by name.
     request:
       method: DELETE
-      path: /api/v1/ippool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <ippool-group-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE uses id as a query value and sends no JSON body.
-        - id is the IPv4 address group name to delete.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_ippool_group:
-    atom_ref: atoms/fw/fw_delete_batch_ippool_group.yaml
-    intent: Build a batch IPv4 address group delete request.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/ippool/group
-            body:
-              id:
-                - "{{ params.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <ippool-group-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch body contains only DELETE /api/v1/ippool/group items.
-        - Each body.id is a single-element list holding the group name.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_ippool_group:
-    atom_ref: atoms/fw/fw_verify_ippool_group.yaml
-    intent: Build an IPv4 address group query request with pagination.
-    request:
-      method: GET
-      path: /api/v1/ippool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <ippool-group-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.
-        - GET requests send no JSON body.
-        - Each val entry carries name, desc, ippools and refcnt fields.
-  fw_config_ip6pool_group:
-    atom_ref: atoms/fw/fw_config_ip6pool_group.yaml
-    intent: Build an IPv6 address group create request.
-    request:
-      method: POST
-      path: /api/v1/ip6pool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val:
-          name: "{{ params.name }}"
-          desc: "{{ params.desc }}"
-          ip6pools: "{{ params.ip6pools }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <ip6pool-group-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - ip6pools is a list of IPv6 address pool name strings.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_ip6pool_group:
-    atom_ref: atoms/fw/fw_update_ip6pool_group.yaml
-    intent: Build an IPv6 address group update request by name.
-    request:
-      method: PUT
-      path: /api/v1/ip6pool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
-        val: "{{ params.val }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <ip6pool-group-update-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Update requires the group name as id.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_ip6pool_group:
-    atom_ref: atoms/fw/fw_delete_ip6pool_group.yaml
-    intent: Build an IPv6 address group delete request by name.
-    request:
-      method: DELETE
-      path: /api/v1/ip6pool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <ip6pool-group-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE uses id as a query value and sends no JSON body.
-        - id is the IPv6 address group name to delete.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_ip6pool_group:
-    atom_ref: atoms/fw/fw_delete_batch_ip6pool_group.yaml
-    intent: Build a batch IPv6 address group delete request.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/ip6pool/group
-            body:
-              id:
-                - "{{ params.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <ip6pool-group-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch body contains only DELETE /api/v1/ip6pool/group items.
-        - Each body.id is a single-element list holding the group name.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_ip6pool_group:
-    atom_ref: atoms/fw/fw_verify_ip6pool_group.yaml
-    intent: Build an IPv6 address group query request with pagination.
-    request:
-      method: GET
-      path: /api/v1/ip6pool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <ip6pool-group-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET takes page, size, optional type (repeatable: ANY/CUSTOM) and keywords query parameters and returns count and vals.
-        - GET requests send no JSON body.
-        - Each val entry carries name, desc, ip6pools and refcnt fields.
-  fw_config_timeobject:
-    atom_ref: atoms/fw/fw_config_timeobject.yaml
-    intent: Build a time object create request.
-    request:
-      method: POST
-      path: /api/v1/timeobject
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val:
-          name: "{{ params.name }}"
-          scheduletype: "{{ params.scheduletype }}"
-          timequantum: "{{ params.timequantum }}"
-          timemonquantum: "{{ params.timemonquantum }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <timeobject-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - scheduletype must be oneshot, day, week or month.
-        - month uses timemonquantum; oneshot/day/week use timequantum.
-        - oneshot time format is YYYY-MM-DD HH:MM:SS; day/week time format is HH:MM:SS; week adds weekday:int.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_timeobject:
-    atom_ref: atoms/fw/fw_update_timeobject.yaml
-    intent: Build a time object update request by name.
-    request:
-      method: PUT
-      path: /api/v1/timeobject
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
-        val: "{{ params.val }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <timeobject-update-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Update requires the time object name as id.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_timeobject:
-    atom_ref: atoms/fw/fw_delete_timeobject.yaml
-    intent: Build a time object delete request by name.
-    request:
-      method: DELETE
-      path: /api/v1/timeobject
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <timeobject-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE uses id as a query value and sends no JSON body.
-        - id is the time object name to delete.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_timeobject:
-    atom_ref: atoms/fw/fw_delete_batch_timeobject.yaml
-    intent: Build a batch time object delete request.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/timeobject
-            body:
-              id:
-                - "{{ params.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <timeobject-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch body contains only DELETE /api/v1/timeobject items.
-        - Each body.id is a single-element list holding the time object name.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_timeobject:
-    atom_ref: atoms/fw/fw_verify_timeobject.yaml
-    intent: Build a time object query request with pagination.
-    request:
-      method: GET
-      path: /api/v1/timeobject
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <timeobject-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET takes page, size and optional keywords query parameters and returns count and vals.
-        - GET requests send no JSON body.
-        - Each val entry carries name, scheduletype, timequantum/timemonquantum and refcnt fields.
-  fw_delete_servicepool:
-    atom_ref: atoms/fw/fw_delete_servicepool.yaml
-    intent: Build a custom service pool delete request by name.
-    request:
-      method: DELETE
-      path: /api/v1/servicepool
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <servicepool-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE uses id as a query value and sends no JSON body.
-        - id is the custom service pool name to delete.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_servicepool_group:
-    atom_ref: atoms/fw/fw_delete_servicepool_group.yaml
-    intent: Build a service pool group delete request by name.
-    request:
-      method: DELETE
-      path: /api/v1/servicepool/group
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <servicepool-group-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE uses id as a query value and sends no JSON body.
-        - id is the service pool group name to delete.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_customappobj:
-    atom_ref: atoms/fw/fw_delete_customappobj.yaml
-    intent: Build a custom application-object delete request by name_cn.
-    request:
-      method: DELETE
-      path: /api/v1/customappobj
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <customappobj-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE uses id as a query value and sends no JSON body.
-        - id is the custom application-object name_cn (not the numeric appid).
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_customappobjtag:
-    atom_ref: atoms/fw/fw_delete_customappobjtag.yaml
-    intent: Build a custom application-tag delete request by name_cn.
-    request:
-      method: DELETE
-      path: /api/v1/customappobjtag
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <customappobjtag-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE uses id as a query value and sends no JSON body.
-        - id is the custom application-tag name_cn.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_config_neighbor:
-    atom_ref: atoms/fw/fw_config_neighbor.yaml
-    intent: Build a static neighbor (ARP) entry create request from a validated atom parameter set.
-    request:
-      method: POST
-      path: /api/v1/neighbor
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val:
-          interface: "{{ params.val.interface }}"
-          ipAddress: "{{ params.val.ipAddress }}"
-          physAddress: "{{ params.val.physAddress }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <neighbor-create-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - The neighbor entry is identified by the triple interface + ipAddress + physAddress.
-        - POST returns {"msg":"success"} without an id field.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_neighbor:
-    atom_ref: atoms/fw/fw_update_neighbor.yaml
-    intent: Build a neighbor (ARP) entry update request from a validated atom parameter set.
-    request:
-      method: PUT
-      path: /api/v1/neighbor
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "0"
-        val:
-          interface: "{{ params.val.interface }}"
-          ipAddress: "{{ params.val.ipAddress }}"
-          physAddress: "{{ params.val.physAddress }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <neighbor-update-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - PUT carries a fixed id "0" (placeholder); the backend identifies the entry by val fields.
-        - PUT returns {"msg":"success"} without an id field.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_neighbor:
-    atom_ref: atoms/fw/fw_verify_neighbor.yaml
-    intent: Build a paginated neighbor (ARP) table query request.
-    request:
-      method: GET
-      path: /api/v1/neighbor
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <neighbor-state-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Query values are page, size, keywords, is_linux (always false), and is_ip6 (false for IPv4 ARP).
-        - 'GET returns {"count": N, "vals": [...]} where each val has interface, ipAddress, physAddress, static, binded.'
-        - GET requests send no JSON body.
-  fw_delete_neighbor:
-    atom_ref: atoms/fw/fw_delete_neighbor.yaml
-    intent: Build a single neighbor (ARP) entry delete request by interface, IP, and MAC address.
-    request:
-      method: DELETE
-      path: /api/v1/neighbor
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <neighbor-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE uses interface, ipAddress, and physAddress as query values and sends no JSON body.
-        - Both static and dynamic ARP entries can be deleted.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_neighbor:
-    atom_ref: atoms/fw/fw_delete_batch_neighbor.yaml
-    intent: Build a batch neighbor (ARP) entry delete request.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/neighbor
-            body:
-              physAddress: "{{ params.batch[0].body.physAddress }}"
-              interface: "{{ params.batch[0].body.interface }}"
-              ipAddress: "{{ params.batch[0].body.ipAddress }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <neighbor-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch delete is independent from single-neighbor DELETE /api/v1/neighbor.
-        - Each batch item must be DELETE /api/v1/neighbor with body.physAddress, body.interface, and body.ipAddress as parallel arrays.
-        - Batch body arrays allow multiple values per field for bulk deletion.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_config_static_dns:
-    atom_ref: atoms/fw/fw_config_static_dns.yaml
-    intent: Build a static DNS entry create request by domain name and address.
-    request:
-      method: POST
-      path: /api/v1/dns/cache
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val: "{{ params.val }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <static-dns-create-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - POST /api/v1/dns/cache carries val.name and val.ip4addr (ip6addr optional) as the static entry body.
-        - A duplicate name overwrites the existing static entry.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_static_dns:
-    atom_ref: atoms/fw/fw_delete_static_dns.yaml
-    intent: Build a static DNS entry delete request by domain name.
-    request:
-      method: DELETE
-      path: /api/v1/dns/cache
+      path: /api/v1/intf/pair
       content_type: application/json
       auth:
         mode: external_session_ref
@@ -8619,397 +8355,38 @@ operations:
         - 200
         - 201
         - 202
-      result_ref: <static-dns-delete-result-ref>
+      result_ref: <interface-pair-delete-result-ref>
     safety:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - DELETE sends the domain name as ?id=<domain> and sends no JSON body.
-        - Deleting an absent domain returns success per device behavior.
+        - DELETE sends the pair name as ?id=<pair-name> and sends no JSON body.
+        - Swagger declares id as list[str]; this single delete follows the repository delete convention and sends one id query value.
+        - Confirm the pair is absent with fw_verify_interface_pair after deletion.
+        - "A repeat delete answers HTTP 400 eObjGetNoExist (未找到对应的接口对). The runner reports details.error_type=RESOURCE_NOT_FOUND with no idempotent marker; the operation is idempotent: false, so a repeat delete is not treated as success."
         - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_update_static_dns:
-    atom_ref: atoms/fw/fw_update_static_dns.yaml
-    intent: Build a static DNS entry update request located by the current domain id.
-    request:
-      method: PUT
-      path: /api/v1/dns/cache
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
-        val: "{{ params.val }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <static-dns-update-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - PUT carries id as the current domain name; val.name may rename the entry.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_static_dns:
-    atom_ref: atoms/fw/fw_delete_batch_static_dns.yaml
-    intent: Build a batch request that deletes multiple static DNS entries.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/dns/cache
-            body:
-              id: "{{ params.batch[0].body.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <static-dns-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Batch static DNS deletion is independent from single-domain DELETE /api/v1/dns/cache.
-        - Each batch item must be DELETE /api/v1/dns/cache with body.id as a non-empty list.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_static_dns:
-    atom_ref: atoms/fw/fw_verify_static_dns.yaml
-    intent: Build a static DNS table query request.
+  fw_verify_system_time:
+    atom_ref: atoms/fw/fw_verify_system_time.yaml
+    intent: Build a read-only system time query request.
     request:
       method: GET
-      path: /api/v1/dns/cache
+      path: /api/v1/systime
       content_type: application/json
       auth:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
+      query_params:
+        id: systime
       payload_template: {}
     response:
       success_status:
         - 200
-      result_ref: <static-dns-query-result-ref>
+      result_ref: <system-time-query-result-ref>
     safety:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - GET sends ?type=static and no JSON body; entries come back in vals with name and ip4addr.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_dns_cache_entry:
-    atom_ref: atoms/fw/fw_verify_dns_cache_entry.yaml
-    intent: Build a dynamic DNS cache query request with pagination.
-    request:
-      method: GET
-      path: /api/v1/dns/cache
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <dns-cache-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET sends ?page=<page>&size=<size>&type=dynamic and no JSON body; entries come back in vals with name, ip4addr, cname, and ttl.
-        - The runner builds page/size/type as query parameters; this profile carries no query field.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_config_dns_server:
-    atom_ref: atoms/fw/fw_config_dns_server.yaml
-    intent: Build a system DNS server configuration request.
-    request:
-      method: PUT
-      path: /api/v1/sysdns
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: 0
-        val:
-          serveraddr: "{{ params.serveraddr }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <sysdns-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - PUT /api/v1/sysdns carries id 0 and val.serveraddr; the first address is the primary DNS server and the second is the backup.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_dns_server:
-    atom_ref: atoms/fw/fw_verify_dns_server.yaml
-    intent: Build a system DNS server query request.
-    request:
-      method: GET
-      path: /api/v1/sysdns
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <sysdns-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET /api/v1/sysdns sends no JSON body; servers come back in data[].serveraddr with the primary first.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_config_dns_proxy:
-    atom_ref: atoms/fw/fw_config_dns_proxy.yaml
-    intent: Build a global DNS proxy toggle request.
-    request:
-      method: PUT
-      path: /api/v1/dns/global
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: dnsServer
-        val:
-          enable: "{{ params.enable }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <dns-global-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - PUT /api/v1/dns/global carries id dnsServer and val.enable as a boolean switch.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_config_dns_proxy_server:
-    atom_ref: atoms/fw/fw_config_dns_proxy_server.yaml
-    intent: Build a DNS proxy server creation request.
-    request:
-      method: POST
-      path: /api/v1/dns/globalserver
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        val:
-          servers: "{{ params.servers }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <dns-proxy-server-create-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - POST /api/v1/dns/globalserver carries val.servers with one addr per entry.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_dns_proxy_server:
-    atom_ref: atoms/fw/fw_delete_dns_proxy_server.yaml
-    intent: Build a DNS proxy server delete request by address.
-    request:
-      method: DELETE
-      path: /api/v1/dns/globalserver
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <dns-proxy-server-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - DELETE sends the server address as ?id=<addr> and sends no JSON body.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_dns_proxy_server:
-    atom_ref: atoms/fw/fw_verify_dns_proxy_server.yaml
-    intent: Build a DNS proxy server query request.
-    request:
-      method: GET
-      path: /api/v1/dns/globalserver
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template: {}
-    response:
-      success_status:
-        - 200
-      result_ref: <dns-proxy-server-query-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - GET /api/v1/dns/globalserver sends no JSON body; servers come back in vals[].servers[].addr.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_delete_batch_dns_proxy_server:
-    atom_ref: atoms/fw/fw_delete_batch_dns_proxy_server.yaml
-    intent: Build a batch request that deletes multiple DNS proxy servers.
-    request:
-      method: POST
-      path: /api/v1/batch
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        batch:
-          - method: DELETE
-            resource: /api/v1/dns/globalserver
-            body:
-              id: "{{ params.batch[0].body.id }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <dns-proxy-server-batch-delete-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Each batch item must be DELETE /api/v1/dns/globalserver with body.id as a non-empty list.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_config_pppoe:
-    atom_ref: atoms/fw/fw_config_pppoe.yaml
-    intent: Build a PPPoE dial interface configuration request.
-    request:
-      method: PUT
-      path: /api/v1/intf
-      content_type: application/json
-      auth:
-        mode: external_session_ref
-        header_name: Authorization
-        value_ref: <session-ref>
-      payload_template:
-        id: "{{ params.id }}"
-        val:
-          linkType: 0
-          name: "{{ params.id }}"
-          type: 3
-          enabled: true
-          vltype: VPP
-          mode: Route
-          service:
-            https: false
-            ssh: false
-            ping: false
-          sip: []
-          smac: []
-          ipv4_address_mode_config:
-            address_mode: 2
-          ipv6_address_mode_config:
-            dhcp_client_setting: {}
-            address_mode: 0
-            install_default_route: false
-          ip_addresses: []
-          mtus:
-            - 1500
-            - 0
-            - 0
-            - 0
-          desc: ""
-          level: 100
-          tag_rw_option: 0
-          pppoe:
-            username: "{{ params.username }}"
-    response:
-      success_status:
-        - 200
-        - 201
-        - 202
-      result_ref: <pppoe-config-result-ref>
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - The runner RSA-encrypts the PPPoE dial credential with the login public key (PKCS1v15) at execute time and injects it into the pppoe block; the profile carries no credential field and plaintext never leaves the environment variable.
-        - PUT /api/v1/intf carries the fixed PPPoE interface shape with type 3, address_mode 2, and the pppoe username.
-        - ptm-atomic run can execute this request only when --execute is explicit.
-  fw_verify_process_state:
-    atom_ref: atoms/fw/fw_verify_process_state.yaml
-    intent: Check the vpp/dnsmasq/agent process state by pgrep over SSH or Telnet.
-    transport: ssh
-    shell:
-      command_template: "pgrep -f \"^{{process_pattern}}\""
-      success_pattern: "\\d+"
-      prompt_timeout_ms: 30000
-      privilege_level: user
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Read-only observation; a numeric pid in stdout means the process is running.
-        - The runner substitutes the exact process command-line pattern for vpp, dnsmasq, or agent, anchored with ^.
-        - Session output is captured into diag_snapshot_ref and never written to the repo.
-        - ptm-atomic run can execute this command only when --execute is explicit.
-  fw_kill_process:
-    atom_ref: atoms/fw/fw_kill_process.yaml
-    intent: Kill the vpp/dnsmasq/agent process by pid with kill -9 over SSH or Telnet.
-    transport: ssh
-    shell:
-      command_template: "kill -9 {{pid}}"
-      success_pattern: "\\A\\z"
-      prompt_timeout_ms: 30000
-      privilege_level: user
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - Destructive command; exit code 0 with empty stdout means the kill succeeded.
-        - The killed process is restarted automatically by the device supervisor (vpp and agent immediately; dnsmasq after the global DNS proxy is enabled).
-        - The runner MUST shell-escape the pid placeholder before executing.
-        - ptm-atomic run can execute this command only when --execute is explicit.
-  fw_config_dns_diag:
-    atom_ref: atoms/fw/fw_config_dns_diag.yaml
-    intent: Run DNS resolution diagnostics (ping or traceroute) for a domain over SSH or Telnet.
-    transport: ssh
-    shell:
-      command_template: "{{diag_command}}"
-      success_pattern: "\\d+ (bytes from|hops max)"
-      prompt_timeout_ms: 30000
-      privilege_level: user
-    safety:
-      stores_sensitive_data: false
-      runner_required: true
-      notes:
-        - ping -c 3 <domain> succeeds when a reply line with bytes from the resolved address appears; traceroute <domain> succeeds when the resolved hop list starts.
-        - Requires a default route, public access rights for the management IP, and a configured system DNS server.
-        - Session output is captured into diag_snapshot_ref and never written to the repo.
-        - ptm-atomic run can execute this command only when --execute is explicit.
+        - GET /api/v1/systime?id=systime sends no JSON body and is read-only; there is no modify-system-time operation in this runner.
+        - The runner returns vals[0] name/enable/date/time/ntp and optional exact-match flags for expected_date and expected_time.
+        - "date is compared as YYYY-MM-DD and time as HH:MM:SS; a mismatch sets matches_expected=false instead of changing the device clock."

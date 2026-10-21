@@ -1,0 +1,124 @@
+schema_version: "1.1"
+op_id: fw_delete_interface_pair
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_delete_interface_pair
+description: >-
+  Delete an NGFW interface pair by name through DELETE /api/v1/intf/pair.
+  A missing pair answers HTTP 400 eObjGetNoExist; the runner surfaces it as
+  RESOURCE_NOT_FOUND in the error details, but this operation stays
+  idempotent: false — a repeat delete is a failure, not a success.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be interface_pair for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      Interface-pair delete selector with the pair name as the id query value.
+      DELETE sends no JSON body. Swagger declares id as list[str]; this single
+      delete operation follows the repository delete convention and sends one
+      ?id=<pair-name> value.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: interface_pair
+  params:
+    id: pair1
+  idempotency_key: "<idempotency-key>"
+side_effect: destructive
+returns:
+  status: success
+  data:
+    pair_name: pair1
+    pre_snapshot_ref: "<interface-pair-pre-delete-snapshot-ref>"
+    config_result:
+      status: succeeded
+      config_domain: interface_pair
+      applied_ref: "<interface-pair-delete-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: false
+rollback_strategy:
+  type: restore_snapshot
+  snapshot_required: true
+  required_inputs:
+    - name
+    - full_config
+  notes: Recreate the interface pair from the full pre-delete snapshot.
+pre_snapshot:
+  op_id: fw_verify_interface_pair
+  capture_fields:
+    - name
+    - full_config
+rollback_apply:
+  op_id: fw_config_interface_pair
+  input_from: pre_snapshot.full_config
+post_verify:
+  op_id: fw_verify_interface_pair
+  expected_state: absent
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - RESOURCE_NOT_FOUND
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - capacity_domain
+gate:
+  required: true
+  reason: Interface-pair deletion removes L2 forwarding and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk interface-pair deletion is used.
+  - DELETE uses the pair name as a query value and sends no JSON body.
+  - >-
+    Deleting an already-absent pair answers HTTP 400 eObjGetNoExist
+    (未找到对应的接口对). This is reported as a failure with
+    details.error_type=RESOURCE_NOT_FOUND and no idempotent marker; a repeat
+    delete is not considered success.
+postconditions:
+  - Interface-pair deletion result and diagnostic references are available to the caller.
+  - A follow-up fw_verify_interface_pair query can confirm the pair is absent.
+tags:
+  - firewall
+  - capacity
+  - interface
+  - pair
+  - configuration
+aliases:
+  - interface-pair
+  - port-pair
+  - pair-interface
+  - l2-pair
+since_version: "1.20.0"

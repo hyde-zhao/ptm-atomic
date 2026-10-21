@@ -134,6 +134,28 @@ def build_subtree() -> tuple[CommandGroup, ...]:
                             add_args=_add_start_stateful_stream_args,
                         ),
                         CommandSpec(
+                            name="start-custom-l7-stream",
+                            help="Apply a custom L7 ASTF template and start traffic.",
+                            description=(
+                                "Composite operation: apply a custom L7 ASTF template "
+                                "(http-attack or ftp-auth) with tunables, then start "
+                                "stateful traffic. Apply failure aborts before start."
+                            ),
+                            handler=_run_start_custom_l7_stream,
+                            add_args=_add_start_custom_l7_stream_args,
+                        ),
+                        CommandSpec(
+                            name="start-pcap-stream",
+                            help="Apply the p2p-replay ASTF template and start pcap replay.",
+                            description=(
+                                "Composite operation: apply the p2p-replay ASTF template "
+                                "with a pcap basename and cps, then start stateful traffic. "
+                                "Apply failure aborts before start."
+                            ),
+                            handler=_run_start_pcap_stream,
+                            add_args=_add_start_pcap_stream_args,
+                        ),
+                        CommandSpec(
                             name="verify-stateful-metrics",
                             help="Verify ASTF stateful metrics.",
                             description="Query real-time ASTF statistics and optionally verify loss ratio.",
@@ -416,6 +438,59 @@ def _add_start_stateful_stream_args(parser: argparse.ArgumentParser) -> None:
     _add_payload_args(parser)
 
 
+def _add_start_custom_l7_stream_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    parser.add_argument(
+        "--template",
+        choices=("http-attack", "ftp-auth"),
+        default="http-attack",
+        help="Custom L7 ASTF template to apply and start (default http-attack).",
+    )
+    parser.add_argument(
+        "--tunables",
+        default=None,
+        help=(
+            "JSON object of template-specific tunables, passed unchanged to "
+            "tg_apply_stateful_template (e.g. '{\"method\":\"POST\",\"uri\":\"/login\"}')."
+        ),
+    )
+    parser.add_argument("--mult", type=int, default=1, help="CPS multiplier (default 1).")
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=30,
+        help="Duration in seconds (-1 = continuous until stopped). Defaults to 30.",
+    )
+    _add_payload_args(parser)
+
+
+def _add_start_pcap_stream_args(parser: argparse.ArgumentParser) -> None:
+    _add_user_id_arg(parser)
+    parser.add_argument(
+        "--pcap",
+        required=False,
+        default=None,
+        help=(
+            "pcap basename under the TG avl directory (no path separators or '..'). "
+            "Required unless --payload-json/--payload-file is given."
+        ),
+    )
+    parser.add_argument(
+        "--cps",
+        type=float,
+        default=10,
+        help="Connections per second for pcap replay (default 10).",
+    )
+    parser.add_argument("--mult", type=int, default=1, help="CPS multiplier (default 1).")
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=30,
+        help="Duration in seconds (-1 = continuous until stopped). Defaults to 30.",
+    )
+    _add_payload_args(parser)
+
+
 def _add_verify_stateful_metrics_args(parser: argparse.ArgumentParser) -> None:
     _add_user_id_arg(parser)
     parser.add_argument(
@@ -490,6 +565,14 @@ def _run_apply_stateful_template(args: argparse.Namespace) -> int:
 
 def _run_start_stateful_stream(args: argparse.Namespace) -> int:
     return _run_trex(args, "tg_start_stateful_stream")
+
+
+def _run_start_custom_l7_stream(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_start_custom_l7_stream")
+
+
+def _run_start_pcap_stream(args: argparse.Namespace) -> int:
+    return _run_trex(args, "tg_start_pcap_stream")
 
 
 def _run_verify_stateful_metrics(args: argparse.Namespace) -> int:
@@ -656,6 +739,25 @@ def _params_from_args(args: argparse.Namespace, op_id: str) -> dict[str, Any]:
             "mult": getattr(args, "mult", 1),
             "duration": getattr(args, "duration", -1),
         }
+    if op_id == "tg_start_custom_l7_stream":
+        params: dict[str, Any] = {
+            "user_id": getattr(args, "user_id", "default"),
+            "template": getattr(args, "template", "http-attack"),
+            "mult": getattr(args, "mult", 1),
+            "duration": getattr(args, "duration", 30),
+        }
+        tunables_str = getattr(args, "tunables", None)
+        if tunables_str:
+            params["tunables"] = _parse_json_object("tunables", tunables_str)
+        return params
+    if op_id == "tg_start_pcap_stream":
+        return {
+            "user_id": getattr(args, "user_id", "default"),
+            "pcap": getattr(args, "pcap", None),
+            "cps": getattr(args, "cps", 10),
+            "mult": getattr(args, "mult", 1),
+            "duration": getattr(args, "duration", 30),
+        }
     if op_id == "tg_verify_stateful_metrics":
         params = {"user_id": getattr(args, "user_id", "default")}
         max_loss = getattr(args, "max_loss", None)
@@ -708,6 +810,25 @@ def _parse_expect_ports(value: str) -> list[dict[str, Any]]:
             "RUNNER_VALIDATION_FAILED",
             "expect-ports must be a JSON array of {port, ratio} objects.",
             {"field": "expect_ports"},
+        )
+    return parsed
+
+
+def _parse_json_object(field: str, value: str) -> dict[str, Any]:
+    """解析 JSON 对象参数（tunables 等）：拒绝非对象根节点。"""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"{field} must be a JSON object.",
+            {"field": field, "reason": exc.msg},
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            f"{field} must be a JSON object.",
+            {"field": field, "type": type(parsed).__name__},
         )
     return parsed
 

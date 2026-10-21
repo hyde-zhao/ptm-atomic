@@ -229,6 +229,35 @@ DHCPV6_OPS = (
     "fw_verify_dhcpv6_static_ip",
     "fw_delete_dhcpv6_static_ip",
 )
+IPS_OPS = (
+    "fw_config_ips_rule",
+    "fw_update_ips_rule",
+    "fw_verify_ips_rule",
+    "fw_delete_ips_rule",
+    "fw_delete_batch_ips_rule",
+    "fw_config_ips_profile",
+    "fw_update_ips_profile",
+    "fw_verify_ips_profile",
+    "fw_delete_ips_profile",
+    "fw_delete_batch_ips_profile",
+    "fw_capture_ips_log",
+    "fw_verify_seclog_evidence",
+    "fw_download_seclog_pcap",
+    "fw_config_log_cache_set",
+    "fw_export_ips_log",
+    "fw_clear_ips_log",
+    "fw_config_log_time_set",
+    "fw_verify_log_time_set",
+    "fw_verify_log_cache_set",
+    "fw_verify_log_backup_list",
+    "fw_create_log_download_task",
+    "fw_verify_log_download_task",
+    "fw_download_log_file",
+)
+LICENSE_OPS = (
+    "fw_verify_license_dev",
+    "fw_verify_license",
+)
 SUPPORTED_OPS = (
     "fw_login_web_management",
     "fw_logout_web_management",
@@ -257,6 +286,10 @@ SUPPORTED_OPS = (
     *GARP_OPS,
     "fw_verify_neighbor_probe",
     "fw_verify_abf_policy",
+    "fw_verify_process_restart",
+    "fw_verify_system_resource",
+    "fw_verify_capture_storage",
+    "fw_capture_system_log",
     *MACPOOL_OPS,
     *DOMAINPOOL_OPS,
     *FILETYPE_OPS,
@@ -267,6 +300,8 @@ SUPPORTED_OPS = (
     *CRL_OPS,
     *DHCP_OPS,
     *DHCPV6_OPS,
+    *IPS_OPS,
+    *LICENSE_OPS,
 )
 
 # ── 旧 op_id → 新子命令路径映射 ──────────────────────────
@@ -463,6 +498,9 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_keyword as run_keyword
     from atomic_ops.commands import run_dhcp as run_dhcp
     from atomic_ops.commands import run_dhcpv6 as run_dhcpv6
+    from atomic_ops.commands import run_ips as run_ips
+    from atomic_ops.commands import run_license as run_license
+    from atomic_ops.commands import run_system as run_system
 
     return (
         CommandGroup(
@@ -643,6 +681,17 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             description="Read-only device shell operations executed over SSH/Telnet transports.",
             children=run_cli.build_subtree(),
         ),
+        CommandGroup(
+            name="ips",
+            help="IPS rule and protection-profile operations.",
+            description=(
+                "IPS rule list/filter/selected-id queries plus rule and protection-profile "
+                "create, update, delete and batch-delete operations."
+            ),
+            children=run_ips.build_subtree(),
+        ),
+        *run_license.build_subtree(),
+        *run_system.build_subtree(),
     )
 
 

@@ -13,6 +13,12 @@
 | v0.7 | 2026-09-14 | meta-dev | Align schema with implemented runner behaviour: `request.content_type` admits `multipart/form-data` (file-upload operations), `request.query_params` models paginated GETs, and `shell.privilege_level` admits `privileged`/`root` for appliance SSH targets. |
 | v0.8 | 2026-10-13 | meta-dev | Add the IPv4 DHCP operation family and document `POST /api/v1/batchv2`, the first batch endpoint outside `/api/v1/batch`. |
 | v0.9 | 2026-10-16 | meta-dev | Add the IPv6 DHCP operation family, document the nested `{"error": {...}}` envelope it answers, and correct v0.8's claim that `/api/v1/dhcpstaticip` is reachable only through batch delete. |
+| v1.0 | 2026-10-19 | meta-dev | Add the IPS rule and protection-profile family, document its JSON-body GET/DELETE shape and per-id batch delete items, and document `sec_obj_data` IPS references in the `fwaclconf` control-policy operations. |
+| v1.1 | 2026-10-19 | meta-dev | Add IPS security-log query (`/api/v1/monitor/seclog`), evidence metadata (`/api/v1/seclog/evidence`), pcap download (`/api/v1/downloadfile`), and license queries (`/api/v1/licensedev`, `/api/v1/license`); record `config_source` semantics and the `whiteList` exception model. |
+| v1.2 | 2026-10-19 | meta-dev | Add the global log-cache merge setting (`PUT /api/v1/logsetting/logcacheset`), noting that it has no GET readback, that only `id=1` is supported and id is not gid, and that `timeSet` is an integer whose unit is device-defined. |
+| v1.3 | 2026-10-19 | meta-dev | Complete IPS profile `actionWrapper`/`filters`/`capture_pkt`/source-classification modelling and add IPS log export, clear, time setting, cache read, backup list, and three-step download-task operations. |
+| v1.4 | 2026-10-20 | meta-dev | Add IPS log business filters (`rule_name`/`level`/`action`/`xff`) and the AO-002/AO-003/AO-004/AO-008 SSH process-restart, resource, capture-storage, and system-log observation operations. |
+| v1.5 | 2026-10-21 | meta-dev | Add the interface-pair family (`POST`/`GET`/`PUT`/`DELETE /api/v1/intf/pair`) and the read-only system-time query (`GET /api/v1/systime?id=systime`), including the L2 preparation order and client-side pair filters. |
 
 ## Purpose
 
@@ -97,6 +103,35 @@ Security rules:
 
 The default HTTP runner returns `RUNNER_UNSUPPORTED_OP` for ssh/telnet/cli ops
 until a dedicated `runner/ssh.py` is registered in the allowlist.
+
+## Interface Pair Profile
+
+The interface-pair resource is `/api/v1/intf/pair` and is separate from the `/api/v1/intf` interface resource. It is a pair-forwarding object, not an L2-specific operation: no dedicated L2 atom is introduced.
+
+| Operation | Method | Path | Body / query |
+|---|---|---|---|
+| `fw_config_interface_pair` | `POST` | `/api/v1/intf/pair` | `{"val": {"name", "remark", "receive_interface", "transmit_interface", "status_sync", "allowed_vlan"}}` |
+| `fw_verify_interface_pair` | `GET` | `/api/v1/intf/pair` | `page`, `size` |
+| `fw_update_interface_pair` | `PUT` | `/api/v1/intf/pair` | `{"id": "<pair-name>", "val": {...}}` |
+| `fw_delete_interface_pair` | `DELETE` | `/api/v1/intf/pair?id=<pair-name>` | none |
+
+`val.allowed_vlan` is a string such as `"0"` (untagged) or `"1-4094"`; the runner also accepts an integer and normalizes it to a string. `status_sync` is a boolean. The pair name is the identity: create carries no top-level `id`, update carries `id` equal to `val.name`, and delete uses the name as the `?id=` value. Swagger declares the delete `id` as `list[str]`; this single-delete operation follows the repository delete convention and sends one query value.
+
+**Name rule.** Measured on 2026-10-21 (<DUT_IP>): the device accepts `^[一-龥a-zA-Z0-9.-]{1,31}$` only — Chinese characters, ASCII letters, digits, `-` and `.`, length 1-31, and **no underscores**. `fw_config_interface_pair` and `fw_update_interface_pair` enforce this rule locally before any request is sent and return `RUNNER_VALIDATION_FAILED` (details carry `field`, `value`, `pattern`, `rule`) for a violation. Delete keeps the historical non-empty `id` rule.
+
+**Failure mapping.** A duplicate create answers HTTP 400 `{"errCode":"eObjCreateExist","errMsg":"接口对名称已存在"}`; the runner maps it to `CONFIG_REJECTED` (`RUNNER_CONFIG_REJECTED`, exit 48) and keeps the device `errCode`/`errMsg` in `details`. A delete of an absent pair answers HTTP 400 `{"errCode":"eObjGetNoExist","errMsg":"未找到对应的接口对"}`; the runner reports `details.error_type=RESOURCE_NOT_FOUND` while the runtime code stays `RUNNER_CONFIG_REJECTED`. `fw_delete_interface_pair` is deliberately `idempotent: false`: it is **not** registered in `IDEMPOTENT_ERROR_TYPES`, no `idempotent`/`idempotent_source` keys are emitted, and a repeat delete is **not** treated as success. Updating a pair that does not exist was not measured; the runner keeps it as a failure with the original device error preserved rather than guessing a not-found success semantic.
+
+**Preparation order.** Configure interfaces first, then create the pair:
+
+1. Pair forwarding: set both physical ports with `fw_update_interface` `mode="Pair"` (and the required pvid/linkType fields) before `fw_config_interface_pair`.
+2. L2 switching: prepare member ports with `fw_update_interface` (mode `Switch`, `pvid`, `linkType` 1 for access), create the BVI with `fw_config_interface` (`val.type` 14 and `val.bvi.bridge.interfaces`), and only then create any pair that references those ports.
+3. Pair update/delete: the referenced ports remain in pair mode; confirm create/update/delete with `fw_verify_interface_pair`.
+
+**Query filtering.** `GET /api/v1/intf/pair` accepts only `page` and `size`; there are no server-side `name`/`receive_interface`/`transmit_interface` filters. The runner therefore fetches all pages (internal page size 100) when a filter is supplied, applies exact-match client-side filtering, and then applies the requested `page`/`size` slice to the filtered result. With no filter, the query is passed through unchanged. The returned `count` is the matching count and `vals` retains `name`, `remark`, `receive_interface`, `transmit_interface`, `allowed_vlan`, `status_sync`, `config_source` and `create_time` when the device provides them. `page` and `size` must be supplied together when filtering; supplying only one is rejected locally.
+
+## System Time Profile
+
+`fw_verify_system_time` maps to `GET /api/v1/systime?id=systime` and is read-only. It returns `vals[0]` fields `name`, `enable`, `date`, `time` and `ntp`. The optional `expected_date` (`YYYY-MM-DD`) and `expected_time` (`HH:MM:SS`) inputs produce exact-match flags (`matches_expected_date`, `matches_expected_time`, `matches_expected`) instead of changing the device clock. There is deliberately no modify-system-time operation; the op exists for log time baselines and time-accuracy checks.
 
 ## Runtime Boundary
 
@@ -262,6 +297,70 @@ All operations carry an optional `user_id` field (default `"default"` = legacy f
 
 The runner reads the trex-api base URL from `--base-url` (for example `http://10.0.0.1:8000`) and does not consume the NGFW session file. On a failed envelope the runner maps `error_type` to a stable CLI error code: `INVALID_PARAM` / `RESOURCE_NOT_FOUND` / `STATE_MISMATCH` -> `RUNNER_VALIDATION_FAILED`, `RESOURCE_CONFLICT` -> `RUNNER_CONFIG_REJECTED`, `INTERNAL_ERROR` -> `RUNNER_RESPONSE_INVALID`, `DEVICE_UNREACHABLE` / `TIMEOUT` -> `RUNNER_DEVICE_UNREACHABLE`.
 
+## IPS Profile
+
+The ten IPS operations map to two resources plus the shared batch endpoint. Unlike most NGFW GET and DELETE operations in this repository, the captured traffic sends a JSON request body for both methods, so the adapter `payload_template` describes the body and no `query_params` are used.
+
+| Operation | Method | Path | Payload |
+|---|---|---|---|
+| `fw_verify_ips_rule` | `GET` | `/api/v1/appsec/ips/rules` | selected-id body `{"id": [...]}` or list body `{key, page, size, config_source?, level?, direct?, os?, classtype?}` |
+| `fw_config_ips_rule` | `POST` | `/api/v1/appsec/ips/rules` | `{"val": {name, desc, isProfenal}}` |
+| `fw_update_ips_rule` | `PUT` | `/api/v1/appsec/ips/rules` | `{"id": "<numeric-id>", "val": {name, desc, isProfenal}}` |
+| `fw_delete_ips_rule` | `DELETE` | `/api/v1/appsec/ips/rules` | `{"id": "<numeric-id>"}` |
+| `fw_delete_batch_ips_rule` | `POST` | `/api/v1/batch` | one DELETE item per id with `resource: /api/v1/appsec/ips/rules` |
+| `fw_verify_ips_profile` | `GET` | `/api/v1/appsec/ips/profiles` | `{key, page, size, config_source?}` |
+| `fw_config_ips_profile` | `POST` | `/api/v1/appsec/ips/profiles` | `{"val": {name, actionWrapper, filters, whiteList, customAddRuleList, desc}}` |
+| `fw_update_ips_profile` | `PUT` | `/api/v1/appsec/ips/profiles` | `{"id": "<numeric-id>", "val": {...}}` |
+| `fw_delete_ips_profile` | `DELETE` | `/api/v1/appsec/ips/profiles` | `{"id": "<numeric-id>"}` |
+| `fw_delete_batch_ips_profile` | `POST` | `/api/v1/batch` | one DELETE item per id with `resource: /api/v1/appsec/ips/profiles` |
+
+`page`, `size`, `key` and `config_source` are sent as strings in the captured requests. Single-value rule filters are sent as scalar strings and multi-value filters as string lists. `config_source=0` means no filtering (captured list/selection requests), while `config_source=18` selects firewall-predefined entries; in responses, `config_source=18` marks predefined entries and a missing `config_source` marks custom entries. There is no `isCustom` request filter. Create responses return `{"vals": [{"Id": <numeric-id>, "Name": <name>}]}`; delete responses return `{"msg": "success"}`; batch responses return `{"BatchResult": [{"msg": "success"}, ...]}` with one entry per requested id. A repeat single delete answers `400 eConfigWrite` with the op-specific message (`删除规则失败(C)` for rules, `读取profile错误` for profiles); the runner maps each pair to `RESOURCE_NOT_FOUND` with `idempotent=true`.
+
+The profile `whiteList` is the IPS exception-rule list: each entry carries `ruleId` and excludes that rule from the profile. It is part of the profile create/update `val`, so an update that must keep exceptions has to resend them.
+
+The IPS security-log and related operations use query strings rather than JSON bodies:
+
+| Operation | Method | Path | Query |
+|---|---|---|---|
+| `fw_capture_ips_log` | `GET` | `/api/v1/monitor/seclog` | `gid`, `page`, `size`, `timetype`, plus `starttime`/`endtime` for `custom` |
+| `fw_verify_seclog_evidence` | `GET` | `/api/v1/seclog/evidence` | `meta_file` |
+| `fw_download_seclog_pcap` | `GET` | `/api/v1/downloadfile` | `id=logpcap/<pcap_filename>` (URL-encoded) |
+| `fw_verify_license_dev` | `GET` | `/api/v1/licensedev` | none |
+| `fw_verify_license` | `GET` | `/api/v1/license` | none |
+| `fw_config_log_cache_set` | `PUT` | `/api/v1/logsetting/logcacheset` | body `{"id": 1, "val": {"enable": true, "timeSet": 60}}` |
+| `fw_export_ips_log` | `GET` | `/api/v1/export` | `id=logexport`, `logtype=ipslog`, `type=csv`, `timetype`, plus `starttime`/`endtime` for `custom` |
+| `fw_clear_ips_log` | `DELETE` | `/api/v1/deletelog` | `logtype=ipslog` |
+| `fw_config_log_time_set` | `PUT` | `/api/v1/logsetting/logtimesetting` | body `{"id": "0", "val": {"timeSet": 180}}` |
+| `fw_verify_log_time_set` | `GET` | `/api/v1/logsetting/logtimesetting` | none |
+| `fw_verify_log_cache_set` | `GET` | `/api/v1/logsetting/logcacheset` | none |
+| `fw_verify_log_backup_list` | `GET` | `/api/v1/logsetting/logbackcsv` | `page`, `size`, `keywords` |
+| `fw_create_log_download_task` | `POST` | `/api/v1/downloadfilehandle` | `{"val":{"dataId":["..."],"moduletype":"influxTask","filetype":"csv"}}` |
+| `fw_verify_log_download_task` | `GET` | `/api/v1/downloadfilehandle` | `id=<taskid>` |
+| `fw_download_log_file` | `GET` | `/api/v1/downloadfile` | `id=<filename>` (URL-encoded) |
+
+`gid` defaults to 1, and the user-confirmed scope implements only `gid=1` (IPS); other security-log types are not enumerated and will be added by later features. `timetype` accepts `24h`, `all`, `1h`, `7d`, `1m`, `custom`. The top-level `count` drives pagination. The entry field set is modelled from the evidence meta (`app_protocol`, `dst_ip`, `dst_port`, `src_ip`, `src_port`, `protocol`, `rule{advice,affact,classtype,cnnvd,cve,desc,gid,name,rev,sid}`, `timestamp_us`, `pcap_filename`, `data_filename`, `highlights`, ...); the runner returns the raw JSON unchanged, so if an entry differs from that set the raw JSON remains authoritative. Identical attacks within the query window are merged by the device and their attack count is accumulated; no separate IPS noise-reduction configuration operation exists. Evidence `vals.meta.pcap_filename` feeds `fw_download_seclog_pcap`. License `module[]` entries carry `license_left`, `count`, `end`, `begin`, `enabled` and `name`; the IPS module is the entry named `入侵防御`.
+
+`fw_config_log_cache_set` is a global log setting used by the IPS log flow to configure the merge window. It supports `PUT` only and has no GET readback, so success is the only direct signal; verify indirectly through the accumulated attack count in the `gid=1` security-log query. `id` supports only 1, and id is not gid; the setting applies to log merging for all log types. `timeSet` is modelled as an integer whose unit is device-defined (sample 60) and is not asserted as seconds or minutes.
+
+IPS profile payloads are modelled from the captured structures. `actionWrapper` entries use `priority` 1..5 with `action` 0/1/2. `filters` entries use `protocols`, `classtype`, `builtintype` (`dmz`/`radom`), `prioritys`, `Directs`, `OsTypes`, optional `action` and `capture_pkt`; `[{}]` means all rules. `customAddRuleList` entries carry a rule `id`, `action` 0/1/2 and optional `capture_pkt` (`true` captures packets for that rule, `false` does not); per-rule and per-filter actions override the actionWrapper level action. `whiteList` remains the exception-rule list. `fw_verify_ips_profile` classifies each entry as predefined when `config_source=18` or when `id<1000`, and as custom when `id>=1000` (the captured create response assigned id 1000 to a user-created profile); versions without `config_source` fall back to the id rule.
+
+Log management uses `GET /api/v1/export` for CSV export (the runner writes the response bytes to `output_path`), `DELETE /api/v1/deletelog` for irreversible clearing, `GET/PUT /api/v1/logsetting/logtimesetting` for backup/retention time (unit device-defined, sample 180), `GET /api/v1/logsetting/logcacheset` for the readback of the cache setting, and `GET /api/v1/logsetting/logbackcsv` for backup files (`count` plus `vals[name,mtime,logtype]`). The three-step download flow uses `POST /api/v1/downloadfilehandle` to create a task (`vals[0].downloadtaskid`), `GET /api/v1/downloadfilehandle?id=<taskid>` until `vals[0].filename` is ready, then `GET /api/v1/downloadfile?id=<filename>` for the bytes.
+
+The IPS security-log query also accepts the business filters `rule_name`, `level`, `action` and `xff` as query values; their exact device spellings are pending confirmation, while gid=1/page/size/timetype and the custom start/end window are unchanged.
+
+The AO-002/AO-003/AO-004/AO-008 verification operations use SSH and the shell block in the adapter:
+
+| Operation | Command summary |
+|---|---|
+| `fw_verify_process_restart` | Record `ps -ef` PIDs before/after a wait window, list `/trace/coredump`, and check `/trace/log/snort_die.log` for snort. Mapping: snort -> one process; vpp -> vpp-agent-init/vpp-agent/vpp. |
+| `fw_verify_system_resource` | `free -m`, `/proc/loadavg`, `top -bn1` CPU line and `df -P -k`; optional second sample for memory/disk deltas. |
+| `fw_verify_capture_storage` | `df -P -k /userdata`, `du -sk /userdata`, mount lines and `ls -ld /userdata /exdisk`; classifies with_disk/no_disk/exdisk/unknown. |
+| `fw_capture_system_log` | Tail `/var/log/messages`, `/var/log/syslog` or `journalctl` and match the IPv4/IPv6 control-policy load keywords. |
+
+For these SSH operations, credentials come from the runner credential env var (`FW_SSH_PASSWORD` by default for root), and raw command output stays in the runner result. IPS configuration/rule changes take effect immediately; existing sessions are not refreshed while new sessions use the new configuration.
+
+The control-policy create/update payloads also carry `sec_obj_data`, the device security-profile reference list. An IPS entry uses `{profile_id, profile_name, model_name: "ips"}`. The runner accepts the raw list through `--sec-obj-data-json`/`--sec-obj-data-file`, or builds the same entry from `--ips-profile-id`/`--ips-profile-name`. Omitting all of them sends an empty list, which is the previous fixed template value.
+
 ## Validation
 
 Run the adapter profile check together with the normal repository checks:
@@ -273,6 +372,8 @@ uv run ptm-atomic adapter fw_config_ospfv2_global
 uv run ptm-atomic adapter fw_delete_ospfv2_network
 uv run ptm-atomic adapter fw_config_ospfv3_global
 uv run ptm-atomic adapter fw_config_bfd_global
+uv run ptm-atomic adapter fw_verify_ips_rule
+uv run ptm-atomic adapter fw_config_ips_profile
 uv run ptm-atomic adapter tg_config_interface
 uv run --python 3.11 python scripts/validate_adapter_profiles.py
 uv run --python 3.11 python scripts/security_gate_check.py

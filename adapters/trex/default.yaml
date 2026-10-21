@@ -427,6 +427,62 @@ operations:
       notes:
         - trex-api uses a single POST /api/v1/ops/{op_id} endpoint; success is determined by the response envelope status and error_type, not the HTTP status code.
         - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_start_custom_l7_stream:
+    atom_ref: atoms/tg/tg_start_custom_l7_stream.yaml
+    intent: Build a composite ASTF request that applies a custom L7 template (http-attack or ftp-auth) and then starts stateful traffic.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_apply_stateful_template
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        template: "{{ params.template }}"
+        tunables: "{{ params.tunables }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-start-custom-l7-stream-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - 'This atom is a composite op. The request block documents the first step (apply); after apply succeeds the runner sends POST /api/v1/ops/tg_start_stateful_stream with {"user_id": ..., "mult": ..., "duration": ...}.'
+        - Apply failure aborts the composite op and no start request is sent; the error details carry composite_step=apply and start_skipped=true.
+        - Allowed templates are http-attack and ftp-auth only; tunables is a JSON object passed unchanged to the apply step.
+        - ptm-atomic run can execute this request only when --execute is explicit.
+  tg_start_pcap_stream:
+    atom_ref: atoms/tg/tg_start_pcap_stream.yaml
+    intent: Build a composite ASTF request that applies the p2p-replay template with a pcap/cps and then starts replay traffic.
+    request:
+      method: POST
+      path: /api/v1/ops/tg_apply_stateful_template
+      content_type: application/json
+      auth:
+        mode: external_credential_ref
+        header_name: X-Session-Ref
+        value_ref: <trex-no-auth>
+      payload_template:
+        user_id: "{{ params.user_id }}"
+        template: p2p-replay
+        tunables:
+          pcap: "{{ params.pcap }}"
+          cps: "{{ params.cps }}"
+    response:
+      success_status:
+        - 200
+      result_ref: <trex-start-pcap-stream-result-ref>
+    safety:
+      stores_sensitive_data: false
+      runner_required: true
+      notes:
+        - 'This atom is a composite op. The request block documents the first step (apply); after apply succeeds the runner sends POST /api/v1/ops/tg_start_stateful_stream with {"user_id": ..., "mult": ..., "duration": ...}.'
+        - Apply failure aborts the composite op and no start request is sent; the error details carry composite_step=apply and start_skipped=true.
+        - pcap accepts a basename only (no path separators or ".."); the TG resolves it under the avl directory.
+        - ptm-atomic run can execute this request only when --execute is explicit.
   tg_verify_stateful_metrics:
     atom_ref: atoms/tg/tg_verify_stateful_metrics.yaml
     intent: Build an ASTF metrics verification request against an optional max loss ratio.

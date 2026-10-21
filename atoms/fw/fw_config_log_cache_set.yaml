@@ -1,0 +1,123 @@
+schema_version: "1.1"
+op_id: fw_config_log_cache_set
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_config_log_cache_set
+description: Configure global log-cache merging for all log types through /api/v1/logsetting/logcacheset.
+parameters:
+  state_ref:
+    type: string
+    required: false
+    description: Non-sensitive state reference from an external orchestrator.
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be log_cache for this operation.
+  params:
+    type: json
+    required: true
+    description: >-
+      Log-cache setting body with id, enable and timeSet. The user-confirmed
+      scope supports only id=1; id is not gid and this configuration applies
+      to log merging for all log types. enable toggles log-cache merging.
+      timeSet is the merge window modelled as an integer; its unit is
+      device-defined (sample 60) and is not asserted as seconds or minutes.
+  idempotency_key:
+    type: string
+    required: true
+    description: Non-sensitive key used by the external orchestrator for repeatable intent.
+inputs:
+  state_ref: "<state-ref>"
+  session_ref: "<session-ref>"
+  config_domain: log_cache
+  params:
+    id: 1
+    enable: true
+    timeSet: 60
+  idempotency_key: "<idempotency-key>"
+side_effect: state_mutation
+returns:
+  status: success
+  data:
+    log_cache_id: 1
+    requested_enable: true
+    requested_time_set: 60
+    config_result:
+      status: succeeded
+      config_domain: log_cache
+      applied_ref: "<log-cache-config-result-ref>"
+    state_ref: "<state-ref>"
+    state_status: valid
+    expires_at: null
+    manual_handling_ref: "<manual-handling-ref>"
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+rollback_strategy:
+  type: manual_required
+  snapshot_required: false
+  required_inputs:
+    - log_cache_id
+    - enable
+    - time_set
+  notes: >-
+    The endpoint exposes no GET readback, so the previous enable/timeSet cannot
+    be captured automatically. Restore requires the caller's recorded values
+    and a manual PUT.
+post_verify:
+  op_id: fw_capture_ips_log
+  expected_state: indirect_count_accumulation
+  notes: >-
+    No observation endpoint exists for /api/v1/logsetting/logcacheset. Verify
+    indirectly by observing that identical attacks within the configured window
+    are merged and their attack count accumulates in the gid=1 security-log
+    query.
+dry_run_supported: true
+risk_level: high
+timeout_ms: 30000
+error_types:
+  - NONE
+  - STATE_INVALID
+  - VALIDATION_FAILED
+  - GATE_MISSING
+  - CONFIG_REJECTED
+  - DEVICE_UNREACHABLE
+  - UNKNOWN_ERROR
+risk:
+  level: high
+  categories:
+    - configuration
+    - logging
+    - global_setting
+gate:
+  required: true
+  reason: Global log-cache merging changes log volume and accumulation behaviour and requires review.
+  approver_role: change_reviewer
+  evidence_required:
+    - approved_change_record
+    - state_reference
+    - parameter_digest
+preconditions:
+  - External orchestration holds a valid state_ref or session_ref.
+  - Gate evidence exists before this high-risk global setting is used.
+  - id must be 1; id is not gid, and the setting applies to log merging for all log types.
+postconditions:
+  - The device accepts the PUT; this endpoint has no observation channel, so success is the only direct signal.
+  - "Verify indirectly through fw_capture_ips_log: identical attacks within the configured window are merged and the attack count accumulates in the gid=1 log query."
+  - timeSet is modelled as an integer; the unit is device-defined (sample 60) and is not asserted as seconds or minutes.
+tags:
+  - firewall
+  - ips
+  - log
+  - configuration
+  - global
+aliases:
+  - log-cache
+  - log-merge
+  - logcacheset
+  - log-cache-setting
+  - ips-log-merge
+since_version: "1.17.0"

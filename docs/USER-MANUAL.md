@@ -379,6 +379,24 @@ ptm-atomic run fw_delete_batch_interface \
   --id GE0_2.106
 ```
 
+接口对使用独立的 `/api/v1/intf/pair` 端点，必须先用 `interface update` 把两个物理口准备为 `--mode Pair`，再创建接口对；L2 转发场景先完成 Switch 成员口和 BVI 配置，再创建接口对。接口对名称只允许中文/字母/数字/`-`/`.`，长度 1-31，不允许下划线；创建或更新时名称不合法会在本地直接报 `RUNNER_VALIDATION_FAILED`。重复创建会返回 `400 eObjCreateExist`（配置拒绝），重复删除会返回 `400 eObjGetNoExist`（错误详情为 `RESOURCE_NOT_FOUND`，但该 op 声明 `idempotent: false`，重复删除不算成功）。查询只支持 `--page/--size`，`--name/--receive-interface/--transmit-interface` 由 runner 在客户端过滤：
+
+```bash
+ptm-atomic run --base-url https://<device-management-ip> interface update --interface-kind physical --id GE0_1 --mode Pair --pvid 10
+ptm-atomic run --base-url https://<device-management-ip> interface update --interface-kind physical --id GE0_2 --mode Pair --pvid 10
+ptm-atomic run --base-url https://<device-management-ip> interface pair-config --name pair1 --receive-interface GE0_1 --transmit-interface GE0_2 --allowed-vlan 0
+ptm-atomic run --base-url https://<device-management-ip> interface pair-verify --name pair1 --page 1 --size 20
+ptm-atomic run --base-url https://<device-management-ip> interface pair-update --id pair1 --receive-interface GE0_1 --transmit-interface GE0_2 --status-sync
+ptm-atomic run --base-url https://<device-management-ip> interface pair-delete --id pair1
+```
+
+系统时间查询只读，不提供修改系统时间的 op。`--expected-date`（`YYYY-MM-DD`）和 `--expected-time`（`HH:MM:SS`）用于精确断言，不匹配时只把 `matches_expected*` 置为 false，不修改设备时钟：
+
+```bash
+ptm-atomic run --base-url https://<device-management-ip> system time-verify
+ptm-atomic run --base-url https://<device-management-ip> system time-verify --expected-date 2026-10-21 --expected-time 12:00:00
+```
+
 OSPFv2、OSPFv3 和 BFD runner 按 HTTP 方法拆分 op。GET 查询发送空请求体；POST 创建；PUT 更新；network DELETE 使用 `{"id": "<id>"}`；OSPFv2/OSPFv3 interface DELETE 使用 `?id=<interface>`。所有真实请求都需要已有登录 session 和 `--execute`。
 
 启停 OSPFv2 全局配置 dry-run：

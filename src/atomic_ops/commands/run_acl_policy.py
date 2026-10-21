@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
 from typing import Any
 
 from atomic_ops.commands import CommandSpec
@@ -59,6 +61,32 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dst-addr-is-group", action="store_true", help="Treat --dst-addr as an address-group name.")
     parser.add_argument("--service", default="any", help="Service object or service-group name.")
     parser.add_argument("--service-is-group", action="store_true", help="Treat --service as a service-group name.")
+    # IPS 集成：ips-api.md 抓包中 fwaclconf 的 val.sec_obj_data 可携带
+    # {profile_id, profile_name, model_name:"ips"}。便捷字段与原始列表二选一。
+    ips_enable_group = parser.add_mutually_exclusive_group()
+    ips_enable_group.add_argument(
+        "--ips-enabled",
+        dest="acl_policy_ips_enabled",
+        action="store_true",
+        default=None,
+        help="Apply an IPS profile reference; requires --ips-profile-id and --ips-profile-name.",
+    )
+    ips_enable_group.add_argument(
+        "--no-ips",
+        dest="acl_policy_ips_enabled",
+        action="store_false",
+        help="Do not apply any IPS profile reference (empty sec_obj_data).",
+    )
+    parser.add_argument("--ips-profile-id", help="IPS protection-profile id to reference when IPS is enabled.")
+    parser.add_argument("--ips-profile-name", help="IPS protection-profile name to reference when IPS is enabled.")
+    parser.add_argument(
+        "--sec-obj-data-json",
+        help='Raw sec_obj_data JSON list, for example [{"profile_id":1003,"profile_name":"all","model_name":"ips"}].',
+    )
+    parser.add_argument(
+        "--sec-obj-data-file",
+        help="Path to a JSON file containing the raw sec_obj_data list.",
+    )
 
 
 def _add_update_args(parser: argparse.ArgumentParser) -> None:
@@ -149,6 +177,10 @@ def _run_acl_policy(args: argparse.Namespace, op_id: str) -> int:
                 service=getattr(args, "service", "any"),
                 service_is_group=bool(getattr(args, "service_is_group", False)),
                 entry_id=entry_id,
+                sec_obj_data=_load_sec_obj_data(args),
+                ips_enabled=getattr(args, "acl_policy_ips_enabled", None),
+                ips_profile_id=getattr(args, "ips_profile_id", None),
+                ips_profile_name=getattr(args, "ips_profile_name", None),
             )
         elif op_id == "fw_delete_acl_policy":
             payload = build_acl_policy_delete_payload(entry_id=_single_arg(args, "id"))
@@ -192,3 +224,39 @@ def _run_acl_policy(args: argparse.Namespace, op_id: str) -> int:
             CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
             output_format,
         )
+
+
+def _load_sec_obj_data(args: argparse.Namespace) -> list[dict[str, Any]] | None:
+    """加载原始 sec_obj_data JSON 列表；未提供时返回 None。"""
+    raw_json = getattr(args, "sec_obj_data_json", None)
+    raw_file = getattr(args, "sec_obj_data_file", None)
+    if raw_json and raw_file:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "--sec-obj-data-json and --sec-obj-data-file cannot be used together.",
+            {"fields": ["sec_obj_data_json", "sec_obj_data_file"]},
+        )
+    if not raw_json and not raw_file:
+        return None
+    try:
+        raw = Path(raw_file).read_text(encoding="utf-8") if raw_file else str(raw_json)
+        value = json.loads(raw)
+    except OSError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "sec_obj_data file cannot be read.",
+            {"path": raw_file, "reason": exc.__class__.__name__},
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "sec_obj_data must be valid JSON.",
+            {"reason": exc.msg},
+        ) from exc
+    if not isinstance(value, list):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "sec_obj_data JSON root must be a list.",
+            {"type": type(value).__name__},
+        )
+    return value
