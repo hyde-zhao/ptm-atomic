@@ -1080,12 +1080,13 @@ class IpsDeleteIdempotencyTests(unittest.TestCase):
         self.assertEqual(result["request"]["query"], {"id": "5191533"})
         self.assertNotIn("payload", result["request"])
 
-    def test_single_profile_delete_uses_query_not_json_body(self) -> None:
+    def test_single_profile_delete_uses_batch_endpoint(self) -> None:
+        """2026-10-21 实机：单条 profile DELETE 返回 eConfigWrite，改走 batch。"""
         with tempfile.TemporaryDirectory() as temp_dir:
             session_file = _make_session(temp_dir)
             with patch(
                 "atomic_ops.runner.ips.request_json",
-                return_value=(200, {"msg": "success"}, "{}"),
+                return_value=(200, {"BatchResult": [{"msg": "success"}]}, "{}"),
             ) as mocked:
                 result = execute_ips(
                     op_id="fw_delete_ips_profile",
@@ -1097,9 +1098,14 @@ class IpsDeleteIdempotencyTests(unittest.TestCase):
                     timeout=10,
                 )
         kwargs = mocked.call_args.kwargs
-        self.assertEqual(kwargs["params"], {"id": "1000"})
-        self.assertIsNone(kwargs["json_payload"])
-        self.assertEqual(result["request"]["query"], {"id": "1000"})
+        self.assertIsNone(kwargs["params"])
+        body = kwargs["json_payload"]
+        self.assertEqual(body["batch"][0]["method"], "DELETE")
+        self.assertEqual(body["batch"][0]["resource"], "/api/v1/appsec/ips/profiles")
+        self.assertEqual(body["batch"][0]["body"]["id"], ["1000"])
+        self.assertEqual(result["request"]["path"], "/api/v1/batch")
+        self.assertEqual(result["batch_result"]["status"], "succeeded")
+        self.assertEqual(result["ips_profile_id"], "1000")
 
     def test_delete_profile_duplicate_maps_to_resource_not_found(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

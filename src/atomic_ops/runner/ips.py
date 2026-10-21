@@ -290,6 +290,23 @@ def _ips_delete_query(op_id: str, payload: dict[str, Any] | None) -> dict[str, A
     return {"id": payload["id"]}
 
 
+def _ips_profile_delete_batch_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """单条 profile 删除改用 /api/v1/batch 的 per-id item。
+
+    2026-10-21 实机：DELETE /api/v1/appsec/ips/profiles?id=<id> 对自定义
+    profile 返回 eConfigWrite 删除profile错误，而 /api/v1/batch 的同一
+    DELETE item 返回 success。为保持 `fw_delete_ips_profile` 的单 id
+    接口不变，runner 内部改走 batch。
+    """
+    if not isinstance(payload, dict) or payload.get("id") in (None, ""):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "IPS profile delete requires a non-empty id.",
+            {"op_id": "fw_delete_ips_profile", "field": "id"},
+        )
+    return build_ips_profile_batch_delete_payload(entry_ids=[payload["id"]])
+
+
 def build_ips_dry_run(
     *,
     op_id: str,
@@ -300,14 +317,20 @@ def build_ips_dry_run(
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
-    method, path = _method_path(op_id)
-    query = _ips_delete_query(op_id, payload)
+    if op_id == "fw_delete_ips_profile":
+        method, path = "POST", BATCH_PATH
+        query = None
+        request_payload = _ips_profile_delete_batch_payload(payload)
+    else:
+        method, path = _method_path(op_id)
+        query = _ips_delete_query(op_id, payload)
+        request_payload = None if query is not None else payload
     request: dict[str, Any] = {
         "method": method,
         "url": f"{normalize_base_url(base_url)}{path}",
         "auth": {"name": auth_header, "value": "<session-ref>"},
         "content_type": "application/json",
-        "payload": None if query is not None else payload,
+        "payload": request_payload,
     }
     if query is not None:
         request["query"] = query
@@ -332,23 +355,29 @@ def execute_ips(
     verify_tls: bool,
     timeout: float,
 ) -> dict[str, Any]:
-    method, path = _method_path(op_id)
     if payload is None:
         raise RunnerError(
             "RUNNER_VALIDATION_FAILED",
             "IPS operation requires a request payload.",
             {"op_id": op_id},
         )
+    if op_id == "fw_delete_ips_profile":
+        method, path = "POST", BATCH_PATH
+        query = None
+        request_payload = _ips_profile_delete_batch_payload(payload)
+    else:
+        method, path = _method_path(op_id)
+        query = _ips_delete_query(op_id, payload)
+        request_payload = None if query is not None else payload
     session_payload = read_session_file(session_file, expect_base_url=base_url)
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {"Content-Type": "application/json", auth_header: header_value}
-    query = _ips_delete_query(op_id, payload)
     status_code, response_payload, _text = request_json(
         method,
         f"{normalize_base_url(base_url)}{path}",
         headers=headers,
-        json_payload=None if query is not None else payload,
+        json_payload=request_payload,
         params=query,
         timeout=timeout,
         verify_tls=verify_tls,
@@ -385,10 +414,11 @@ def execute_ips(
         "response": response_payload,
     }
     result.update(_extract_ips_summary(op_id, payload, response_payload))
-    if op_id in BATCH_OPS:
+    if op_id in BATCH_OPS or op_id == "fw_delete_ips_profile":
+        requested_count = 1 if op_id == "fw_delete_ips_profile" else _batch_delete_requested_count(payload)
         batch_summary = summarize_batch_result(
             response_payload,
-            requested_count=_batch_delete_requested_count(payload),
+            requested_count=requested_count,
         )
         result.update(batch_summary)
         result["batch_result"] = {
