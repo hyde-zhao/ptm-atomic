@@ -2,7 +2,7 @@
 
 覆盖：
 - 规则/防护模板的载荷构造与校验；
-- 规则 GET/DELETE 携带 JSON body 的形态；
+- 规则 GET 携带 JSON body、单条 DELETE 携带 query ?id= 的形态（2026-10-21 实机校准）；
 - 批量删除的 per-id item 形态与结果摘要；
 - acl-policy 的 IPS sec_obj_data 便捷字段与向后兼容空列表；
 - CLI ``run ips ...`` dry-run 路径。
@@ -1056,6 +1056,50 @@ class IpsDeleteIdempotencyTests(unittest.TestCase):
         self.assertEqual(
             details["idempotent_source"], "atoms/fw/fw_delete_ips_rule.yaml#idempotent"
         )
+
+    def test_single_delete_uses_query_not_json_body(self) -> None:
+        """2026-10-21 实机：DELETE 只认 ?id=，JSON body 会 eObjParse。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.ips.request_json",
+                return_value=(200, {"msg": "success"}, "{}"),
+            ) as mocked:
+                result = execute_ips(
+                    op_id="fw_delete_ips_rule",
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload={"id": "5191533"},
+                    verify_tls=False,
+                    timeout=10,
+                )
+        kwargs = mocked.call_args.kwargs
+        self.assertEqual(kwargs["params"], {"id": "5191533"})
+        self.assertIsNone(kwargs["json_payload"])
+        self.assertEqual(result["request"]["query"], {"id": "5191533"})
+        self.assertNotIn("payload", result["request"])
+
+    def test_single_profile_delete_uses_query_not_json_body(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_file = _make_session(temp_dir)
+            with patch(
+                "atomic_ops.runner.ips.request_json",
+                return_value=(200, {"msg": "success"}, "{}"),
+            ) as mocked:
+                result = execute_ips(
+                    op_id="fw_delete_ips_profile",
+                    base_url=BASE_URL,
+                    session_file=session_file,
+                    auth_header="Authorization",
+                    payload={"id": "1000"},
+                    verify_tls=False,
+                    timeout=10,
+                )
+        kwargs = mocked.call_args.kwargs
+        self.assertEqual(kwargs["params"], {"id": "1000"})
+        self.assertIsNone(kwargs["json_payload"])
+        self.assertEqual(result["request"]["query"], {"id": "1000"})
 
     def test_delete_profile_duplicate_maps_to_resource_not_found(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

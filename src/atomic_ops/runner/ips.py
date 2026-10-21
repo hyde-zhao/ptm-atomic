@@ -6,9 +6,11 @@ IPS 族由两个资源组成：
   勾选规则详情、增删改与批量删除；
 - 防护模板（profiles）：引用规则集合的防护模板，支持列表、增删改与批量删除。
 
-抓包（ips-api.md）显示这两个资源的 GET 与 DELETE 都把 JSON 载荷放在请求
-body 中，而不是 query string。runner 因此对 GET/DELETE 同样发送 JSON body，
-这与仓库内多数“GET 无 body、DELETE 用 ?id=”的族不同。
+抓包（ips-api.md）曾显示这两个资源的 GET 与 DELETE 都把 JSON 载荷放在请求
+body 中；2026-10-21 在 DUT2（<DUT_IP>）实机复核发现：GET 的列表/详情
+仍用 JSON body，但**单条 DELETE 的 id 必须放 query `?id=<id>`**，放 body 会
+返回 `eObjParse id参数为空/错误`。runner 对 DELETE 改为 query 传参
+（见 `DELETE_QUERY_OPS`），GET 与批量删除保持原形态。
 
 批量删除沿用 ``runner/batch.py#build_batch_delete_payload``，并显式选择
 ``carrier="per_id_item"``：抓包中的 Web UI 对每条规则/模板各发一个 batch
@@ -66,6 +68,10 @@ IPS_ENDPOINTS: dict[str, tuple[str, str]] = {
 }
 GET_OPS = {"fw_verify_ips_rule", "fw_verify_ips_profile"}
 BATCH_OPS = {"fw_delete_batch_ips_rule", "fw_delete_batch_ips_profile"}
+# 2026-10-21 实机校准（DUT2 <DUT_IP>）：单条删除的 id 必须放 query
+# `?id=<id>`；放 DELETE JSON body 会被设备拒绝（eObjParse id参数为空/错误）。
+# 批量删除仍走 /api/v1/batch 的 per_id_item body。
+DELETE_QUERY_OPS = {"fw_delete_ips_rule", "fw_delete_ips_profile"}
 
 
 # ── 规则载荷构造 ──────────────────────────────────────────
@@ -266,6 +272,24 @@ def validate_ips_payload(payload: dict[str, Any], *, op_id: str) -> dict[str, An
 # ── 执行与 dry-run ────────────────────────────────────────
 
 
+def _ips_delete_query(op_id: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """单条 IPS 删除的 query 参数；非删除 op 返回 None。
+
+    2026-10-21 实机：DELETE /api/v1/appsec/ips/{rules,profiles} 只认 query
+    `?id=<id>`；JSON body 形式返回 eObjParse。payload 仍保留 id 供结果摘要
+    与幂等语义使用。
+    """
+    if op_id not in DELETE_QUERY_OPS:
+        return None
+    if not isinstance(payload, dict) or payload.get("id") in (None, ""):
+        raise RunnerError(
+            "RUNNER_VALIDATION_FAILED",
+            "IPS delete requires a non-empty id.",
+            {"op_id": op_id, "field": "id"},
+        )
+    return {"id": payload["id"]}
+
+
 def build_ips_dry_run(
     *,
     op_id: str,
@@ -277,17 +301,21 @@ def build_ips_dry_run(
     timeout: float,
 ) -> dict[str, Any]:
     method, path = _method_path(op_id)
+    query = _ips_delete_query(op_id, payload)
+    request: dict[str, Any] = {
+        "method": method,
+        "url": f"{normalize_base_url(base_url)}{path}",
+        "auth": {"name": auth_header, "value": "<session-ref>"},
+        "content_type": "application/json",
+        "payload": None if query is not None else payload,
+    }
+    if query is not None:
+        request["query"] = query
     return {
         "op_id": op_id,
         "status": "dry_run",
         "execute_required": True,
-        "request": {
-            "method": method,
-            "url": f"{normalize_base_url(base_url)}{path}",
-            "auth": {"name": auth_header, "value": "<session-ref>"},
-            "content_type": "application/json",
-            "payload": payload,
-        },
+        "request": request,
         "session_file": str(session_file),
         "verify_tls": verify_tls,
         "timeout": timeout,
@@ -315,11 +343,13 @@ def execute_ips(
     session_value = str(session_payload["session_value"])
     header_value = f"Bearer {session_value}" if auth_header == "Authorization" else session_value
     headers = {"Content-Type": "application/json", auth_header: header_value}
+    query = _ips_delete_query(op_id, payload)
     status_code, response_payload, _text = request_json(
         method,
         f"{normalize_base_url(base_url)}{path}",
         headers=headers,
-        json_payload=payload,
+        json_payload=None if query is not None else payload,
+        params=query,
         timeout=timeout,
         verify_tls=verify_tls,
     )
@@ -340,15 +370,18 @@ def execute_ips(
                 "response_keys": sorted(response_payload.keys()),
             },
         )
+    request_summary: dict[str, Any] = {
+        "method": method,
+        "path": path,
+        "auth": {"name": auth_header, "value": "<session-ref>"},
+    }
+    if query is not None:
+        request_summary["query"] = query
     result: dict[str, Any] = {
         "op_id": op_id,
         "status": "success",
         "status_code": status_code,
-        "request": {
-            "method": method,
-            "path": path,
-            "auth": {"name": auth_header, "value": "<session-ref>"},
-        },
+        "request": request_summary,
         "response": response_payload,
     }
     result.update(_extract_ips_summary(op_id, payload, response_payload))

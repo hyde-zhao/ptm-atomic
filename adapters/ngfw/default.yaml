@@ -7489,7 +7489,7 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      payload_template:
+      query_template:
         id: "{{ params.id }}"
     response:
       success_status:
@@ -7501,7 +7501,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - "DELETE carries the id in a JSON request body, unlike the query-string delete style used by several other NGFW families."
+        - "Live device check 2026-10-21: DELETE requires the id as query ?id=<id>; a JSON body is rejected with eObjParse id参数为空/错误."
         - 'The captured success response is {"msg": "success"}.'
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_batch_ips_rule:
@@ -7642,7 +7642,7 @@ operations:
         mode: external_session_ref
         header_name: Authorization
         value_ref: <session-ref>
-      payload_template:
+      query_template:
         id: "{{ params.id }}"
     response:
       success_status:
@@ -7654,7 +7654,7 @@ operations:
       stores_sensitive_data: false
       runner_required: true
       notes:
-        - "DELETE carries the id in a JSON request body, unlike the query-string delete style used by several other NGFW families."
+        - "Live device check 2026-10-21: DELETE requires the id as query ?id=<id>; a JSON body is rejected with eObjParse id参数为空."
         - 'The captured success response is {"msg": "success"}.'
         - ptm-atomic run can execute this request only when --execute is explicit.
   fw_delete_batch_ips_profile:

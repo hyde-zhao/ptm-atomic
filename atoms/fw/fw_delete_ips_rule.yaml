@@ -20,9 +20,10 @@ parameters:
     type: json
     required: true
     description: >-
-      IPS rule delete selector. id is the numeric rule id carried in a JSON
-      request body ({"id": "..."}), unlike the query-string delete style used
-      by several other NGFW families.
+      IPS rule delete selector. id is the numeric rule id carried as the
+      query parameter `?id=<id>` (DELETE /api/v1/appsec/ips/rules?id=...).
+      Live device check 2026-10-21: a JSON body {"id": "..."} is rejected
+      with eObjParse id参数为空/错误.
   idempotency_key:
     type: string
     required: true

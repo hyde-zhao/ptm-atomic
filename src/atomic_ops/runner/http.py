@@ -55,6 +55,7 @@ def request_json(
     *,
     headers: dict[str, str] | None = None,
     json_payload: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
     timeout: float = 10,
     verify_tls: bool = False,
 ) -> tuple[int, dict[str, Any], str]:
@@ -64,6 +65,7 @@ def request_json(
             url,
             headers=headers,
             json=json_payload,
+            params=params,
             timeout=timeout,
             verify=verify_tls,
         )

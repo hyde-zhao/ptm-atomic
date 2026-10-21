@@ -21,8 +21,10 @@ parameters:
     required: true
     description: >-
       IPS protection-profile delete selector. id is the numeric profile id
-      carried in a JSON request body ({"id": "..."}), unlike the query-string
-      delete style used by several other NGFW families.
+      carried as the query parameter `?id=<id>`
+      (DELETE /api/v1/appsec/ips/profiles?id=...). Live device check
+      2026-10-21: a JSON body {"id": "..."} is rejected with
+      eObjParse id参数为空.
   idempotency_key:
     type: string
     required: true
