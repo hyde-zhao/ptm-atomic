@@ -500,6 +500,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
     from atomic_ops.commands import run_dhcpv6 as run_dhcpv6
     from atomic_ops.commands import run_ips as run_ips
     from atomic_ops.commands import run_license as run_license
+    from atomic_ops.commands import run_system as run_system
 
     return (
         CommandGroup(
@@ -690,6 +691,7 @@ def build_run_subtree() -> tuple[CommandGroup | CommandSpec, ...]:
             children=run_ips.build_subtree(),
         ),
         *run_license.build_subtree(),
+        *run_system.build_subtree(),
     )
 
 

@@ -48,6 +48,7 @@
 | 容量验证 | `ngfw_verification` package 包含对应容量域验证 op 和 OSPFv2、OSPFv3、BFD 查询，不包含安装健康检查 `fw_verify_ngfw_health`。 |
 | 多设备批量配置 | `ngfw_batch_config` package 包含 10 个批量配置 op；批量合同见 `docs/batch-configuration-contract.md`。 |
 | IPS 规则与防护模板 | `ngfw_capacity_config`、`ngfw_verification` 和 `security` package 收录 IPS op：规则/模板查询、新增、修改、删除与批量删除；`run ips rule ...` / `run ips profile ...` 提供 dry-run 与 `--execute` 路径；`fw_config_acl_policy` / `fw_update_acl_policy` 通过 `sec_obj_data` 或 `ips_enabled` 便捷字段引用 IPS 防护模板。`run ips log capture/evidence/download-pcap` 覆盖 `/api/v1/monitor/seclog`、`/api/v1/seclog/evidence` 与 pcap 下载（日志查询支持 rule_name/level/action/xff 业务过滤）；`run ips log cache-set` 配置全局日志归并窗口；`run ips log export/clear/time-set/time-verify/cache-verify/backup-list/download-task-create/download-task-verify/download-file` 覆盖日志导出、清除、保留时间、缓存读取、备份列表与三段式下载；`run license dev/verify` 查询设备授权与 IPS 模块（“入侵防御”）授权状态。`run cli verify-process-restart/verify-system-resource/verify-capture-storage/capture-system-log` 提供进程重启检测、资源/存储检查与系统日志读取。 |
+| 接口对与系统时间 | `ngfw_capacity_config` 收录 `fw_config_interface_pair`、`fw_update_interface_pair`、`fw_delete_interface_pair`，`ngfw_verification` 收录 `fw_verify_interface_pair` 和 `fw_verify_system_time`。`run interface pair-config/pair-update/pair-verify/pair-delete` 覆盖 `/api/v1/intf/pair` 的创建、修改、查询与删除；创建前必须先用 `interface update --mode Pair` 准备两个物理口（L2 场景先完成 Switch/BVI 配置）。查询支持 `--page/--size` 以及 `--name/--receive-interface/--transmit-interface` 客户端过滤。`run system time-verify` 只读查询 `/api/v1/systime?id=systime`，支持 `--expected-date/--expected-time` 精确断言，不提供修改系统时间的 op。 |
 | Adapter profile | `adapters/ngfw/default.yaml` 为地址对象、策略路由、OSPFv2、OSPFv3 和 BFD runner 提供公开 API shape 映射；合同见 `docs/API-ADAPTER-SPEC.md`。 |
 | CLI | 当前 CLI 提供 `sync`、`list`、`show`、`adapter`、`run`、`packages`、`validate`；除 `run` 白名单外，其余命令只读。 |
 | 安全门禁 | `scripts/security_gate_check.py` 执行敏感赋值模式检测，并检查高风险 atom 的 gate 合同完整性。 |
@@ -192,6 +193,18 @@ ptm-atomic run --base-url https://<device-management-ip> cli verify-process-rest
 ptm-atomic run --base-url https://<device-management-ip> cli verify-system-resource --sample-interval-seconds 5
 ptm-atomic run --base-url https://<device-management-ip> cli verify-capture-storage
 ptm-atomic run --base-url https://<device-management-ip> cli capture-system-log --lines 200
+
+# 接口对（先准备物理口 mode=Pair，再创建接口对）
+ptm-atomic run --base-url https://<device-management-ip> interface update --interface-kind physical --id GE0_1 --mode Pair --pvid 10
+ptm-atomic run --base-url https://<device-management-ip> interface update --interface-kind physical --id GE0_2 --mode Pair --pvid 10
+ptm-atomic run --base-url https://<device-management-ip> interface pair-config --name pair1 --receive-interface GE0_1 --transmit-interface GE0_2 --allowed-vlan 0
+ptm-atomic run --base-url https://<device-management-ip> interface pair-verify --name pair1 --page 1 --size 20
+ptm-atomic run --base-url https://<device-management-ip> interface pair-update --id pair1 --receive-interface GE0_1 --transmit-interface GE0_2 --status-sync --allowed-vlan 1-4094
+ptm-atomic run --base-url https://<device-management-ip> interface pair-delete --id pair1
+
+# 系统时间（只读）
+ptm-atomic run --base-url https://<device-management-ip> system time-verify
+ptm-atomic run --base-url https://<device-management-ip> system time-verify --expected-date 2026-10-21 --expected-time 12:00:00
 ```
 
 旧格式 `ptm-atomic run <op_id>` 仍然兼容，但会显示 deprecation warning。迁移指引：`ptm-atomic run --help` 查看所有可用操作族。
@@ -462,8 +475,8 @@ ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-i
 | `networking` | 1 | `fw_verify_acl_rule` |
 | `security` | 30 | `fw_verify_acl_rule`、`fw_verify_ips_rule`、`fw_config_ips_profile`、`fw_capture_ips_log`、`fw_export_ips_log`、`fw_verify_license` |
 | `ngfw_installation` | 7 | `fw_install_ngfw_image`、`fw_init_ngfw_minimal`、`fw_login_web_management`、`fw_check_login_state`、`fw_verify_ngfw_health` |
-| `ngfw_capacity_config` | 185 | `fw_config_interface`、`fw_update_interface`、`fw_delete_interface`、`fw_config_policy_route`、`fw_config_ips_rule` |
-| `ngfw_verification` | 76 | `fw_verify_interface`、`fw_verify_policy_route`、`fw_verify_ips_rule`、`fw_capture_ips_log`、`fw_verify_process_restart` |
+| `ngfw_capacity_config` | 188 | `fw_config_interface`、`fw_update_interface`、`fw_delete_interface`、`fw_config_interface_pair`、`fw_config_policy_route`、`fw_config_ips_rule` |
+| `ngfw_verification` | 78 | `fw_verify_interface`、`fw_verify_interface_pair`、`fw_verify_system_time`、`fw_verify_policy_route`、`fw_verify_ips_rule`、`fw_capture_ips_log`、`fw_verify_process_restart` |
 | `ngfw_batch_config` | 13 | `fw_config_batch_interface`、`fw_config_batch_object`、`fw_config_batch_static_route`、`fw_config_batch_nat`、`fw_config_batch_dynamic_routing` |
 | `traffic` | 15 | `tg_start_traffic_stream`、`tg_capture_traffic_result`、`tg_verify_traffic_loss` |
 
@@ -472,8 +485,8 @@ ptm-atomic run ospfv3 bfd verify-session --base-url https://<device-management-i
 当前 package 完整性事实：
 
 - 共有 7 个 package manifest。
-- 共有 327 条 package `operations` 条目。
-- 共有 295 个唯一 `op_id`；`fw_verify_acl_rule` 同时出现在 `networking` 和 `security` 旧基线视图中。
+- 共有 332 条 package `operations` 条目。
+- 共有 300 个唯一 `op_id`；`fw_verify_acl_rule` 同时出现在 `networking` 和 `security` 旧基线视图中。
 - 所有 package `op_id` 均能解析到 `atoms/fw/*.yaml`。
 
 ## 7. Schema v1.1 摘要

@@ -18,6 +18,7 @@
 | v1.2 | 2026-10-19 | meta-dev | Add the global log-cache merge setting (`PUT /api/v1/logsetting/logcacheset`), noting that it has no GET readback, that only `id=1` is supported and id is not gid, and that `timeSet` is an integer whose unit is device-defined. |
 | v1.3 | 2026-10-19 | meta-dev | Complete IPS profile `actionWrapper`/`filters`/`capture_pkt`/source-classification modelling and add IPS log export, clear, time setting, cache read, backup list, and three-step download-task operations. |
 | v1.4 | 2026-10-20 | meta-dev | Add IPS log business filters (`rule_name`/`level`/`action`/`xff`) and the AO-002/AO-003/AO-004/AO-008 SSH process-restart, resource, capture-storage, and system-log observation operations. |
+| v1.5 | 2026-10-21 | meta-dev | Add the interface-pair family (`POST`/`GET`/`PUT`/`DELETE /api/v1/intf/pair`) and the read-only system-time query (`GET /api/v1/systime?id=systime`), including the L2 preparation order and client-side pair filters. |
 
 ## Purpose
 
@@ -102,6 +103,31 @@ Security rules:
 
 The default HTTP runner returns `RUNNER_UNSUPPORTED_OP` for ssh/telnet/cli ops
 until a dedicated `runner/ssh.py` is registered in the allowlist.
+
+## Interface Pair Profile
+
+The interface-pair resource is `/api/v1/intf/pair` and is separate from the `/api/v1/intf` interface resource. It is a pair-forwarding object, not an L2-specific operation: no dedicated L2 atom is introduced.
+
+| Operation | Method | Path | Body / query |
+|---|---|---|---|
+| `fw_config_interface_pair` | `POST` | `/api/v1/intf/pair` | `{"val": {"name", "remark", "receive_interface", "transmit_interface", "status_sync", "allowed_vlan"}}` |
+| `fw_verify_interface_pair` | `GET` | `/api/v1/intf/pair` | `page`, `size` |
+| `fw_update_interface_pair` | `PUT` | `/api/v1/intf/pair` | `{"id": "<pair-name>", "val": {...}}` |
+| `fw_delete_interface_pair` | `DELETE` | `/api/v1/intf/pair?id=<pair-name>` | none |
+
+`val.allowed_vlan` is a string such as `"0"` (untagged) or `"1-4094"`; the runner also accepts an integer and normalizes it to a string. `status_sync` is a boolean. The pair name is the identity: create carries no top-level `id`, update carries `id` equal to `val.name`, and delete uses the name as the `?id=` value. Swagger declares the delete `id` as `list[str]`; this single-delete operation follows the repository delete convention and sends one query value.
+
+**Preparation order.** Configure interfaces first, then create the pair:
+
+1. Pair forwarding: set both physical ports with `fw_update_interface` `mode="Pair"` (and the required pvid/linkType fields) before `fw_config_interface_pair`.
+2. L2 switching: prepare member ports with `fw_update_interface` (mode `Switch`, `pvid`, `linkType` 1 for access), create the BVI with `fw_config_interface` (`val.type` 14 and `val.bvi.bridge.interfaces`), and only then create any pair that references those ports.
+3. Pair update/delete: the referenced ports remain in pair mode; confirm create/update/delete with `fw_verify_interface_pair`.
+
+**Query filtering.** `GET /api/v1/intf/pair` accepts only `page` and `size`; there are no server-side `name`/`receive_interface`/`transmit_interface` filters. The runner therefore fetches all pages (internal page size 100) when a filter is supplied, applies exact-match client-side filtering, and then applies the requested `page`/`size` slice to the filtered result. With no filter, the query is passed through unchanged. The returned `count` is the matching count and `vals` retains `name`, `remark`, `receive_interface`, `transmit_interface`, `allowed_vlan`, `status_sync`, `config_source` and `create_time` when the device provides them. `page` and `size` must be supplied together when filtering; supplying only one is rejected locally.
+
+## System Time Profile
+
+`fw_verify_system_time` maps to `GET /api/v1/systime?id=systime` and is read-only. It returns `vals[0]` fields `name`, `enable`, `date`, `time` and `ntp`. The optional `expected_date` (`YYYY-MM-DD`) and `expected_time` (`HH:MM:SS`) inputs produce exact-match flags (`matches_expected_date`, `matches_expected_time`, `matches_expected`) instead of changing the device clock. There is deliberately no modify-system-time operation; the op exists for log time baselines and time-accuracy checks.
 
 ## Runtime Boundary
 

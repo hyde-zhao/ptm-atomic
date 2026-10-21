@@ -40,6 +40,10 @@ def build_subtree() -> tuple[CommandSpec, ...]:
         CommandSpec(name="delete-batch", help="Delete multiple network interfaces.", description="Batch-delete NGFW network interfaces.", handler=_run_delete_batch, add_args=_add_delete_args),
         CommandSpec(name="verify", help="Verify a network interface.", description="Verify a NGFW network interface.", handler=_run_verify, add_args=_add_verify_args),
         CommandSpec(name="pppoe-config", help="Configure a PPPoE dial interface.", description="PUT /api/v1/intf with an RSA-encrypted PPPoE password.", handler=_run_pppoe_config, add_args=_add_pppoe_args),
+        CommandSpec(name="pair-config", help="Create an interface pair.", description="Create an NGFW interface pair through POST /api/v1/intf/pair. Prepare both physical ports with 'interface update --mode Pair' first.", handler=_run_pair_config, add_args=_add_pair_config_args),
+        CommandSpec(name="pair-update", help="Update an interface pair.", description="Update an NGFW interface pair through PUT /api/v1/intf/pair.", handler=_run_pair_update, add_args=_add_pair_update_args),
+        CommandSpec(name="pair-verify", help="Query or filter interface pairs.", description="Query NGFW interface pairs through GET /api/v1/intf/pair with optional page/size and client-side name/receive/transmit filters.", handler=_run_pair_verify, add_args=_add_pair_verify_args),
+        CommandSpec(name="pair-delete", help="Delete an interface pair by name.", description="Delete an NGFW interface pair through DELETE /api/v1/intf/pair?id=<pair-name>.", handler=_run_pair_delete, add_args=_add_pair_delete_args),
     )
 
 
@@ -214,6 +218,45 @@ def _add_verify_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page-size", type=int, help="Aggregate mode: fetch ALL interfaces with internal pagination of this page size instead of one oversized query (use instead of e.g. --size 5000).")
 
 
+def _add_pair_common_args(parser: argparse.ArgumentParser, *, include_name: bool = True) -> None:
+    # 标量 flag 一律 action="append"，消费侧统一走 _single_arg：重复给出报结构化
+    # RUNNER_VALIDATION_FAILED，而不是 argparse 默认的「后者静默胜出」。
+    if include_name:
+        parser.add_argument("--name", action="append", help="Interface-pair val.name. Required for pair-config; defaults to --id for pair-update.")
+    parser.add_argument("--receive-interface", action="append", help="Receive-side physical interface name. Required unless --payload-json/--payload-file is given; the port must already be mode=Pair through 'interface update'.")
+    parser.add_argument("--transmit-interface", action="append", help="Transmit-side physical interface name. Required unless --payload-json/--payload-file is given; the port must already be mode=Pair through 'interface update'.")
+    parser.add_argument("--remark", action="append", help="Interface-pair description. Defaults to an empty string.")
+    parser.add_argument("--allowed-vlan", action="append", help='Allowed VLAN range as a string, e.g. "0" (untagged) or "1-4094". Defaults to "0".')
+    status_sync_group = parser.add_mutually_exclusive_group()
+    status_sync_group.add_argument("--status-sync", dest="status_sync", action="store_true", default=False, help="Synchronize the link status of both ports (val.status_sync=true).")
+    status_sync_group.add_argument("--no-status-sync", dest="status_sync", action="store_false", help="Do not synchronize link status (default).")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
+def _add_pair_config_args(parser: argparse.ArgumentParser) -> None:
+    _add_pair_common_args(parser)
+
+
+def _add_pair_update_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", action="append", help="Existing interface-pair name (also the top-level id). Required unless --payload-json/--payload-file is given.")
+    _add_pair_common_args(parser)
+
+
+def _add_pair_verify_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--page", type=int, help="Page number for the interface-pair query. Must be paired with --size when filters are used.")
+    parser.add_argument("--size", type=int, help="Page size for the interface-pair query. Must be paired with --page when filters are used.")
+    parser.add_argument("--name", action="append", help="Client-side exact-match filter on the pair name.")
+    parser.add_argument("--receive-interface", action="append", help="Client-side exact-match filter on the receive interface.")
+    parser.add_argument("--transmit-interface", action="append", help="Client-side exact-match filter on the transmit interface.")
+
+
+def _add_pair_delete_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", action="append", help="Interface-pair name to delete (single value; also the DELETE ?id= value).")
+    parser.add_argument("--payload-file", help="Path to a complete JSON request payload.")
+    parser.add_argument("--payload-json", help="Complete JSON request payload.")
+
+
 def _add_pppoe_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", required=True, help="PPPoE interface id, e.g. TE0_21.")
     parser.add_argument("--username", required=True, help="PPPoE dial username.")
@@ -282,6 +325,157 @@ def _run_delete_batch(args: argparse.Namespace) -> int:
 
 def _run_verify(args: argparse.Namespace) -> int:
     return _run_interface(args, "fw_verify_interface")
+
+
+def _run_pair_config(args: argparse.Namespace) -> int:
+    return _run_interface_pair(args, "fw_config_interface_pair")
+
+
+def _run_pair_update(args: argparse.Namespace) -> int:
+    return _run_interface_pair(args, "fw_update_interface_pair")
+
+
+def _run_pair_verify(args: argparse.Namespace) -> int:
+    return _run_interface_pair(args, "fw_verify_interface_pair")
+
+
+def _run_pair_delete(args: argparse.Namespace) -> int:
+    return _run_interface_pair(args, "fw_delete_interface_pair")
+
+
+def _pair_query(args: argparse.Namespace) -> dict[str, int] | None:
+    page = getattr(args, "page", None)
+    size = getattr(args, "size", None)
+    if page is None and size is None:
+        return None
+    query: dict[str, int] = {}
+    for name, value in (("page", page), ("size", size)):
+        if value is None:
+            continue
+        if value < 1:
+            raise RunnerError(
+                "RUNNER_VALIDATION_FAILED",
+                "Interface-pair pagination parameter must be a positive integer.",
+                {"field": name, "value": value},
+            )
+        query[name] = value
+    return query
+
+
+def _run_interface_pair(args: argparse.Namespace, op_id: str) -> int:
+    from atomic_ops.runner._payload import load_json_payload
+    from atomic_ops.runner.interface_pair import (
+        build_interface_pair_dry_run,
+        build_interface_pair_filters,
+        build_interface_pair_payload,
+        build_interface_pair_update_payload,
+        execute_interface_pair,
+        validate_interface_pair_payload,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        if not ctx.get("verify_tls"):
+            write_warning({"warning_code": "TLS_VERIFY_DISABLED", "message": "Device TLS verification is disabled."}, output_format)
+
+        session_file = resolve_session_file(ctx.get("session_file"))
+        raw_payload = load_json_payload(
+            payload_file=getattr(args, "payload_file", None),
+            payload_json=getattr(args, "payload_json", None),
+        )
+        payload: dict[str, Any] | None = None
+        query: dict[str, int] | None = None
+        filters: dict[str, str] | None = None
+
+        if op_id == "fw_verify_interface_pair":
+            if raw_payload is not None:
+                raise RunnerError(
+                    "RUNNER_VALIDATION_FAILED",
+                    "Interface-pair verify is a GET operation and accepts no request payload.",
+                    {"op_id": op_id},
+                )
+            query = _pair_query(args)
+            filters = build_interface_pair_filters(
+                name=_single_arg(args, "name"),
+                receive_interface=_single_arg(args, "receive_interface"),
+                transmit_interface=_single_arg(args, "transmit_interface"),
+            ) or None
+        elif op_id == "fw_delete_interface_pair":
+            if raw_payload is not None:
+                payload = validate_interface_pair_payload(raw_payload, op_id=op_id)
+            else:
+                _require_arg(args, "id")
+                payload = validate_interface_pair_payload(
+                    {"id": _single_arg(args, "id")},
+                    op_id=op_id,
+                )
+        elif op_id == "fw_update_interface_pair":
+            if raw_payload is not None:
+                payload = validate_interface_pair_payload(raw_payload, op_id=op_id)
+            else:
+                _require_arg(args, "id")
+                _require_arg(args, "receive_interface")
+                _require_arg(args, "transmit_interface")
+                entry_id = _single_arg(args, "id")
+                payload = build_interface_pair_update_payload(
+                    entry_id=entry_id or "",
+                    name=_single_arg(args, "name"),
+                    receive_interface=_single_arg(args, "receive_interface") or "",
+                    transmit_interface=_single_arg(args, "transmit_interface") or "",
+                    remark=_single_arg(args, "remark") or "",
+                    status_sync=bool(getattr(args, "status_sync", False)),
+                    allowed_vlan=_single_arg(args, "allowed_vlan") or "0",
+                )
+                payload = validate_interface_pair_payload(payload, op_id=op_id)
+        else:
+            if raw_payload is not None:
+                payload = validate_interface_pair_payload(raw_payload, op_id=op_id)
+            else:
+                _require_arg(args, "name")
+                _require_arg(args, "receive_interface")
+                _require_arg(args, "transmit_interface")
+                payload = build_interface_pair_payload(
+                    name=_single_arg(args, "name") or "",
+                    receive_interface=_single_arg(args, "receive_interface") or "",
+                    transmit_interface=_single_arg(args, "transmit_interface") or "",
+                    remark=_single_arg(args, "remark") or "",
+                    status_sync=bool(getattr(args, "status_sync", False)),
+                    allowed_vlan=_single_arg(args, "allowed_vlan") or "0",
+                )
+                payload = validate_interface_pair_payload(payload, op_id=op_id)
+
+        if not ctx.get("execute"):
+            result = build_interface_pair_dry_run(
+                op_id=op_id,
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"),
+                payload=payload,
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+                query=query,
+                filters=filters,
+            )
+        else:
+            result = execute_interface_pair(
+                op_id=op_id,
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                auth_header=ctx.get("auth_header", "Authorization"),
+                payload=payload,
+                verify_tls=bool(ctx.get("verify_tls")),
+                timeout=float(ctx.get("timeout", 10.0)),
+                query=query,
+                filters=filters,
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
 
 
 def _verify_query(args: argparse.Namespace, op_id: str) -> dict[str, int] | None:

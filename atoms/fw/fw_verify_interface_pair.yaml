@@ -1,0 +1,88 @@
+schema_version: "1.1"
+op_id: fw_verify_interface_pair
+device_type: fw
+adapter_contract_ref: adapters/ngfw/default.yaml#/operations/fw_verify_interface_pair
+description: Query NGFW interface pairs through GET /api/v1/intf/pair.
+parameters:
+  session_ref:
+    type: string
+    required: false
+    description: Non-sensitive session reference from an external orchestrator.
+  config_domain:
+    type: string
+    required: true
+    description: Must be interface_pair for this operation.
+  page:
+    type: int
+    required: false
+    description: Positive page number for the paginated interface-pair query.
+  size:
+    type: int
+    required: false
+    description: Positive page size for the paginated interface-pair query.
+  name:
+    type: string
+    required: false
+    description: Optional exact-match filter on the pair name (client-side).
+  receive_interface:
+    type: string
+    required: false
+    description: Optional exact-match filter on the receive interface (client-side).
+  transmit_interface:
+    type: string
+    required: false
+    description: Optional exact-match filter on the transmit interface (client-side).
+inputs:
+  session_ref: "<session-ref>"
+  config_domain: interface_pair
+  page: 1
+  size: 20
+  name: pair1
+returns:
+  status: success
+  data:
+    observed_state_ref: "<interface-pair-state-ref>"
+    count: 0
+    vals_ref: "<interface-pair-vals-ref>"
+    state_status: valid
+    expires_at: null
+  error_type: NONE
+  diag_snapshot_ref: "<diag-snapshot-ref>"
+idempotent: true
+side_effect: observation
+dry_run_supported: true
+risk_level: low
+timeout_ms: 30000
+error_types:
+  - NONE
+  - VALIDATION_FAILED
+  - DEVICE_UNREACHABLE
+  - RESPONSE_INVALID
+  - UNKNOWN_ERROR
+verification:
+  kind: capacity_domain
+  rules:
+    - name: interface_pair_query_returns_count_and_vals
+      input_ref: "<interface-pair-query-result-ref>"
+      expected_result: >-
+        the device returns count and vals; each vals entry retains name, remark,
+        receive_interface, transmit_interface, allowed_vlan, status_sync,
+        config_source and create_time when present.
+  summary_ref: "<interface-pair-verification-summary-ref>"
+preconditions:
+  - External orchestration holds a valid session_ref or runner session file.
+postconditions:
+  - Interface-pair query result and diagnostic references are available to the caller.
+  - When filters are supplied, count reflects the matching entries after client-side filtering.
+tags:
+  - firewall
+  - capacity
+  - interface
+  - pair
+  - verification
+aliases:
+  - interface-pair
+  - port-pair
+  - pair-interface
+  - l2-pair
+since_version: "1.20.0"

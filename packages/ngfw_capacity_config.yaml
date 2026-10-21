@@ -3,12 +3,15 @@
 package_id: ngfw_capacity_config
 display_name: NGFW Capacity Configuration
 description: Capacity configuration contract operations for NGFW domains.
-version: "1.8.0"
+version: "1.9.0"
 operations:
   - fw_config_interface
   - fw_update_interface
   - fw_delete_interface
   - fw_delete_batch_interface
+  - fw_config_interface_pair
+  - fw_update_interface_pair
+  - fw_delete_interface_pair
   - fw_config_object
   - fw_update_object
   - fw_delete_object
