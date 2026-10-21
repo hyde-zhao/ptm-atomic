@@ -187,6 +187,34 @@ def build_subtree() -> tuple[CommandSpec, ...]:
             handler=_run_verify_abf_policy,
             add_args=_add_verify_abf_policy_args,
         ),
+        CommandSpec(
+            name="verify-iplink-etcd",
+            help="Query iplink backend etcd config over SSH/Telnet (etcdctl get .../iplink/<name>).",
+            description="Read an iplink entry's backend etcd config over SSH or Telnet.",
+            handler=_run_verify_iplink_etcd,
+            add_args=_add_verify_iplink_etcd_args,
+        ),
+        CommandSpec(
+            name="verify-linkgroup-etcd",
+            help="Query iplink-group backend etcd config over SSH/Telnet (etcdctl get .../linkgroup/<name>).",
+            description="Read an iplink-group entry's backend etcd config over SSH or Telnet.",
+            handler=_run_verify_iplink_group_etcd,
+            add_args=_add_verify_iplink_group_etcd_args,
+        ),
+        CommandSpec(
+            name="verify-iplink-status-etcd",
+            help="Verify iplink status key (up/down) in etcd over SSH (etcdctl get .../status/iplink/<name>/<state>).",
+            description="Verify an iplink entry's reachability status key in etcd over SSH or Telnet.",
+            handler=_run_verify_iplink_status_etcd,
+            add_args=_add_verify_iplink_status_etcd_args,
+        ),
+        CommandSpec(
+            name="verify-linkgroup-status-etcd",
+            help="Verify iplink-group status key (up/down) in etcd over SSH (etcdctl get .../status/iplink/<name>/<state>).",
+            description="Verify an iplink-group entry's reachability status key in etcd over SSH or Telnet.",
+            handler=_run_verify_iplink_group_status_etcd,
+            add_args=_add_verify_iplink_group_status_etcd_args,
+        ),
     )
 
 
@@ -1101,6 +1129,315 @@ def _run_verify_neighbor_probe(args: argparse.Namespace) -> int:
                 expected_ip=expected_ip,
                 expected_interface=expected_interface,
                 expected_phase=expected_phase,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+def _add_verify_iplink_etcd_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    # 2026-10-20 houjialin：注册 --username（修复 RUNNER_SHELL_CONNECT_FAILED：
+    # 未注册时 parse_known_args 静默吞掉该 flag，handler 回退 session 的 Web 用户名
+    # admin 去 SSH，NGFW 设备只允许 root —— etcdctl 必须走 root，与 abf 同型 default）。
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (etcdctl requires root privileges).",
+    )
+    parser.add_argument(
+        "--name",
+        required=True,
+        help="Iplink name substituted into the etcd key path /vnf-agent/.../iplink/v1/iplink/<name>.",
+    )
+
+
+
+def _run_verify_iplink_etcd(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_iplink_etcd_dry_run,
+        execute_verify_iplink_etcd,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", None)
+        name = getattr(args, "name")
+        if not ctx.get("execute"):
+            result = build_verify_iplink_etcd_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                name=name,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = getattr(args, "credential_env", None)
+            if not credential_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--credential-env is required when using --execute.",
+                    {"missing": "credential_env"},
+                )
+            result = execute_verify_iplink_etcd(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                credential_env=credential_env,
+                name=name,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+
+def _add_verify_iplink_group_etcd_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    # 2026-10-20 houjialin：注册 --username（修复 RUNNER_SHELL_CONNECT_FAILED：
+    # 未注册时 parse_known_args 静默吞掉该 flag，handler 回退 session 的 Web 用户名
+    # admin 去 SSH，NGFW 设备只允许 root —— etcdctl 必须走 root，与 abf 同型 default）。
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (etcdctl requires root privileges).",
+    )
+    parser.add_argument(
+        "--name",
+        required=True,
+        help="Iplink-group name substituted into the etcd key path /vnf-agent/.../iplink/v1/linkgroup/<name>.",
+    )
+
+
+
+def _run_verify_iplink_group_etcd(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_iplink_group_etcd_dry_run,
+        execute_verify_iplink_group_etcd,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", None)
+        name = getattr(args, "name")
+        if not ctx.get("execute"):
+            result = build_verify_iplink_group_etcd_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                name=name,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = getattr(args, "credential_env", None)
+            if not credential_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--credential-env is required when using --execute.",
+                    {"missing": "credential_env"},
+                )
+            result = execute_verify_iplink_group_etcd(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                credential_env=credential_env,
+                name=name,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+
+def _add_verify_iplink_status_etcd_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    # 2026-10-20 houjialin：注册 --username（修复 RUNNER_SHELL_CONNECT_FAILED：
+    # 未注册时 parse_known_args 静默吞掉该 flag，handler 回退 session 的 Web 用户名
+    # admin 去 SSH，NGFW 设备只允许 root —— etcdctl 必须走 root，与 abf 同型 default）。
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (etcdctl requires root privileges).",
+    )
+    parser.add_argument(
+        "--name",
+        required=True,
+        help="Iplink name substituted into the etcd status key path.",
+    )
+    parser.add_argument(
+        "--state",
+        required=True,
+        choices=("up", "down"),
+        help="Expected state to verify: up (reachable) or down (unreachable).",
+    )
+
+
+
+def _run_verify_iplink_status_etcd(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_iplink_status_etcd_dry_run,
+        execute_verify_iplink_status_etcd,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", None)
+        name = getattr(args, "name")
+        state = getattr(args, "state")
+        if not ctx.get("execute"):
+            result = build_verify_iplink_status_etcd_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                name=name,
+                state=state,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = getattr(args, "credential_env", None)
+            if not credential_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--credential-env is required when using --execute.",
+                    {"missing": "credential_env"},
+                )
+            result = execute_verify_iplink_status_etcd(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                credential_env=credential_env,
+                name=name,
+                state=state,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        _write_output(_to_run_envelope(result), output_format)
+        return 0
+    except RunnerError as exc:
+        return write_error(
+            CliError(exc.error_code, exc.message, exc.details, retryable=exc.retryable, suggestion=exc.suggestion),
+            output_format,
+        )
+
+
+
+def _add_verify_iplink_group_status_etcd_args(parser: argparse.ArgumentParser) -> None:
+    _add_transport_args(parser)
+    # 2026-10-20 houjialin：注册 --username（修复 RUNNER_SHELL_CONNECT_FAILED：
+    # 未注册时 parse_known_args 静默吞掉该 flag，handler 回退 session 的 Web 用户名
+    # admin 去 SSH，NGFW 设备只允许 root —— etcdctl 必须走 root，与 abf 同型 default）。
+    parser.add_argument(
+        "--username",
+        default="root",
+        help="SSH/Telnet username; defaults to root (etcdctl requires root privileges).",
+    )
+    parser.add_argument(
+        "--name",
+        required=True,
+        help="Iplink-group name substituted into the etcd status key path.",
+    )
+    parser.add_argument(
+        "--state",
+        required=True,
+        choices=("up", "down"),
+        help="Expected state to verify: up (reachable) or down (unreachable).",
+    )
+
+
+
+def _run_verify_iplink_group_status_etcd(args: argparse.Namespace) -> int:
+    from atomic_ops.runner.ssh import (
+        build_verify_iplink_group_status_etcd_dry_run,
+        execute_verify_iplink_group_status_etcd,
+    )
+
+    ctx = resolve_run_context(args)
+    output_format = ctx.get("output_format", "yaml")
+    try:
+        session_file = resolve_session_file(ctx.get("session_file"))
+        transport = getattr(args, "transport", DEFAULT_TRANSPORT)
+        host = getattr(args, "host", None)
+        port = getattr(args, "port", None)
+        username = getattr(args, "username", None)
+        name = getattr(args, "name")
+        state = getattr(args, "state")
+        if not ctx.get("execute"):
+            result = build_verify_iplink_group_status_etcd_dry_run(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                name=name,
+                state=state,
+                timeout=float(ctx.get("timeout", 10.0)),
+            )
+        else:
+            credential_env = getattr(args, "credential_env", None)
+            if not credential_env:
+                raise RunnerError(
+                    "RUNNER_CREDENTIAL_MISSING",
+                    "--credential-env is required when using --execute.",
+                    {"missing": "credential_env"},
+                )
+            result = execute_verify_iplink_group_status_etcd(
+                base_url=ctx["base_url"],
+                session_file=session_file,
+                transport=transport,
+                host=host,
+                port=port,
+                username=username,
+                credential_env=credential_env,
+                name=name,
+                state=state,
                 timeout=float(ctx.get("timeout", 10.0)),
             )
         _write_output(_to_run_envelope(result), output_format)
